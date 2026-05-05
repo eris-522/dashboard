@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, ReactNode } from "react";
 
 export interface MenuSelection {
   appetizers: string[];
@@ -22,13 +22,20 @@ export interface Booking {
   menu: MenuSelection;
   additionalServices: string[];
   budget: number;
-  status: 'Confirmed' | 'Pending' | 'Inquiry' | 'Cancelled' | 'Completed' | 'Rejected' | 'Archived';
+  status:
+    | "Confirmed"
+    | "Pending"
+    | "Inquiry"
+    | "Cancelled"
+    | "Completed"
+    | "Rejected"
+    | "Archived";
 }
 
 interface BookingContextType {
   bookings: Booking[];
-  addBooking: (booking: Omit<Booking, 'id'>) => void;
-  updateBookingStatus: (id: number, status: Booking['status']) => void;
+  addBooking: (booking: Omit<Booking, "id">) => void;
+  updateBookingStatus: (id: number, status: Booking["status"]) => void;
   removeBooking: (id: number) => void;
 }
 
@@ -43,12 +50,12 @@ export function BookingProvider({ children }: { children: ReactNode }) {
    * Adds a new booking to the state with a generated unique ID.
    * @param newBooking The booking data without an ID.
    */
-  const addBooking = (newBooking: Omit<Booking, 'id'>) => {
+  const addBooking = (newBooking: Omit<Booking, "id">) => {
     const booking: Booking = {
       ...newBooking,
-      id: Date.now()
+      id: Date.now(),
     };
-    setBookings(prev => [...prev, booking]);
+    setBookings((prev) => [...prev, booking]);
   };
 
   /**
@@ -56,8 +63,10 @@ export function BookingProvider({ children }: { children: ReactNode }) {
    * @param id The unique identifier of the booking.
    * @param status The new status to apply.
    */
-  const updateBookingStatus = (id: number, status: Booking['status']) => {
-    setBookings(prev => prev.map(b => b.id === id ? { ...b, status } : b));
+  const updateBookingStatus = (id: number, status: Booking["status"]) => {
+    setBookings((prev) =>
+      prev.map((b) => (b.id === id ? { ...b, status } : b)),
+    );
   };
 
   /**
@@ -65,11 +74,13 @@ export function BookingProvider({ children }: { children: ReactNode }) {
    * @param id The unique identifier of the booking to remove.
    */
   const removeBooking = (id: number) => {
-    setBookings(prev => prev.filter(b => b.id !== id));
+    setBookings((prev) => prev.filter((b) => b.id !== id));
   };
 
   return (
-    <BookingContext.Provider value={{ bookings, addBooking, updateBookingStatus, removeBooking }}>
+    <BookingContext.Provider
+      value={{ bookings, addBooking, updateBookingStatus, removeBooking }}
+    >
       {children}
     </BookingContext.Provider>
   );
@@ -78,7 +89,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
 export function useBooking() {
   const context = useContext(BookingContext);
   if (context === undefined) {
-    throw new Error('useBooking must be used within a BookingProvider');
+    throw new Error("useBooking must be used within a BookingProvider");
   }
   return context;
 }
