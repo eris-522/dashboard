@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, ReactNode } from "react";
+import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
+import { supabase } from "../utils/supabase";
 
 export interface MenuSelection {
   appetizers: string[];
@@ -34,9 +35,12 @@ export interface Booking {
 
 interface BookingContextType {
   bookings: Booking[];
+  isLoading: boolean;
+  error: string | null;
   addBooking: (booking: Omit<Booking, "id">) => void;
   updateBookingStatus: (id: number, status: Booking["status"]) => void;
   removeBooking: (id: number) => void;
+  refreshBookings: () => Promise<void>;
 }
 
 const BookingContext = createContext<BookingContextType | undefined>(undefined);
@@ -45,6 +49,86 @@ const initialBookings: Booking[] = [];
 
 export function BookingProvider({ children }: { children: ReactNode }) {
   const [bookings, setBookings] = useState<Booking[]>(initialBookings);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch bookings on mount and set up real-time listener
+  useEffect(() => {
+    refreshBookings();
+
+    // Subscribe to real-time changes on the bookings table
+    const subscription = supabase
+      .channel("bookings-channel-context")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "bookings" },
+        (payload) => {
+          console.log("Booking change detected in context:", payload);
+          refreshBookings(); // Refresh data when any booking changes
+        },
+      )
+      .subscribe();
+
+    // Cleanup subscription on unmount
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  /**
+   * Fetches all active bookings from Supabase
+   */
+  const refreshBookings = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      const { data: bData, error: bError } = await supabase
+        .from("bookings")
+        .select(
+          `
+          *,
+          profiles (name, email),
+          packages (name, price)
+        `,
+        )
+        .order("created_at", { ascending: false });
+
+      if (bError) {
+        setError(`Error fetching bookings: ${bError.message}`);
+        console.error("Error fetching bookings:", bError.message);
+        setBookings([]);
+      } else {
+        // Transform database rows to Booking interface
+        const transformedBookings = (bData || []).map((booking: any) => ({
+          id: booking.id,
+          customerName: booking.profiles?.name || "Unknown",
+          email: booking.profiles?.email || "",
+          phone: "", // Not available in database
+          eventType: booking.event_type || "",
+          package: booking.packages?.name || "",
+          date: booking.event_date || "",
+          time: booking.event_time || "",
+          guestCount: booking.guest_count || 0,
+          venueName: booking.event_location?.split(" - ")[0] || "",
+          venueAddress: booking.event_location?.split(" - ")[1] || "",
+          menu: booking.selected_menu_items || [],
+          additionalServices: booking.selected_add_ons || [],
+          budget: 0, // Will be calculated by components if needed
+          status: booking.status || "Pending",
+        }));
+        setBookings(transformedBookings);
+        setError(null);
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Unknown error";
+      setError(errorMsg);
+      console.error("Unexpected error in refreshBookings:", err);
+      setBookings([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   /**
    * Adds a new booking to the state with a generated unique ID.
@@ -79,7 +163,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
 
   return (
     <BookingContext.Provider
-      value={{ bookings, addBooking, updateBookingStatus, removeBooking }}
+      value={{ bookings, isLoading, error, addBooking, updateBookingStatus, removeBooking, refreshBookings }}
     >
       {children}
     </BookingContext.Provider>

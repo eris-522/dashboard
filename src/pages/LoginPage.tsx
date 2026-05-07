@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Mail, Lock, LogIn, Utensils, AlertCircle, Loader2 } from 'lucide-react';
 import { useUser } from '../context/UserContext';
-import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
 
 export function LoginPage() {
@@ -9,7 +8,34 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const { login } = useUser();
+  const { login, currentUser } = useUser();
+
+  if (currentUser) {
+    return (
+      <div className="min-h-screen bg-natural-bg flex items-center justify-center p-6 bg-[url('https://images.unsplash.com/photo-1519222970733-f546218fa6d7?q=80&w=2670&auto=format&fit=crop')] bg-cover bg-center">
+        <div className="absolute inset-0 bg-natural-sidebar/40 backdrop-blur-xs" />
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-md relative"
+        >
+          <div className="glass-card p-10 shadow-2xl border-white/20 text-center">
+            <div className="flex flex-col items-center mb-6">
+              <div className="w-16 h-16 bg-natural-accent rounded-2xl flex items-center justify-center mb-4 shadow-lg rotate-3" />
+              <h1 className="text-2xl font-serif font-bold text-natural-text-main">Already signed in</h1>
+              <p className="text-natural-text-light text-[0.8rem] font-bold uppercase tracking-[0.2em] mt-2">
+                Welcome back, {currentUser.name}
+              </p>
+            </div>
+
+            <p className="text-natural-text-light/90 text-sm font-medium">
+              You are already authenticated. Redirecting to your dashboard...
+            </p>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
 
   /**
    * Processes the login form submission.
@@ -17,6 +43,7 @@ export function LoginPage() {
    * @param e React form event
    */
   const handleSubmit = async (e: React.FormEvent) => {
+
     e.preventDefault();
     setError(null);
     setIsLoading(true);

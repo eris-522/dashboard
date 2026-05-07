@@ -39,6 +39,8 @@ export function BookingPage() {
   const [packages, setPackages] = useState<any[]>([]);
   const [menuItems, setMenuItems] = useState<any[]>([]);
   const [additionalServices, setAdditionalServices] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
   const [searchQuery, setSearchQuery] = useState("");
@@ -77,38 +79,79 @@ export function BookingPage() {
   }, [confirmAction]);
 
   useEffect(() => {
+    // Fetch initial data
     fetchAllData();
+
+    // Subscribe to real-time changes on the bookings table
+    const subscription = supabase
+      .channel("bookings-channel")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "bookings" },
+        (payload) => {
+          console.log("Booking change detected:", payload);
+          fetchAllData(); // Refresh data when any booking changes
+        },
+      )
+      .subscribe();
+
+    // Cleanup subscription on unmount
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   const fetchAllData = async () => {
-    const { data: bData, error: bError } = await supabase
-      .from("bookings")
-      .select(
-        `
-        *,
-        profiles (name, email, phone),
-        packages (name, price)
-      `,
-      )
-      .order("created_at", { ascending: false });
+    try {
+      setIsLoading(true);
+      setFetchError(null);
 
-    if (bError) {
-      console.error("Error fetching bookings:", bError.message);
-    } else {
-      setBookings(bData || []);
+      const { data: bData, error: bError } = await supabase
+        .from("bookings")
+        .select(
+          `
+          *,
+          profiles (name, email),
+          packages (name, price)
+        `,
+        )
+        .order("created_at", { ascending: false });
+
+      if (bError) {
+        const errorMsg = `Error fetching bookings: ${bError.message}`;
+        setFetchError(errorMsg);
+        console.error(errorMsg);
+        setBookings([]);
+      } else {
+        setBookings(bData || []);
+        setFetchError(null);
+      }
+
+      const [pRes, pkgRes, menuRes, srvRes] = await Promise.all([
+        supabase.from("profiles").select("*").neq("status", "Archived"),
+        supabase.from("packages").select("*").neq("status", "Archived"),
+        supabase.from("menu_items").select("*").neq("status", "Archived"),
+        supabase.from("add_ons").select("*").neq("status", "Archived"),
+      ]);
+
+      if (pRes.error) console.error("Error fetching profiles:", pRes.error.message);
+      else if (pRes.data) setCustomers(pRes.data);
+
+      if (pkgRes.error) console.error("Error fetching packages:", pkgRes.error.message);
+      else if (pkgRes.data) setPackages(pkgRes.data);
+
+      if (menuRes.error) console.error("Error fetching menu items:", menuRes.error.message);
+      else if (menuRes.data) setMenuItems(menuRes.data);
+
+      if (srvRes.error) console.error("Error fetching add-ons:", srvRes.error.message);
+      else if (srvRes.data) setAdditionalServices(srvRes.data);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      setFetchError(errorMsg);
+      console.error("Unexpected error in fetchAllData:", error);
+    } finally {
+      setIsLoading(false);
     }
-
-    const [pRes, pkgRes, menuRes, srvRes] = await Promise.all([
-      supabase.from("profiles").select("*").neq("status", "Archived"),
-      supabase.from("packages").select("*").neq("status", "Archived"),
-      supabase.from("menu_items").select("*").neq("status", "Archived"),
-      supabase.from("add_ons").select("*").neq("status", "Archived"),
-    ]);
-
-    if (pRes.data) setCustomers(pRes.data);
-    if (pkgRes.data) setPackages(pkgRes.data);
-    if (menuRes.data) setMenuItems(menuRes.data);
-    if (srvRes.data) setAdditionalServices(srvRes.data);
   };
 
   const handleSort = (field: SortField) => {
@@ -154,7 +197,10 @@ export function BookingPage() {
         (booking.event_location || "").toLowerCase().includes(query);
 
       const matchesStatus =
-        statusFilter === "All Status" || booking.status === statusFilter;
+        statusFilter === "All Status"
+          ? booking.status !== "Archived"
+          : booking.status === statusFilter;
+
 
       return matchesSearch && matchesStatus;
     });
@@ -165,8 +211,10 @@ export function BookingPage() {
 
     return [...filteredBookings].sort((a, b) => {
       const { field, order } = sortConfig;
-      let valA: any = field === "customerName" ? a.profiles?.name : a[field];
-      let valB: any = field === "customerName" ? b.profiles?.name : b[field];
+      let valA: any =
+        field === "customerName" ? a.profiles?.name : field ? a[field] : "";
+      let valB: any =
+        field === "customerName" ? b.profiles?.name : field ? b[field] : "";
 
       if (field === "budget") {
         valA = calculateBudget(a);
@@ -283,7 +331,7 @@ export function BookingPage() {
         {[
           {
             label: "Total Bookings",
-            value: bookings.length.toString(),
+            value: bookings.filter((b) => b.status !== "Archived").length.toString(),
             sub: "Active",
           },
           {

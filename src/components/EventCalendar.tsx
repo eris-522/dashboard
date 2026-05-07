@@ -1,4 +1,5 @@
-import { ChevronLeft, ChevronRight, MoreHorizontal } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isToday, isSameDay, parseISO, addMonths, subMonths, startOfWeek, endOfWeek } from 'date-fns';
 import React from 'react';
 
@@ -23,11 +24,13 @@ export function EventCalendar({ bookings = [] }: EventCalendarProps) {
 
   const days = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
 
-  const events = bookings.map(b => ({
+  const events = bookings.map((b) => ({
     id: b.id,
     title: `${b.eventType} - ${b.customerName}`,
-    date: parseISO(b.date)
+    // BookingPage stores `event_date` (date-only). Use it directly as YYYY-MM-DD.
+    date: parseISO(b.date),
   }));
+
 
   /**
    * Advances the calendar view to the next month.

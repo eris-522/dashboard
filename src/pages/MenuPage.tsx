@@ -122,11 +122,28 @@ export function MenuPage() {
     });
   };
 
+  const normalizeDishName = (name: string) =>
+    name.trim().replace(/\s+/g, " ").toLowerCase();
+
+  const [formError, setFormError] = useState<string | null>(null);
+
   // The core database execution function. Handles Insert, Update, and Archive operations directly to Supabase.
   const handleExecuteAction = async () => {
     if (!confirmAction) return;
+    setFormError(null);
 
     if (confirmAction.type === "create") {
+      const candidate = normalizeDishName(formData.name);
+
+      const duplicate = menuItems.some(
+        (item) => normalizeDishName(item.name) === candidate,
+      );
+
+      if (duplicate) {
+        setFormError("A dish with this name already exists in the catalog.");
+        return;
+      }
+
       // Inserts a new row into the menu_items table
       const { error } = await supabase.from("menu_items").insert([
         {
@@ -135,8 +152,25 @@ export function MenuPage() {
           status: "Active",
         },
       ]);
-      if (error) console.error("Error adding item:", error.message);
+      if (error) {
+        console.error("Error adding item:", error.message);
+        setFormError("Failed to add dish.");
+        return;
+      }
     } else if (confirmAction.type === "edit" && confirmAction.itemId) {
+      const candidate = normalizeDishName(formData.name);
+
+      const duplicate = menuItems.some(
+        (item) =>
+          item.id !== confirmAction.itemId &&
+          normalizeDishName(item.name) === candidate,
+      );
+
+      if (duplicate) {
+        setFormError("Another dish with this name already exists.");
+        return;
+      }
+
       // Updates an existing row in the menu_items table using its unique ID
       const { error } = await supabase
         .from("menu_items")
@@ -145,7 +179,11 @@ export function MenuPage() {
           category: formData.category,
         })
         .eq("id", confirmAction.itemId);
-      if (error) console.error("Error updating item:", error.message);
+      if (error) {
+        console.error("Error updating item:", error.message);
+        setFormError("Failed to update dish.");
+        return;
+      }
     } else if (confirmAction.type === "archive" && confirmAction.itemId) {
       // Changes the status of an item to 'Archived' so it no longer appears in active views
       const { error } = await supabase
@@ -154,7 +192,11 @@ export function MenuPage() {
           status: "Archived",
         })
         .eq("id", confirmAction.itemId);
-      if (error) console.error("Error archiving item:", error.message);
+      if (error) {
+        console.error("Error archiving item:", error.message);
+        setFormError("Failed to archive dish.");
+        return;
+      }
     }
 
     // Refreshes the UI data from the database and resets the form states
@@ -441,6 +483,12 @@ export function MenuPage() {
               </p>
 
               <div className="flex flex-col gap-3">
+                {formError && (
+                  <p className="text-xs font-bold text-red-600 bg-red-50 border border-red-200 px-4 py-2 rounded-xl text-left">
+                    {formError}
+                  </p>
+                )}
+
                 <button
                   onClick={handleExecuteAction}
                   className={cn(
@@ -455,7 +503,10 @@ export function MenuPage() {
                   Confirm {confirmAction.type}
                 </button>
                 <button
-                  onClick={() => setConfirmAction(null)}
+                  onClick={() => {
+                    setConfirmAction(null);
+                    setFormError(null);
+                  }}
                   className="w-full py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] text-natural-text-light border border-natural-border hover:bg-natural-bg transition-all active:scale-[0.98]"
                 >
                   Cancel

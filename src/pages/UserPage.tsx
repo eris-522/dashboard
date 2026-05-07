@@ -106,7 +106,9 @@ export function UserPage() {
       const matchesRole =
         roleFilter === "All Roles" || user.role === roleFilter;
       const matchesStatus =
-        statusFilter === "All Status" || user.status === statusFilter;
+        statusFilter === "All Status"
+          ? user.status !== "Archived"
+          : user.status === statusFilter;
 
       return matchesSearch && matchesRole && matchesStatus;
     });
@@ -158,38 +160,106 @@ export function UserPage() {
     });
   };
 
+  const isCreateValid = useMemo(() => {
+    if (editingUser) return false;
+    const trimmedName = (formData.name ?? "").toString().trim();
+    const email = (formData.email ?? "").toString().trim();
+    const password = (formData.password ?? "").toString();
+
+    return Boolean(trimmedName && email && password);
+  }, [editingUser, formData.name, formData.email, formData.password]);
+
   const handleExecuteAction = async () => {
     if (!confirmAction) return;
 
+    if (confirmAction.type === "create" && !isCreateValid) return;
+
+
     if (confirmAction.type === "create") {
+      const trimmedName = (formData.name ?? "").toString().trim();
+      const email = (formData.email ?? "").toString().trim();
+      const password = (formData.password ?? "").toString();
+
+      if (!trimmedName) {
+        console.error("Cannot create user: name is empty.");
+        return;
+      }
+      if (!email) {
+        console.error("Cannot create user: email is empty.");
+        return;
+      }
+      if (!password) {
+        console.error("Cannot create user: password is empty.");
+        return;
+      }
+
       const { data, error: signUpError } = await supabase.auth.signUp({
-        email: formData.email || "",
-        password: formData.password || "",
+        email,
+        password,
         options: {
           data: {
-            full_name: formData.name,
+            full_name: trimmedName,
           },
         },
       });
 
       if (signUpError) {
         console.error("Error creating user auth:", signUpError.message);
-      } else if (data?.user) {
-        const { error: profileError } = await supabase.from("profiles").upsert({
-          id: data.user.id,
-          email: formData.email,
-          name: formData.name,
-          role: formData.role || "Staff",
-          status: formData.status || "Active",
+        return;
+      }
+
+      if (!data?.user) {
+        console.error("SignUp succeeded but data.user is missing.");
+        return;
+      }
+
+      const userId = data.user.id;
+
+      // Upsert into public.profiles so BookingPage can render profiles.name.
+      // NOTE: We intentionally set both `name` and `full_name` in case your DB uses either.
+      const upsertPayload: Record<string, any> = {
+        id: userId,
+        email,
+        name: trimmedName,
+        full_name: trimmedName,
+        role: formData.role || "Staff",
+        status: formData.status || "Active",
+      };
+
+      const { error: profileError, data: upsertData } = await supabase
+        .from("profiles")
+        .upsert(upsertPayload)
+        .select();
+
+      if (profileError) {
+        console.error("Error saving profile:", profileError.message, {
+          upsertPayload,
+          userId,
         });
-        if (profileError)
-          console.error("Error saving profile:", profileError.message);
+        return;
+      }
+
+      console.log("Profile upsert result:", { upsertData, upsertPayload });
+
+      // Verify the stored name immediately to catch schema/column mismatch.
+      const { data: verifyData, error: verifyError } = await supabase
+        .from("profiles")
+        .select("id,name,full_name,email")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (verifyError) {
+        console.error("Error verifying profile after upsert:", verifyError.message);
+      } else {
+        console.log("Profile verify:", verifyData);
       }
     } else if (confirmAction.type === "edit" && confirmAction.userId) {
+      const trimmedName = (formData.name ?? "").toString().trim();
+
       const { error: updateError } = await supabase
         .from("profiles")
         .update({
-          name: formData.name,
+          name: trimmedName,
           role: formData.role,
           status: formData.status,
         })
@@ -622,19 +692,21 @@ export function UserPage() {
               </p>
 
               <div className="flex flex-col gap-3">
-                <button
-                  onClick={handleExecuteAction}
-                  className={cn(
-                    "w-full py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] text-white transition-all shadow-md active:scale-[0.98]",
-                    confirmAction.type === "create"
-                      ? "bg-blue-600 hover:bg-blue-700"
-                      : confirmAction.type === "edit"
-                        ? "bg-natural-accent hover:bg-natural-accent/90"
-                        : "bg-red-600 hover:bg-red-700",
-                  )}
-                >
-                  Confirm {confirmAction.type}
-                </button>
+              <button
+                onClick={handleExecuteAction}
+                disabled={confirmAction.type === "create" && !isCreateValid}
+                className={cn(
+                  "w-full py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] text-white transition-all shadow-md active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-inherit",
+                  confirmAction.type === "create"
+                    ? "bg-blue-600 hover:bg-blue-700"
+                    : confirmAction.type === "edit"
+                      ? "bg-natural-accent hover:bg-natural-accent/90"
+                      : "bg-red-600 hover:bg-red-700",
+                )}
+              >
+                Confirm {confirmAction.type}
+              </button>
+
                 <button
                   onClick={() => setConfirmAction(null)}
                   className="w-full py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] text-natural-text-light border border-natural-border hover:bg-natural-bg transition-all active:scale-[0.98]"

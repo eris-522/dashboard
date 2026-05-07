@@ -7,10 +7,14 @@ import { useUser } from '../context/UserContext';
  */
 export function MetricCards() {
   const { bookings } = useBooking();
-  const { users } = useUser();
+  const { activeUserCount } = useUser();
 
-  const confirmedCount = bookings.filter(b => b.status === 'Confirmed').length;
-  const pendingCount = bookings.filter(b => b.status === 'Pending').length;
+  const confirmedCount = bookings.filter((b) => b.status === 'Confirmed').length;
+  const pendingCount = bookings.filter((b) => b.status === 'Pending').length;
+
+  // “Active Users” should reflect the same status used in User Management.
+  // `User.status` values are like: "Active", "Inactive", "Archived".
+  // Active user count is sourced directly from the database via UserContext
 
   const stats = [
     {
@@ -22,19 +26,20 @@ export function MetricCards() {
     },
     {
       id: 'total-events',
-      label: 'Pending Inquiries',
+      label: 'Total Pendings',
       value: pendingCount.toString(),
       change: 'Awaiting Response',
       icon: PartyPopper,
     },
     {
       id: 'total-users',
-      label: 'Registered Users',
-      value: users.length.toString(),
-      change: 'Active Accounts',
+      label: 'Total Active Users',
+      value: activeUserCount.toString(),
+      change: 'Currently Active',
       icon: Users,
     },
   ];
+
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
