@@ -15,6 +15,7 @@ import {
   Zap,
   DollarSign,
   ChevronDown,
+  ArrowLeft,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { supabase } from "../utils/supabase"; // Database connection
@@ -116,6 +117,8 @@ export function PackagePage() {
     itemName: string;
     parentCategory?: string;
   } | null>(null);
+
+  const [formError, setFormError] = useState<string | null>(null);
 
   // Feature: Fetches both packages and services from the database on page load
   useEffect(() => {
@@ -321,6 +324,7 @@ export function PackagePage() {
   // Feature: The core database execution function handling Insert, Update, and Archive for BOTH tables.
   const handleExecuteAction = async () => {
     if (!confirmAction) return;
+    setFormError(null);
 
     if (confirmAction.type === "delete") {
       if (confirmAction.itemType === "category") {
@@ -360,68 +364,99 @@ export function PackagePage() {
     if (confirmAction.itemType === "package") {
       if (confirmAction.type === "create") {
         // Inserts new package into the 'packages' table
-        await supabase.from("packages").insert([
+        const { error } = await supabase.from("packages").insert([
           {
             name: editingPackage?.name,
             type: editingPackage?.type,
             pax: editingPackage?.pax,
-            price: editingPackage?.price,
+            price: editingPackage?.price ? String(editingPackage.price).replace(/,/g, "") : null,
             tag: editingPackage?.tag,
             inclusions: editingPackage?.inclusions || [],
             status: "Active",
           },
         ]);
+        if (error) {
+          console.error("Error creating package:", error);
+          setFormError(error.message);
+          return;
+        }
       } else if (confirmAction.type === "edit" && confirmAction.itemId) {
         // Updates existing package
-        await supabase
+        const { error } = await supabase
           .from("packages")
           .update({
             name: editingPackage?.name,
             type: editingPackage?.type,
             pax: editingPackage?.pax,
-            price: editingPackage?.price,
+            price: editingPackage?.price ? String(editingPackage.price).replace(/,/g, "") : null,
             tag: editingPackage?.tag,
             inclusions: editingPackage?.inclusions || [],
           })
           .eq("id", confirmAction.itemId);
+        if (error) {
+          console.error("Error updating package:", error);
+          setFormError(error.message);
+          return;
+        }
       } else if (confirmAction.type === "archive" && confirmAction.itemId) {
         // Archives package
-        await supabase
+        const { error } = await supabase
           .from("packages")
           .update({ status: "Archived" })
           .eq("id", confirmAction.itemId);
+        if (error) {
+          console.error("Error archiving package:", error);
+          setFormError(error.message);
+          return;
+        }
       }
     } else {
       if (confirmAction.type === "create") {
         // Inserts new service into the 'add_ons' table
-        await supabase.from("add_ons").insert([
+        const { error } = await supabase.from("add_ons").insert([
           {
             name: editingService?.name,
             price: editingService?.price,
             status: "Active",
           },
         ]);
+        if (error) {
+          console.error("Error adding service:", error);
+          setFormError(error.message);
+          return;
+        }
       } else if (confirmAction.type === "edit" && confirmAction.itemId) {
         // Updates existing service
-        await supabase
+        const { error } = await supabase
           .from("add_ons")
           .update({
             name: editingService?.name,
             price: editingService?.price,
           })
           .eq("id", confirmAction.itemId);
+        if (error) {
+          console.error("Error updating service:", error);
+          setFormError(error.message);
+          return;
+        }
       } else if (confirmAction.type === "archive" && confirmAction.itemId) {
         // Archives service
-        await supabase
+        const { error } = await supabase
           .from("add_ons")
           .update({ status: "Archived" })
           .eq("id", confirmAction.itemId);
+        if (error) {
+          console.error("Error archiving service:", error);
+          setFormError(error.message);
+          return;
+        }
       }
     }
 
     // Refresh UI data and reset forms
     await fetchData();
     setConfirmAction(null);
+    setFormError(null);
     setEditingPackage(null);
     setEditingService(null);
   };
@@ -741,12 +776,19 @@ export function PackagePage() {
                           <input
                             type="text"
                             value={editingPackage.price}
-                            onChange={(e) =>
+                            onChange={(e) => {
+                              let raw = e.target.value.replace(/,/g, '');
+                              raw = raw.replace(/[^0-9.]/g, '');
+                              const parts = raw.split('.');
+                              if (parts[0]) {
+                                parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+                              }
+                              const formatted = parts.slice(0, 2).join('.');
                               setEditingPackage({
                                 ...editingPackage,
-                                price: e.target.value,
-                              })
-                            }
+                                price: formatted,
+                              });
+                            }}
                             placeholder="99,000"
                             className="w-full pl-8 pr-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20"
                           />
@@ -1157,7 +1199,24 @@ export function PackagePage() {
       {/* Confirmation Modal */}
       {confirmAction && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200 border border-natural-border">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200 border border-natural-border relative">
+            
+            {(confirmAction.type === "create" || confirmAction.type === "edit") && (
+              <button
+                onClick={() => {
+                  const actionType = confirmAction.itemType;
+                  setConfirmAction(null);
+                  setFormError(null);
+                  if (actionType === "package") setIsModalOpen(true);
+                  if (actionType === "service") setIsServiceModalOpen(true);
+                }}
+                className="absolute top-4 left-4 p-2 text-natural-text-light hover:text-natural-text-main hover:bg-natural-bg/50 rounded-full transition-colors z-10"
+                title="Back to Form"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+            )}
+
             <div className="p-8 text-center">
               <div
                 className={cn(
@@ -1225,6 +1284,12 @@ export function PackagePage() {
               </p>
 
               <div className="flex flex-col gap-3">
+                {formError && (
+                  <p className="text-xs font-bold text-red-600 bg-red-50 border border-red-200 px-4 py-2 rounded-xl text-left">
+                    {formError}
+                  </p>
+                )}
+
                 <button
                   onClick={handleExecuteAction}
                   className={cn(
@@ -1239,7 +1304,10 @@ export function PackagePage() {
                   Confirm {confirmAction.type}
                 </button>
                 <button
-                  onClick={() => setConfirmAction(null)}
+                  onClick={() => {
+                    setConfirmAction(null);
+                    setFormError(null);
+                  }}
                   className="w-full py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] text-natural-text-light border border-natural-border hover:bg-natural-bg transition-all active:scale-[0.98]"
                 >
                   Cancel
