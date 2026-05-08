@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Search,
   Plus,
@@ -83,7 +83,7 @@ export function BookingPage() {
     fetchAllData();
 
     // Subscribe to real-time changes on the bookings table
-    const subscription = supabase
+    const channel = supabase
       .channel("bookings-channel")
       .on(
         "postgres_changes",
@@ -97,7 +97,7 @@ export function BookingPage() {
 
     // Cleanup subscription on unmount
     return () => {
-      subscription.unsubscribe();
+      channel.unsubscribe();
     };
   }, []);
 
@@ -395,7 +395,7 @@ export function BookingPage() {
               <option>Rejected</option>
               <option>Archived</option>
             </select>
-            <div className="h-6 w-[1px] bg-natural-border mx-1" />
+            <div className="h-6 w-px bg-natural-border mx-1" />
             <div className="flex gap-1 bg-natural-bg/50 p-1 rounded-lg">
               <button
                 onClick={() => setViewMode("list")}
@@ -1156,7 +1156,7 @@ export function BookingPage() {
       )}
 
       {confirmAction && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-60 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 text-center">
               <div

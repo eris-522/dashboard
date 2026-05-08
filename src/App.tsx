@@ -168,7 +168,7 @@ function MainApp() {
                         />
                       </div>
 
-                      <div className="h-8 w-[1px] bg-natural-border" />
+                      <div className="h-8 w-px bg-natural-border" />
 
                       <div className="flex items-center gap-3">
                         <div className="text-right">

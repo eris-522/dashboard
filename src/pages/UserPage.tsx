@@ -65,6 +65,8 @@ export function UserPage() {
   }, []);
 
   const fetchUsers = async () => {
+    // Use select('*') so we don't break the listing if the schema/column names
+    // differ slightly (e.g. name vs full_name vs fullName).
     const { data, error } = await supabase.from("profiles").select("*");
 
     if (error) {
@@ -72,9 +74,40 @@ export function UserPage() {
       return;
     }
 
-    if (data) {
-      setUsers(data as User[]);
-    }
+    if (!data) return;
+
+    const normalized = (data as any[])
+      .map((row) => {
+        const idRaw = row?.id ?? row?.user_id ?? row?.userId ?? null;
+
+        const id = typeof idRaw === "string" ? idRaw : idRaw ? String(idRaw) : "";
+
+        if (!id) return null;
+
+        const nameStr =
+          typeof row?.name === "string" ? row.name.trim() : "";
+
+        const fullNameStrs = [
+          row?.full_name,
+          row?.fullName,
+          row?.fullname,
+        ].filter((v) => typeof v === "string") as string[];
+
+        const fullNameStr = fullNameStrs.length
+          ? fullNameStrs[0].trim()
+          : "";
+
+        const displayName = nameStr || fullNameStr;
+
+        return {
+          ...(row as Record<string, unknown>),
+          id,
+          name: displayName,
+        };
+      })
+      .filter(Boolean) as User[];
+
+    setUsers(normalized);
   };
 
   const censorEmail = (email: string) => {
@@ -426,7 +459,11 @@ export function UserPage() {
                       </div>
                       <div>
                         <p className="text-sm font-bold text-natural-text-main tracking-tight">
-                          {user.name || "Unnamed User"}
+                          {user.name ||
+                            (user as any).full_name ||
+                            (user as any).fullName ||
+                            (user as any).fullname ||
+                            "Unnamed User"}
                         </p>
                         <p className="text-[0.7rem] text-natural-text-light font-medium flex items-center gap-1">
                           <Mail className="w-3 h-3" /> {censorEmail(user.email)}

@@ -24,12 +24,22 @@ export function EventCalendar({ bookings = [] }: EventCalendarProps) {
 
   const days = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
 
-  const events = bookings.map((b) => ({
-    id: b.id,
-    title: `${b.eventType} - ${b.customerName}`,
-    // BookingPage stores `event_date` (date-only). Use it directly as YYYY-MM-DD.
-    date: parseISO(b.date),
-  }));
+  const events = bookings.map((b) => {
+    try {
+      return {
+        id: b.id,
+        title: `${b.eventType} - ${b.customerName || "Unknown"}`,
+        date: b.date && b.date.trim() ? parseISO(b.date) : new Date(),
+      };
+    } catch (error) {
+      console.warn(`Failed to parse event date for booking ${b.id}:`, error);
+      return {
+        id: b.id,
+        title: `${b.eventType} - ${b.customerName || "Unknown"}`,
+        date: new Date(),
+      };
+    }
+  });
 
 
   /**
