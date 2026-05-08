@@ -14,6 +14,7 @@ import {
   Trash2,
   Zap,
   DollarSign,
+  ChevronDown,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { supabase } from "../utils/supabase"; // Database connection
@@ -38,6 +39,47 @@ export interface AdditionalService {
   status: string;
 }
 
+const initialInclusionCategories: Record<string, string[]> = {
+  Catering: [
+    "Buffet Setup",
+    "Plated Dinner Service",
+    "Cocktail Hour Appetizers",
+    "Dessert Station",
+    "Beverage Station (Non-alcoholic)",
+    "Mobile Bar Service",
+  ],
+  "Venue Styling": [
+    "Thematic Backdrop",
+    "Table Centerpieces",
+    "Guest Seating Chart",
+    "Welcome Signage",
+    "Aisle Decor",
+    "Stage Design",
+  ],
+  "Photo & Video": [
+    "Full Day Photo Coverage",
+    "Full Day Video Coverage",
+    "Same-Day Edit Video",
+    "Pre-event Photoshoot",
+    "Drone Videography",
+    "Photo Album",
+  ],
+  Entertainment: [
+    "Live Band",
+    "DJ/Emcee",
+    "String Quartet",
+    "Photobooth",
+    "Dancers/Performers",
+  ],
+  "Flowers & Ceremony": [
+    "Bridal Bouquet",
+    "Entourage Flowers",
+    "Ceremony Arch Flowers",
+    "Table Centerpiece Flowers",
+    "Aisle Petals",
+  ],
+};
+
 export function PackagePage() {
   // Feature: State management for database arrays and UI toggles
   const [packages, setPackages] = useState<CateringPackage[]>([]);
@@ -54,12 +96,25 @@ export function PackagePage() {
     useState<Partial<AdditionalService> | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isServiceModalOpen, setIsServiceModalOpen] = useState(false);
+  const [openInclusionSections, setOpenInclusionSections] = useState<string[]>([
+    "Catering",
+  ]);
+  const [dynamicInclusionCategories, setDynamicInclusionCategories] = useState<Record<string, string[]>>(
+    initialInclusionCategories,
+  );
+  const [addingItemToCategory, setAddingItemToCategory] = useState<string | null>(
+    null,
+  );
+  const [newItemName, setNewItemName] = useState("");
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
 
   const [confirmAction, setConfirmAction] = useState<{
-    type: "create" | "edit" | "archive";
-    itemType: "package" | "service";
+    type: "create" | "edit" | "archive" | "delete";
+    itemType: "package" | "service" | "category" | "item";
     itemId?: string;
     itemName: string;
+    parentCategory?: string;
   } | null>(null);
 
   // Feature: Fetches both packages and services from the database on page load
@@ -151,6 +206,96 @@ export function PackagePage() {
     setIsServiceModalOpen(true);
   };
 
+  const handleInclusionChange = (inclusion: string, isChecked: boolean) => {
+    if (!editingPackage) return;
+    const currentInclusions = editingPackage.inclusions || [];
+    let updatedInclusions;
+    if (isChecked) {
+      updatedInclusions = [...currentInclusions, inclusion];
+    } else {
+      updatedInclusions = currentInclusions.filter(
+        (item) => item !== inclusion,
+      );
+    }
+    setEditingPackage({
+      ...editingPackage,
+      inclusions: updatedInclusions,
+    });
+  };
+
+  const toggleInclusionSection = (category: string) => {
+    setOpenInclusionSections((prev) =>
+      prev.includes(category)
+        ? prev.filter((c) => c !== category)
+        : [...prev, category],
+    );
+  };
+
+  const handleAddNewItemToCategory = (category: string) => {
+    if (
+      !newItemName.trim() ||
+      dynamicInclusionCategories[category]?.includes(newItemName.trim())
+    ) {
+      setNewItemName("");
+      setAddingItemToCategory(null);
+      return;
+    }
+    const updatedCategoryItems = [
+      ...(dynamicInclusionCategories[category] || []),
+      newItemName.trim(),
+    ];
+    setDynamicInclusionCategories((prev) => ({
+      ...prev,
+      [category]: updatedCategoryItems,
+    }));
+    // Automatically check the new item
+    handleInclusionChange(newItemName.trim(), true);
+    setNewItemName("");
+    setAddingItemToCategory(null);
+  };
+
+  const handleAddNewCategory = () => {
+    const trimmedCategoryName = newCategoryName.trim();
+    if (
+      !trimmedCategoryName ||
+      Object.keys(dynamicInclusionCategories)
+        .map((k) => k.toLowerCase())
+        .includes(trimmedCategoryName.toLowerCase())
+    ) {
+      setNewCategoryName("");
+      setIsAddingCategory(false);
+      return;
+    }
+    setDynamicInclusionCategories((prev) => ({
+      ...prev,
+      [trimmedCategoryName]: [],
+    }));
+    // Also expand the new category
+    if (!openInclusionSections.includes(trimmedCategoryName)) {
+      toggleInclusionSection(trimmedCategoryName);
+    }
+    setNewCategoryName("");
+    setIsAddingCategory(false);
+  };
+
+  const confirmDeleteCategory = (e: React.MouseEvent, category: string) => {
+    e.stopPropagation();
+    setConfirmAction({
+      type: "delete",
+      itemType: "category",
+      itemName: category,
+    });
+  };
+
+  const confirmDeleteItem = (category: string, item: string) => {
+    setConfirmAction({
+      type: "delete",
+      itemType: "item",
+      itemName: item,
+      parentCategory: category,
+    });
+  };
+
   // Feature: Moves user from the package input form to the final validation step
   const handleConfirmSave = () => {
     setIsModalOpen(false);
@@ -176,6 +321,41 @@ export function PackagePage() {
   // Feature: The core database execution function handling Insert, Update, and Archive for BOTH tables.
   const handleExecuteAction = async () => {
     if (!confirmAction) return;
+
+    if (confirmAction.type === "delete") {
+      if (confirmAction.itemType === "category") {
+        const category = confirmAction.itemName;
+        const itemsInCategory = dynamicInclusionCategories[category] || [];
+        
+        setDynamicInclusionCategories((prev) => {
+          const updated = { ...prev };
+          delete updated[category];
+          return updated;
+        });
+
+        if (editingPackage && editingPackage.inclusions) {
+          const newInclusions = editingPackage.inclusions.filter(
+            (inc) => !itemsInCategory.includes(inc)
+          );
+          setEditingPackage({ ...editingPackage, inclusions: newInclusions });
+        }
+      } else if (confirmAction.itemType === "item" && confirmAction.parentCategory) {
+        const category = confirmAction.parentCategory;
+        const item = confirmAction.itemName;
+        
+        setDynamicInclusionCategories((prev) => ({
+          ...prev,
+          [category]: prev[category].filter((i) => i !== item),
+        }));
+
+        if (editingPackage && editingPackage.inclusions?.includes(item)) {
+          handleInclusionChange(item, false);
+        }
+      }
+      // Clear the modal without calling fetchData() to prevent closing the Package Editor
+      setConfirmAction(null);
+      return;
+    }
 
     if (confirmAction.itemType === "package") {
       if (confirmAction.type === "create") {
@@ -488,7 +668,7 @@ export function PackagePage() {
       {/* Package Modal */}
       {isModalOpen && editingPackage && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden animate-in zoom-in duration-200 border border-natural-border">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden animate-in zoom-in duration-200 border border-natural-border">
             <div className="p-6 border-b border-natural-border flex items-center justify-between">
               <h3 className="text-lg font-serif font-bold text-natural-text-main">
                 {editingPackage.id ? "Edit Package" : "Create New Package"}
@@ -502,115 +682,365 @@ export function PackagePage() {
             </div>
 
             <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
-                    Package Name
-                  </label>
-                  <input
-                    type="text"
-                    value={editingPackage.name}
-                    onChange={(e) =>
-                      setEditingPackage({
-                        ...editingPackage,
-                        name: e.target.value,
-                      })
-                    }
-                    className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
-                    Event Type
-                  </label>
-                  <select
-                    value={editingPackage.type}
-                    onChange={(e) =>
-                      setEditingPackage({
-                        ...editingPackage,
-                        type: e.target.value,
-                      })
-                    }
-                    className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20"
-                  >
-                    <option>Social</option>
-                    <option>Corporate</option>
-                    <option>Wedding</option>
-                    <option>Birthday</option>
-                    <option>Christening</option>
-                  </select>
-                </div>
-              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                {/* LEFT: input layout */}
+                <div className="space-y-4">
+                  <div className="border border-natural-border/50 rounded-xl overflow-hidden">
+                    <div className="p-4 bg-natural-bg/10 border-b border-natural-border/50">
+                      <p className="text-[0.7rem] font-bold text-natural-text-light uppercase tracking-widest">
+                        Package Details
+                      </p>
+                    </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
-                    Guest range (e.g. 50-100)
-                  </label>
-                  <input
-                    type="text"
-                    value={editingPackage.pax}
-                    onChange={(e) =>
-                      setEditingPackage({
-                        ...editingPackage,
-                        pax: e.target.value,
-                      })
-                    }
-                    className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
-                    Price Point (e.g. ₱500/pax)
-                  </label>
-                  <input
-                    type="text"
-                    value={editingPackage.price}
-                    onChange={(e) =>
-                      setEditingPackage({
-                        ...editingPackage,
-                        price: e.target.value,
-                      })
-                    }
-                    className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20"
-                  />
-                </div>
-              </div>
+                    <div className="p-4 space-y-3">
+                      <div className="grid grid-cols-3 gap-3 items-center">
+                        <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest col-span-1">
+                          Package Name
+                        </label>
+                        <input
+                          type="text"
+                          value={editingPackage.name}
+                          onChange={(e) =>
+                            setEditingPackage({
+                              ...editingPackage,
+                              name: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 col-span-2"
+                        />
+                      </div>
 
-              <div className="space-y-1">
-                <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
-                  Status Tag (e.g. Popular, High Tier)
-                </label>
-                <input
-                  type="text"
-                  value={editingPackage.tag}
-                  onChange={(e) =>
-                    setEditingPackage({
-                      ...editingPackage,
-                      tag: e.target.value,
-                    })
-                  }
-                  className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20"
-                />
-              </div>
+                      {/* Guest range (separate row) */}
+                      <div className="grid grid-cols-3 gap-3 items-center">
+                        <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest col-span-1">
+                          Guest range
+                        </label>
+                        <input
+                          type="text"
+                          value={editingPackage.pax}
+                          onChange={(e) =>
+                            setEditingPackage({
+                              ...editingPackage,
+                              pax: e.target.value,
+                            })
+                          }
+                          placeholder="e.g. 80 - 100 pax"
+                          className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 col-span-2"
+                        />
+                      </div>
 
-              <div className="space-y-1">
-                <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
-                  Inclusions (Comma separated)
-                </label>
-                <textarea
-                  rows={3}
-                  value={editingPackage.inclusions?.join(", ")}
-                  onChange={(e) =>
-                    setEditingPackage({
-                      ...editingPackage,
-                      inclusions: e.target.value
-                        .split(",")
-                        .map((s) => s.trim()),
-                    })
-                  }
-                  className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20"
-                />
+                      {/* Price with ₱ prefix */}
+                      <div className="grid grid-cols-3 gap-3 items-center">
+                        <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest col-span-1">
+                          Price
+                        </label>
+                        <div className="col-span-2 w-full relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-natural-text-light">
+                            ₱
+                          </span>
+                          <input
+                            type="text"
+                            value={editingPackage.price}
+                            onChange={(e) =>
+                              setEditingPackage({
+                                ...editingPackage,
+                                price: e.target.value,
+                              })
+                            }
+                            placeholder="99,000"
+                            className="w-full pl-8 pr-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Status Tag dropdown */}
+                      <div className="grid grid-cols-3 gap-3 items-center">
+                        <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest col-span-1">
+                          Status Tag
+                        </label>
+                        <select
+                          value={editingPackage.tag || ""}
+                          onChange={(e) =>
+                            setEditingPackage({
+                              ...editingPackage,
+                              tag: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 col-span-2"
+                        >
+                          <option value="" disabled>
+                            Select status
+                          </option>
+                          <option>Popular</option>
+                          <option>Premium</option>
+                          <option>Budget-Friendly</option>
+                          <option>Kids Special</option>
+                          <option>Styling Only</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border border-natural-border/50 rounded-xl overflow-hidden">
+                    <div className="p-4 bg-natural-bg/10 border-b border-natural-border/50">
+                      <p className="text-[0.7rem] font-bold text-natural-text-light uppercase tracking-widest">
+                        Inclusions Checklist
+                      </p>
+                    </div>
+
+                    <div className="p-4 space-y-1 max-h-96 overflow-y-auto">
+                      {Object.entries(dynamicInclusionCategories).map(
+                        ([category, items]) => (
+                          <div
+                            key={category}
+                            className="border-b border-natural-border/50 last:border-b-0"
+                          >
+                            <div
+                              onClick={() => toggleInclusionSection(category)}
+                              className="w-full flex justify-between items-center py-3 text-left cursor-pointer group"
+                            >
+                              <div className="flex items-center gap-2">
+                                <ChevronDown
+                                  className={cn(
+                                    "w-4 h-4 transition-transform",
+                                    openInclusionSections.includes(category) &&
+                                      "rotate-180",
+                                  )}
+                                />
+                                <span className="text-xs font-bold text-natural-text-main">
+                                  {category}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={(e) => confirmDeleteCategory(e, category)}
+                                className="p-1 text-natural-text-light hover:text-red-500 hover:bg-red-50 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                                title="Delete Category"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                            {openInclusionSections.includes(category) && (
+                              <div className="pb-4 pt-2 animate-in fade-in duration-200">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  {items.map((item) => (
+                                    <div
+                                      key={item}
+                                      className="flex items-center justify-between gap-2 hover:bg-natural-bg/50 p-1 rounded-md group"
+                                    >
+                                      <label className="flex items-center gap-2 text-xs text-natural-text-main cursor-pointer flex-1">
+                                        <input
+                                          type="checkbox"
+                                          checked={editingPackage.inclusions?.includes(
+                                            item,
+                                          )}
+                                          onChange={(e) =>
+                                            handleInclusionChange(
+                                              item,
+                                              e.target.checked,
+                                            )
+                                          }
+                                          className="w-3.5 h-3.5 rounded border-natural-border text-natural-accent focus:ring-natural-accent/20"
+                                        />
+                                        {item}
+                                      </label>
+                                      <button
+                                        type="button"
+                                        onClick={() => confirmDeleteItem(category, item)}
+                                        className="p-1 text-natural-text-light hover:text-red-500 hover:bg-red-50 rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                                        title="Delete Item"
+                                      >
+                                        <Trash2 className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="mt-3">
+                                  {addingItemToCategory === category ? (
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        type="text"
+                                        value={newItemName}
+                                        onChange={(e) =>
+                                          setNewItemName(e.target.value)
+                                        }
+                                        onKeyDown={(e) =>
+                                          e.key === "Enter" &&
+                                          handleAddNewItemToCategory(category)
+                                        }
+                                        placeholder="New item name"
+                                        className="w-full px-2 py-1 bg-natural-bg border border-natural-border rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-natural-accent/20"
+                                        autoFocus
+                                      />
+                                      <button
+                                        onClick={() =>
+                                          handleAddNewItemToCategory(category)
+                                        }
+                                        className="p-1 text-green-600 hover:bg-green-50 rounded-md"
+                                      >
+                                        <Check className="w-4 h-4" />
+                                      </button>
+                                      <button
+                                        onClick={() =>
+                                          setAddingItemToCategory(null)
+                                        }
+                                        className="p-1 text-red-600 hover:bg-red-50 rounded-md"
+                                      >
+                                        <X className="w-4 h-4" />
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      onClick={() => {
+                                        setAddingItemToCategory(category);
+                                        setNewItemName("");
+                                      }}
+                                      className="flex items-center gap-1 text-xs font-bold text-natural-accent/80 hover:text-natural-accent"
+                                    >
+                                      <Plus className="w-3 h-3" /> Add Item
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ),
+                      )}
+                      <div className="pt-4">
+                        {isAddingCategory ? (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={newCategoryName}
+                              onChange={(e) =>
+                                setNewCategoryName(e.target.value)
+                              }
+                              onKeyDown={(e) =>
+                                e.key === "Enter" && handleAddNewCategory()
+                              }
+                              placeholder="New category name"
+                              className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-natural-accent/20"
+                              autoFocus
+                            />
+                            <button
+                              onClick={handleAddNewCategory}
+                              className="p-2 text-white bg-green-600 hover:bg-green-700 rounded-lg"
+                            >
+                              <Check className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => setIsAddingCategory(false)}
+                              className="p-2 text-white bg-red-600 hover:bg-red-700 rounded-lg"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              setIsAddingCategory(true);
+                              setNewCategoryName("");
+                            }}
+                            className="w-full flex items-center justify-center gap-2 px-4 py-2 text-xs font-bold text-natural-accent uppercase tracking-widest border-2 border-dashed border-natural-border/50 rounded-lg hover:bg-natural-accent/5 hover:border-natural-accent/50 transition-all"
+                          >
+                            <Plus className="w-4 h-4" /> Add Category
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* RIGHT: preview panel */}
+                <div className="space-y-3">
+                  <div className="p-4 border border-natural-border/50 rounded-xl bg-natural-bg/5">
+                    <p className="text-[0.7rem] font-bold text-natural-text-light uppercase tracking-widest mb-3">
+                      Package Preview
+                    </p>
+
+                    <div className="border border-natural-border/50 rounded-xl overflow-hidden bg-white">
+                      <div className="p-4 bg-natural-bg/5 border-b border-natural-border/50">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-[10px] font-bold text-natural-accent uppercase tracking-widest">
+                              {editingPackage.type || "Event Type"}
+                            </p>
+                            <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest mt-1">
+                              {editingPackage.tag ? editingPackage.tag : "Tag: —"}
+                            </p>
+                          </div>
+
+                          <div className="text-right">
+                            <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest">
+                              Price
+                            </p>
+                            <p className="text-lg font-bold text-natural-accent font-serif italic leading-none">
+                              {editingPackage.price || "—"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-4">
+                        <h4 className="text-base font-bold text-natural-text-main tracking-tight leading-tight">
+                          {editingPackage.name || "Package Name"}
+                        </h4>
+
+                        <p className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest mt-1">
+                          Guests: {editingPackage.pax || "—"}
+                        </p>
+
+                        <div className="mt-4 border border-natural-border/50 rounded-lg overflow-hidden">
+                          <div className="p-3 bg-natural-bg/10 border-b border-natural-border/50">
+                            <p className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                              Inclusions
+                            </p>
+                          </div>
+
+                          <div className="p-3">
+                            {editingPackage.inclusions &&
+                            editingPackage.inclusions.length > 0 ? (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
+                                {editingPackage.inclusions
+                                  .slice(0, 6)
+                                  .map((inc, i) => (
+                                    <div
+                                      key={`${inc}-${i}`}
+                                      className="flex items-start gap-2"
+                                    >
+                                      <Check className="w-3.5 h-3.5 text-natural-accent mt-0.5" />
+                                      <span className="text-[0.7rem] font-medium text-natural-text-main/80">
+                                        {inc}
+                                      </span>
+                                    </div>
+                                  ))}
+                              </div>
+                            ) : (
+                              <p className="text-[0.75rem] font-medium text-natural-text-light/80">
+                                Add inclusions to see them here.
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-end">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditingPackage((prev) => ({
+                            ...(prev || {}),
+                            inclusions: [],
+                          }))
+                        }
+                        className="px-4 py-2 text-xs font-bold text-natural-text-light uppercase tracking-widest hover:text-natural-text-main transition-colors border border-natural-border/50 rounded-lg"
+                      >
+                        Clear Inclusions
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -623,7 +1053,12 @@ export function PackagePage() {
               </button>
               <button
                 onClick={handleConfirmSave}
-                disabled={!editingPackage.name}
+                disabled={
+                  !editingPackage.name?.trim() ||
+                  !editingPackage.pax?.trim() ||
+                  !editingPackage.price?.trim() ||
+                  !editingPackage.tag
+                }
                 className="bg-natural-accent text-white px-6 py-2 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm disabled:opacity-50"
               >
                 {editingPackage.id ? "Save Changes" : "Create Package"}
@@ -743,6 +1178,9 @@ export function PackagePage() {
                 {confirmAction.type === "archive" && (
                   <Archive className="w-8 h-8 text-white" />
                 )}
+                {confirmAction.type === "delete" && (
+                  <Trash2 className="w-8 h-8 text-white" />
+                )}
               </div>
 
               <h3 className="text-xl font-serif font-bold text-natural-text-main mb-2 capitalize">
@@ -765,6 +1203,14 @@ export function PackagePage() {
                       {confirmAction.itemName}
                     </span>
                     . Continue?
+                  </>
+                ) : confirmAction.type === "delete" ? (
+                  <>
+                    Are you sure you want to permanently delete{" "}
+                    <span className="font-bold text-natural-text-main">
+                      {confirmAction.itemName}
+                    </span>
+                    ? This action cannot be undone.
                   </>
                 ) : (
                   <>
