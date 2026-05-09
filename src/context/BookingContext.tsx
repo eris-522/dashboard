@@ -88,8 +88,8 @@ export function BookingProvider({ children }: { children: ReactNode }) {
         .select(
           `
           *,
-          profiles (name, email, phone, phone_number),
-          packages (name, price)
+          profiles (*),
+          packages (*)
         `,
         )
         .order("created_at", { ascending: false });
@@ -102,7 +102,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
         // Transform database rows to Booking interface
         const transformedBookings = (bData || []).map((booking: any) => ({
           id: booking.id,
-          customerName: booking.profiles?.name || "Unknown",
+          customerName: booking.profiles?.name || booking.profiles?.full_name || "Unknown User",
           email: booking.profiles?.email || "",
           phone: booking.profiles?.phone_number || booking.profiles?.phone || "",
           eventType: booking.event_type || "",

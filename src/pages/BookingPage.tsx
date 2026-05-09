@@ -25,13 +25,36 @@ import { cn } from "../lib/utils";
 import { EventCalendar } from "../components/EventCalendar";
 import { supabase } from "../utils/supabase";
 
-type SortField = "customerName" | "date" | "budget" | "status" | null;
+type SortField = "customerName" | "date" | "budget" | "status" | "created_at" | null;
 type SortOrder = "asc" | "desc" | null;
 
 interface SortConfig {
   field: SortField;
   order: SortOrder;
 }
+
+const formatEventDate = (dateStr?: string) => {
+  if (!dateStr) return "N/A";
+  const date = new Date(`${dateStr}T12:00:00`);
+  return isNaN(date.getTime())
+    ? dateStr
+    : date.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
+};
+
+const formatEventTime = (timeStr?: string) => {
+  if (!timeStr) return "N/A";
+  const date = new Date(`2000-01-01T${timeStr}`);
+  return isNaN(date.getTime())
+    ? timeStr
+    : date.toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+};
 
 export function BookingPage() {
   const [bookings, setBookings] = useState<any[]>([]);
@@ -111,8 +134,8 @@ export function BookingPage() {
         .select(
           `
           *,
-          profiles (name, email, phone, phone_number),
-          packages (name, price)
+          profiles (*),
+          packages (*)
         `,
         )
         .order("created_at", { ascending: false });
@@ -189,17 +212,18 @@ export function BookingPage() {
 
   const filteredBookings = useMemo(() => {
     return bookings.filter((booking) => {
-      const customerName = booking.profiles?.name || "Unknown User";
+      const customerName = booking.profiles?.name || booking.profiles?.full_name || "Unknown User";
       const query = searchQuery.toLowerCase();
       const matchesSearch =
         customerName.toLowerCase().includes(query) ||
         (booking.event_type || "").toLowerCase().includes(query) ||
         (booking.event_location || "").toLowerCase().includes(query);
 
+      const currentStatus = booking.status || "Pending";
       const matchesStatus =
         statusFilter === "All Status"
-          ? booking.status !== "Archived"
-          : booking.status === statusFilter;
+          ? currentStatus !== "Archived"
+          : currentStatus === statusFilter;
 
 
       return matchesSearch && matchesStatus;
@@ -212,9 +236,9 @@ export function BookingPage() {
     return [...filteredBookings].sort((a, b) => {
       const { field, order } = sortConfig;
       let valA: any =
-        field === "customerName" ? a.profiles?.name : field ? a[field] : "";
+        field === "customerName" ? (a.profiles?.name || a.profiles?.full_name) : field ? a[field] : "";
       let valB: any =
-        field === "customerName" ? b.profiles?.name : field ? b[field] : "";
+        field === "customerName" ? (b.profiles?.name || b.profiles?.full_name) : field ? b[field] : "";
 
       if (field === "budget") {
         valA = calculateBudget(a);
@@ -222,6 +246,9 @@ export function BookingPage() {
       } else if (field === "date") {
         valA = new Date(a.event_date || 0).getTime();
         valB = new Date(b.event_date || 0).getTime();
+      } else if (field === "created_at") {
+        valA = new Date(a.created_at || 0).getTime();
+        valB = new Date(b.created_at || 0).getTime();
       }
 
       if (valA === undefined || valA === null) valA = "";
@@ -315,36 +342,38 @@ export function BookingPage() {
           </p>
         </div>
 
-        <button
-          onClick={() => {
-            resetNewBooking();
-            setIsModalOpen(true);
-          }}
-          className="flex items-center gap-2 bg-natural-accent text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-natural-accent/90 transition-all shadow-sm"
-        >
-          <Plus className="w-4 h-4" />
-          Create New Booking
-        </button>
+        {/* Hidden for now:
+          <button
+            onClick={() => {
+              resetNewBooking();
+              setIsModalOpen(true);
+            }}
+            className="flex items-center gap-2 bg-natural-accent text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-natural-accent/90 transition-all shadow-sm"
+          >
+            <Plus className="w-4 h-4" />
+            Create New Booking
+          </button>
+        */}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {[
           {
             label: "Total Bookings",
-            value: bookings.filter((b) => b.status !== "Archived").length.toString(),
+            value: bookings.filter((b) => (b.status || "Pending") !== "Archived").length.toString(),
             sub: "Active",
           },
           {
             label: "Confirmed",
             value: bookings
-              .filter((b) => b.status === "Confirmed")
+              .filter((b) => (b.status || "Pending") === "Confirmed")
               .length.toString(),
             sub: "Paid/Ready",
           },
           {
             label: "Pending",
             value: bookings
-              .filter((b) => b.status === "Pending")
+              .filter((b) => (b.status || "Pending") === "Pending")
               .length.toString(),
             sub: "Needs Review",
           },
@@ -467,6 +496,23 @@ export function BookingPage() {
                   </th>
                   <th
                     className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
+                    onClick={() => handleSort("created_at")}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      Applied On
+                      {sortConfig.field === "created_at" ? (
+                        sortConfig.order === "asc" ? (
+                          <ArrowUp className="w-3 h-3 text-natural-accent" />
+                        ) : (
+                          <ArrowDown className="w-3 h-3 text-natural-accent" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-30" />
+                      )}
+                    </div>
+                  </th>
+                  <th
+                    className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
                     onClick={() => handleSort("budget")}
                   >
                     <div className="flex items-center gap-1.5">
@@ -504,7 +550,7 @@ export function BookingPage() {
                     <td className="px-6 py-5 border-b border-natural-border/50">
                       <div>
                         <p className="text-sm font-bold text-natural-text-main tracking-tight leading-tight">
-                          {booking.profiles?.name || "Unknown User"}
+                          {booking.profiles?.name || booking.profiles?.full_name || "Unknown User"}
                         </p>
                         <div className="flex flex-col gap-0.5 mt-1">
                           <p className="text-[10px] text-natural-text-light flex items-center gap-1">
@@ -536,10 +582,20 @@ export function BookingPage() {
                       <div className="flex flex-col gap-1">
                         <p className="text-xs text-natural-text-main font-medium flex items-center gap-2">
                           <Calendar className="w-3.5 h-3.5 text-natural-accent opacity-60" />{" "}
-                          {booking.event_date}
+                          {formatEventDate(booking.event_date)}
                         </p>
                         <p className="text-[10px] text-natural-text-light flex items-center gap-2">
-                          <Clock className="w-3 h-3" /> {booking.event_time}
+                          <Clock className="w-3 h-3" /> {formatEventTime(booking.event_time)}
+                        </p>
+                      </div>
+                    </td>
+                    <td className="px-6 py-5 border-b border-natural-border/50">
+                      <div className="flex flex-col gap-1">
+                        <p className="text-xs text-natural-text-main font-medium">
+                          {booking.created_at ? new Date(booking.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : "N/A"}
+                        </p>
+                        <p className="text-[10px] text-natural-text-light">
+                          {booking.created_at ? new Date(booking.created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : ""}
                         </p>
                       </div>
                     </td>
@@ -555,33 +611,33 @@ export function BookingPage() {
                       <span
                         className={cn(
                           "text-[0.6rem] font-bold uppercase tracking-widest px-2 py-1 rounded border",
-                          booking.status === "Confirmed"
+                          (booking.status || "Pending") === "Confirmed"
                             ? "bg-green-50 text-green-700 border-green-200"
-                            : booking.status === "Pending"
+                            : (booking.status || "Pending") === "Pending"
                               ? "bg-orange-50 text-orange-700 border-orange-200"
-                              : booking.status === "Rejected"
+                              : (booking.status || "Pending") === "Rejected"
                                 ? "bg-red-50 text-red-700 border-red-200"
-                                : booking.status === "Archived"
+                                : (booking.status || "Pending") === "Archived"
                                   ? "bg-gray-100 text-gray-600 border-gray-300"
                                   : "bg-gray-50 text-gray-700 border-gray-200",
                         )}
                       >
-                        {booking.status}
+                        {booking.status || "Pending"}
                       </span>
                     </td>
                     <td className="px-6 py-5 border-b border-natural-border/50">
                       <div className="flex items-center gap-2">
-                        {booking.status !== "Archived" && (
+                        {(booking.status || "Pending") !== "Archived" && (
                           <>
-                            {(booking.status === "Inquiry" ||
-                              booking.status === "Pending") && (
+                            {((booking.status || "Pending") === "Inquiry" ||
+                              (booking.status || "Pending") === "Pending") && (
                               <>
                                 <button
                                   onClick={() =>
                                     setConfirmAction({
                                       type: "confirm",
                                       bookingId: booking.id,
-                                      bookingName: booking.profiles?.name,
+                                      bookingName: booking.profiles?.name || booking.profiles?.full_name || "Unknown User",
                                     })
                                   }
                                   className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-all"
@@ -594,7 +650,7 @@ export function BookingPage() {
                                     setConfirmAction({
                                       type: "reject",
                                       bookingId: booking.id,
-                                      bookingName: booking.profiles?.name,
+                                      bookingName: booking.profiles?.name || booking.profiles?.full_name || "Unknown User",
                                     })
                                   }
                                   className="p-1.5 text-orange-600 hover:bg-orange-50 rounded-lg transition-all"
@@ -616,7 +672,7 @@ export function BookingPage() {
                                 setConfirmAction({
                                   type: "archive",
                                   bookingId: booking.id,
-                                  bookingName: booking.profiles?.name,
+                                  bookingName: booking.profiles?.name || booking.profiles?.full_name || "Unknown User",
                                 })
                               }
                               className="p-1.5 text-natural-text-light hover:text-natural-text-main hover:bg-natural-bg/50 rounded-lg transition-all"
@@ -626,7 +682,7 @@ export function BookingPage() {
                             </button>
                           </>
                         )}
-                        {booking.status === "Archived" && (
+                        {(booking.status || "Pending") === "Archived" && (
                           <button
                             onClick={() => setSelectedBooking(booking)}
                             className="p-1.5 text-natural-text-light/50 hover:text-natural-text-main hover:bg-natural-bg/50 rounded-lg transition-all"
@@ -644,7 +700,24 @@ export function BookingPage() {
           ) : (
             <div className="p-6">
               <EventCalendar
-                bookings={bookings.filter((b) => b.status === "Confirmed")}
+                bookings={filteredBookings.map((b) => ({
+                  id: b.id,
+                  customerName: b.profiles?.name || b.profiles?.full_name || "Unknown User",
+                  email: b.profiles?.email || "",
+                  phone: b.profiles?.phone_number || b.profiles?.phone || "",
+                  eventType: b.event_type || "",
+                  package: b.packages?.name || "",
+                  date: b.event_date || "",
+                  time: formatEventTime(b.event_time),
+                  guestCount: b.guest_count || 0,
+                  venueName: (b.event_location || "").split(" - ")[0] || "",
+                  venueAddress: (b.event_location || "").split(" - ")[1] || "",
+                  menu: b.selected_menu_items || [],
+                  additionalServices: b.selected_add_ons || [],
+                  budget: calculateBudget(b),
+                  status: b.status || "Pending",
+                }))}
+                detailedView={true}
               />
             </div>
           )}
@@ -986,26 +1059,30 @@ export function BookingPage() {
               <div className="flex items-start justify-between">
                 <div>
                   <h4 className="text-2xl font-serif font-bold text-natural-text-main">
-                    {selectedBooking.profiles?.name}
+                    {selectedBooking.profiles?.name || selectedBooking.profiles?.full_name || "Unknown User"}
                   </h4>
                   <p className="text-sm font-medium text-natural-text-light">
                     {selectedBooking.event_type} •{" "}
                     {selectedBooking.packages?.name} Package
+                    <br />
+                    <span className="text-[10px] uppercase tracking-widest mt-1 block opacity-70">
+                      Applied On: {selectedBooking.created_at ? new Date(selectedBooking.created_at).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : "N/A"}
+                    </span>
                   </p>
                 </div>
                 <span
                   className={cn(
                     "text-[0.6rem] font-bold uppercase tracking-widest px-3 py-1.5 rounded-full border",
-                    selectedBooking.status === "Confirmed"
+                    (selectedBooking.status || "Pending") === "Confirmed"
                       ? "bg-green-50 text-green-700 border-green-200"
-                      : selectedBooking.status === "Rejected"
+                      : (selectedBooking.status || "Pending") === "Rejected"
                         ? "bg-red-50 text-red-700 border-red-200"
-                        : selectedBooking.status === "Archived"
+                        : (selectedBooking.status || "Pending") === "Archived"
                           ? "bg-gray-100 text-gray-600 border-gray-300"
                           : "bg-orange-50 text-orange-700 border-orange-200",
                   )}
                 >
-                  {selectedBooking.status}
+                  {selectedBooking.status || "Pending"}
                 </span>
               </div>
 
@@ -1018,8 +1095,8 @@ export function BookingPage() {
                         Date & Time
                       </p>
                       <p className="text-sm font-semibold text-natural-text-main">
-                        {selectedBooking.event_date} at{" "}
-                        {selectedBooking.event_time}
+                        {formatEventDate(selectedBooking.event_date)} at{" "}
+                        {formatEventTime(selectedBooking.event_time)}
                       </p>
                     </div>
                   </div>
@@ -1114,14 +1191,14 @@ export function BookingPage() {
             </div>
 
             <div className="p-6 bg-natural-bg/30 border-t border-natural-border flex gap-3">
-              {selectedBooking.status === "Pending" && (
+              {(selectedBooking.status || "Pending") === "Pending" && (
                 <>
                   <button
                     onClick={() =>
                       setConfirmAction({
                         type: "confirm",
                         bookingId: selectedBooking.id,
-                        bookingName: selectedBooking.profiles?.name,
+                        bookingName: selectedBooking.profiles?.name || selectedBooking.profiles?.full_name || "Unknown User",
                       })
                     }
                     className="flex-1 bg-green-600 text-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-green-700 transition-all shadow-sm"
@@ -1133,7 +1210,7 @@ export function BookingPage() {
                       setConfirmAction({
                         type: "reject",
                         bookingId: selectedBooking.id,
-                        bookingName: selectedBooking.profiles?.name,
+                        bookingName: selectedBooking.profiles?.name || selectedBooking.profiles?.full_name || "Unknown User",
                       })
                     }
                     className="flex-1 border border-orange-200 text-orange-600 bg-orange-50/50 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-orange-50 transition-all"
@@ -1142,7 +1219,7 @@ export function BookingPage() {
                   </button>
                 </>
               )}
-              {selectedBooking.status !== "Pending" && (
+              {(selectedBooking.status || "Pending") !== "Pending" && (
                 <button
                   onClick={() => setSelectedBooking(null)}
                   className="flex-1 bg-natural-accent text-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm"

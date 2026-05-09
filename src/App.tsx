@@ -14,8 +14,8 @@ import { InventoryPage } from "./pages/InventoryPage";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { AuditTrailPage } from "./pages/AuditTrailPage";
 import { SettingsPage } from "./pages/SettingsPage";
-import { Bell, Mail } from "lucide-react";
 import { NotificationCenter } from "./components/NotificationCenter";
+import { Bell, Mail, LogOut, Users } from "lucide-react";
 import { cn } from "./lib/utils";
 import { InventoryProvider } from "./context/InventoryContext";
 import { BookingProvider, useBooking } from "./context/BookingContext";
@@ -24,7 +24,6 @@ import { MenuProvider } from "./context/MenuContext";
 import { ServicesProvider } from "./context/ServicesContext";
 import { PackageProvider } from "./context/PackageContext";
 import { LoginPage } from "./pages/LoginPage";
-import { LogOut } from "lucide-react";
 
 /**
  * The primary dashboard view component.
@@ -59,30 +58,28 @@ function Dashboard({ onNavigate }: { onNavigate: (id: string) => void }) {
   );
 }
 
-/**
- * The core application shell including the persistent navigation sidebar and header.
- * Manages the active view state and provides context providers for data domains.
- */
-function MainApp() {
+function AppContent() {
   const [activeTab, setActiveTab] = React.useState("dashboard");
   const [isNotificationOpen, setIsNotificationOpen] = React.useState(false);
+  const [dismissedIds, setDismissedIds] = React.useState<number[]>([]);
   const { currentUser, logout } = useUser();
+  const { bookings } = useBooking();
+
+  const pendingCount = bookings.filter((b) => {
+    const status = b.status || "Pending";
+    return (status === "Pending" || status === "Inquiry") && !dismissedIds.includes(b.id);
+  }).length;
 
   React.useEffect(() => {
     window.scrollTo(0, 0);
   }, [activeTab]);
 
   if (!currentUser) {
-    return <LoginPage />;
+    return null;
   }
 
   return (
-    <MenuProvider>
-      <ServicesProvider>
-        <PackageProvider>
-          <BookingProvider>
-            <InventoryProvider>
-              <div className="flex bg-natural-bg min-h-screen">
+    <div className="flex bg-natural-bg min-h-screen">
                 <Sidebar active={activeTab} setActive={setActiveTab} />
 
                 <main className="flex-1 ml-56 p-8">
@@ -137,7 +134,7 @@ function MainApp() {
                       <div className="flex items-center gap-2 relative">
                         <button
                           onClick={() =>
-                            setIsNotificationOpen(!isNotificationOpen)
+                            setIsNotificationOpen(true)
                           }
                           className={cn(
                             "p-2 bg-white border border-natural-border rounded-lg relative hover:bg-natural-bg transition-colors shadow-xs",
@@ -146,16 +143,18 @@ function MainApp() {
                           )}
                         >
                           <Bell className="w-4 h-4 text-natural-text-main" />
-                          <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-natural-accent rounded-full border border-white" />
+                          {pendingCount > 0 && (
+                            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-white animate-pulse" />
+                          )}
                         </button>
 
-                        <NotificationCenter
-                          isOpen={isNotificationOpen}
-                          onClose={() => setIsNotificationOpen(false)}
-                          onViewAllLogs={() => {
-                            setActiveTab("audit-trail");
-                            setIsNotificationOpen(false);
-                          }}
+                        <NotificationCenter 
+                          isOpen={isNotificationOpen} 
+                          onClose={() => setIsNotificationOpen(false)} 
+                          onManageBooking={() => setActiveTab("booking")}
+                          onViewAllLogs={() => setActiveTab("audit-trail")}
+                          dismissedIds={dismissedIds}
+                          onDismiss={(id) => setDismissedIds((prev) => [...prev, id])}
                         />
                       </div>
 
@@ -170,12 +169,16 @@ function MainApp() {
                             {currentUser.role} Account
                           </p>
                         </div>
-                        <div className="w-9 h-9 rounded-lg bg-natural-accent/10 border border-natural-accent/20 flex items-center justify-center text-natural-accent font-bold text-xs select-none uppercase">
+                        <button
+                          onClick={() => setActiveTab("setting")}
+                          title="Go to Settings"
+                          className="w-9 h-9 rounded-lg bg-natural-accent/10 border border-natural-accent/20 flex items-center justify-center text-natural-accent font-bold text-xs select-none uppercase hover:bg-natural-accent/20 transition-colors cursor-pointer"
+                        >
                           {currentUser.name
                             .split(" ")
                             .map((n) => n[0])
                             .join("")}
-                        </div>
+                        </button>
                         <button
                           onClick={() => logout()}
                           className="p-2 ml-1 text-natural-text-light hover:text-red-500 hover:bg-white rounded-lg transition-all"
@@ -223,7 +226,28 @@ function MainApp() {
                     </p>
                   </footer>
                 </main>
-              </div>
+    </div>
+  );
+}
+
+/**
+ * The core application shell including the persistent navigation sidebar and header.
+ * Manages the active view state and provides context providers for data domains.
+ */
+function MainApp() {
+  const { currentUser } = useUser();
+
+  if (!currentUser) {
+    return <LoginPage />;
+  }
+
+  return (
+    <MenuProvider>
+      <ServicesProvider>
+        <PackageProvider>
+          <BookingProvider>
+            <InventoryProvider>
+              <AppContent />
             </InventoryProvider>
           </BookingProvider>
         </PackageProvider>

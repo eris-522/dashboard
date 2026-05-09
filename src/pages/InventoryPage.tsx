@@ -16,7 +16,7 @@ export function InventoryPage() {
   const [newItem, setNewItem] = React.useState<Partial<InventoryItem>>({
     name: '',
     category: 'Equipment',
-    stock: 0,
+    stock: undefined,
     minStock: 10,
     unit: 'pcs'
   });
@@ -36,7 +36,7 @@ export function InventoryPage() {
     });
 
     setIsAddModalOpen(false);
-    setNewItem({ name: '', category: 'Equipment', stock: 0, minStock: 10, unit: 'pcs' });
+    setNewItem({ name: '', category: 'Equipment', stock: undefined, minStock: 10, unit: 'pcs' });
   };
 
   /**
@@ -233,7 +233,7 @@ export function InventoryPage() {
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-natural-border flex items-center justify-between">
-              <h3 className="text-xl font-serif font-bold text-natural-text-main">Add New SKU</h3>
+              <h3 className="text-xl font-serif font-bold text-natural-text-main">Add New Item</h3>
               <button onClick={() => setIsAddModalOpen(false)} className="p-1 hover:bg-natural-bg rounded-lg">
                 <X className="w-5 h-5 text-natural-text-light" />
               </button>
@@ -277,8 +277,8 @@ export function InventoryPage() {
                   <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">Current Stock</label>
                   <input 
                     type="number"
-                    value={newItem.stock}
-                    onChange={(e) => setNewItem({...newItem, stock: Number(e.target.value)})}
+                    value={newItem.stock ?? ''}
+                    onChange={(e) => setNewItem({...newItem, stock: e.target.value === '' ? undefined : Number(e.target.value)})}
                     className="w-full px-4 py-2 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:bg-white"
                   />
                 </div>
@@ -286,8 +286,8 @@ export function InventoryPage() {
                   <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">Min. Required</label>
                   <input 
                     type="number"
-                    value={newItem.minStock}
-                    onChange={(e) => setNewItem({...newItem, minStock: Number(e.target.value)})}
+                    value={newItem.minStock ?? ''}
+                    onChange={(e) => setNewItem({...newItem, minStock: e.target.value === '' ? undefined : Number(e.target.value)})}
                     className="w-full px-4 py-2 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:bg-white"
                   />
                 </div>
@@ -402,4 +402,3 @@ export function InventoryPage() {
     </div>
   );
 }
-
