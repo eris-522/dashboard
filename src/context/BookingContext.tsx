@@ -40,7 +40,7 @@ interface BookingContextType {
   addBooking: (booking: Omit<Booking, "id">) => void;
   updateBookingStatus: (id: number, status: Booking["status"]) => void;
   removeBooking: (id: number) => void;
-  refreshBookings: () => Promise<void>;
+  refreshBookings: (silent?: boolean) => Promise<void>;
 }
 
 const BookingContext = createContext<BookingContextType | undefined>(undefined);
@@ -56,31 +56,36 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refreshBookings();
 
+    // Fallback polling: Refresh bookings silently every 10 seconds 
+    // in case real-time WebSockets fail or drop.
+    const intervalId = setInterval(() => refreshBookings(true), 10000);
+
     // Subscribe to real-time changes on the bookings table
-    const subscription = supabase
+    const channel = supabase
       .channel("bookings-channel-context")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "bookings" },
         (payload) => {
           console.log("Booking change detected in context:", payload);
-          refreshBookings(); // Refresh data when any booking changes
+          refreshBookings(true); // Refresh data silently when any booking changes
         },
       )
       .subscribe();
 
     // Cleanup subscription on unmount
     return () => {
-      subscription.unsubscribe();
+      clearInterval(intervalId);
+      supabase.removeChannel(channel);
     };
   }, []);
 
   /**
    * Fetches all active bookings from Supabase
    */
-  const refreshBookings = async () => {
+  const refreshBookings = async (silent = false) => {
     try {
-      setIsLoading(true);
+      if (!silent) setIsLoading(true);
       setError(null);
 
       const { data: bData, error: bError } = await supabase

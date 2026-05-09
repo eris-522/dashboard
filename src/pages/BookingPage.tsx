@@ -77,8 +77,9 @@ export function BookingPage() {
   const [selectedBooking, setSelectedBooking] = useState<any | null>(null);
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordError, setPasswordError] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
   const [confirmAction, setConfirmAction] = useState<{
-    type: "confirm" | "reject" | "archive" | "create";
+    type: "confirm" | "cancel" | "archive" | "create";
     bookingId?: string;
     bookingName: string;
   } | null>(null);
@@ -99,6 +100,7 @@ export function BookingPage() {
   useEffect(() => {
     setConfirmPassword("");
     setPasswordError(false);
+    setCancelReason("");
   }, [confirmAction]);
 
   useEffect(() => {
@@ -249,6 +251,9 @@ export function BookingPage() {
       } else if (field === "created_at") {
         valA = new Date(a.created_at || 0).getTime();
         valB = new Date(b.created_at || 0).getTime();
+      } else if (field === "status") {
+        valA = a.status || "Pending";
+        valB = b.status || "Pending";
       }
 
       if (valA === undefined || valA === null) valA = "";
@@ -288,7 +293,7 @@ export function BookingPage() {
     if (!confirmAction) return;
     const { type, bookingId } = confirmAction;
 
-    if (["confirm", "reject", "archive"].includes(type) && !confirmPassword) {
+    if (["confirm", "cancel", "archive"].includes(type) && !confirmPassword) {
       setPasswordError(true);
       return;
     }
@@ -298,10 +303,10 @@ export function BookingPage() {
         .from("bookings")
         .update({ status: "Confirmed" })
         .eq("id", bookingId);
-    } else if (type === "reject" && bookingId) {
+    } else if (type === "cancel" && bookingId) {
       await supabase
         .from("bookings")
-        .update({ status: "Rejected" })
+        .update({ status: "Cancelled", cancellation_reason: cancelReason })
         .eq("id", bookingId);
     } else if (type === "archive" && bookingId) {
       await supabase
@@ -421,7 +426,7 @@ export function BookingPage() {
               <option>All Status</option>
               <option>Confirmed</option>
               <option>Pending</option>
-              <option>Rejected</option>
+              <option>Cancelled</option>
               <option>Archived</option>
             </select>
             <div className="h-6 w-px bg-natural-border mx-1" />
@@ -528,8 +533,22 @@ export function BookingPage() {
                       )}
                     </div>
                   </th>
-                  <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border">
-                    Status
+                  <th
+                    className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
+                    onClick={() => handleSort("status")}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      Status
+                      {sortConfig.field === "status" ? (
+                        sortConfig.order === "asc" ? (
+                          <ArrowUp className="w-3 h-3 text-natural-accent" />
+                        ) : (
+                          <ArrowDown className="w-3 h-3 text-natural-accent" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-30" />
+                      )}
+                    </div>
                   </th>
                   <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border">
                     Actions
@@ -615,7 +634,7 @@ export function BookingPage() {
                             ? "bg-green-50 text-green-700 border-green-200"
                             : (booking.status || "Pending") === "Pending"
                               ? "bg-orange-50 text-orange-700 border-orange-200"
-                              : (booking.status || "Pending") === "Rejected"
+                              : (booking.status || "Pending") === "Cancelled"
                                 ? "bg-red-50 text-red-700 border-red-200"
                                 : (booking.status || "Pending") === "Archived"
                                   ? "bg-gray-100 text-gray-600 border-gray-300"
@@ -648,13 +667,13 @@ export function BookingPage() {
                                 <button
                                   onClick={() =>
                                     setConfirmAction({
-                                      type: "reject",
+                                      type: "cancel",
                                       bookingId: booking.id,
                                       bookingName: booking.profiles?.name || booking.profiles?.full_name || "Unknown User",
                                     })
                                   }
                                   className="p-1.5 text-orange-600 hover:bg-orange-50 rounded-lg transition-all"
-                                  title="Reject Booking"
+                                  title="Cancel Booking"
                                 >
                                   <XCircle className="w-4 h-4" />
                                 </button>
@@ -1075,7 +1094,7 @@ export function BookingPage() {
                     "text-[0.6rem] font-bold uppercase tracking-widest px-3 py-1.5 rounded-full border",
                     (selectedBooking.status || "Pending") === "Confirmed"
                       ? "bg-green-50 text-green-700 border-green-200"
-                      : (selectedBooking.status || "Pending") === "Rejected"
+                      : (selectedBooking.status || "Pending") === "Cancelled"
                         ? "bg-red-50 text-red-700 border-red-200"
                         : (selectedBooking.status || "Pending") === "Archived"
                           ? "bg-gray-100 text-gray-600 border-gray-300"
@@ -1208,14 +1227,14 @@ export function BookingPage() {
                   <button
                     onClick={() =>
                       setConfirmAction({
-                        type: "reject",
+                        type: "cancel",
                         bookingId: selectedBooking.id,
                         bookingName: selectedBooking.profiles?.name || selectedBooking.profiles?.full_name || "Unknown User",
                       })
                     }
                     className="flex-1 border border-orange-200 text-orange-600 bg-orange-50/50 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-orange-50 transition-all"
                   >
-                    Reject
+                    Cancel
                   </button>
                 </>
               )}
@@ -1241,7 +1260,7 @@ export function BookingPage() {
                   "w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4",
                   confirmAction.type === "confirm"
                     ? "bg-green-100"
-                    : confirmAction.type === "reject"
+                    : confirmAction.type === "cancel"
                       ? "bg-orange-100"
                       : confirmAction.type === "archive"
                         ? "bg-gray-100"
@@ -1251,7 +1270,7 @@ export function BookingPage() {
                 {confirmAction.type === "confirm" && (
                   <CheckCircle2 className="w-8 h-8 text-green-600" />
                 )}
-                {confirmAction.type === "reject" && (
+                {confirmAction.type === "cancel" && (
                   <XCircle className="w-8 h-8 text-orange-600" />
                 )}
                 {confirmAction.type === "archive" && (
@@ -1270,33 +1289,48 @@ export function BookingPage() {
                   : `Are you sure you want to ${confirmAction.type} the booking for ${confirmAction.bookingName}?`}
               </p>
 
-              {["confirm", "reject", "archive"].includes(
+              {["confirm", "cancel", "archive"].includes(
                 confirmAction.type,
               ) && (
-                <div className="mb-6 space-y-2 text-left animate-in slide-in-from-bottom-2 duration-300">
-                  <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest pl-1">
-                    Security Verification
-                  </label>
-                  <input
-                    type="password"
-                    value={confirmPassword}
-                    onChange={(e) => {
-                      setConfirmPassword(e.target.value);
-                      setPasswordError(false);
-                    }}
-                    placeholder="Enter admin password to proceed"
-                    className={cn(
-                      "w-full px-4 py-2.5 bg-natural-bg/50 border rounded-xl text-sm transition-all focus:outline-none focus:bg-white focus:ring-2",
-                      passwordError
-                        ? "border-red-300 focus:ring-red-100"
-                        : "border-natural-border focus:ring-natural-accent/10",
-                    )}
-                  />
-                  {passwordError && (
-                    <p className="text-[10px] font-bold text-red-500 uppercase tracking-tighter pl-1">
-                      Password is required to proceed.
-                    </p>
+                <div className="mb-6 space-y-4 text-left animate-in slide-in-from-bottom-2 duration-300">
+                  {confirmAction.type === "cancel" && (
+                    <div className="space-y-2">
+                      <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest pl-1">
+                        Reason for Cancellation
+                      </label>
+                      <textarea
+                        value={cancelReason}
+                        onChange={(e) => setCancelReason(e.target.value)}
+                        placeholder="Enter the reason for cancelling..."
+                        className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm transition-all focus:outline-none focus:bg-white focus:ring-2 focus:ring-natural-accent/10 resize-none min-h-[80px]"
+                      />
+                    </div>
                   )}
+                  <div className="space-y-2">
+                    <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest pl-1">
+                      Security Verification
+                    </label>
+                    <input
+                      type="password"
+                      value={confirmPassword}
+                      onChange={(e) => {
+                        setConfirmPassword(e.target.value);
+                        setPasswordError(false);
+                      }}
+                      placeholder="Enter admin password to proceed"
+                      className={cn(
+                        "w-full px-4 py-2.5 bg-natural-bg/50 border rounded-xl text-sm transition-all focus:outline-none focus:bg-white focus:ring-2",
+                        passwordError
+                          ? "border-red-300 focus:ring-red-100"
+                          : "border-natural-border focus:ring-natural-accent/10",
+                      )}
+                    />
+                    {passwordError && (
+                      <p className="text-[10px] font-bold text-red-500 uppercase tracking-tighter pl-1">
+                        Password is required to proceed.
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -1307,7 +1341,7 @@ export function BookingPage() {
                     "w-full py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest text-white transition-all shadow-sm",
                     confirmAction.type === "confirm"
                       ? "bg-green-600 hover:bg-green-700"
-                      : confirmAction.type === "reject"
+                      : confirmAction.type === "cancel"
                         ? "bg-orange-600 hover:bg-orange-700"
                         : confirmAction.type === "archive"
                           ? "bg-gray-600 hover:bg-gray-700"

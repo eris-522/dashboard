@@ -18,7 +18,7 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
   const [expandedId, setExpandedId] = React.useState<number | null>(null);
 
   const recentBookings = bookings
-    .filter((b) => (b.status || "Pending") !== "Archived" && !dismissedIds.includes(b.id))
+    .filter((b) => (b.status || "Pending") !== "Archived")
     .slice(0, 5);
 
   const pendingCount = bookings.filter((b) => {
@@ -45,15 +45,9 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
           >
             <div className="p-4 border-b border-natural-border flex items-center justify-between bg-natural-bg/30">
               <div className="flex items-center gap-2">
-                <Bell className="w-4 h-4 text-natural-accent" />
                 <h3 className="text-sm font-bold text-natural-text-main uppercase tracking-widest">Recent Bookings</h3>
               </div>
               <div className="flex items-center gap-3">
-                {pendingCount > 0 && (
-                  <span className="text-[10px] font-bold bg-red-100 text-red-600 px-2 py-0.5 rounded-full">
-                    {pendingCount} New
-                  </span>
-                )}
                 <button onClick={onClose} className="p-1 hover:bg-natural-bg rounded-lg transition-colors">
                   <X className="w-4 h-4 text-natural-text-light" />
                 </button>
@@ -68,7 +62,7 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
                 </div>
               ) : (
                 recentBookings.map((booking) => {
-                  const isPending = (booking.status || "Pending") === "Pending" || booking.status === "Inquiry";
+                  const isPending = ((booking.status || "Pending") === "Pending" || booking.status === "Inquiry") && !dismissedIds.includes(booking.id);
                   const isExpanded = expandedId === booking.id;
 
                   return (
@@ -78,7 +72,10 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
                         "p-4 hover:bg-natural-bg/30 transition-all cursor-pointer group",
                         isPending && "bg-natural-accent/5"
                       )}
-                      onClick={() => setExpandedId(isExpanded ? null : booking.id)}
+                      onClick={() => {
+                        setExpandedId(isExpanded ? null : booking.id);
+                        if (isPending && onDismiss) onDismiss(booking.id);
+                      }}
                     >
                       <div className="flex justify-between items-start">
                         <div>
@@ -93,16 +90,18 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (onDismiss) onDismiss(booking.id);
-                            }}
-                            className="opacity-0 group-hover:opacity-100 p-1 text-natural-text-light hover:text-green-600 hover:bg-green-50 rounded transition-all"
-                            title="Mark as read"
-                          >
-                            <CheckCircle className="w-3.5 h-3.5" />
-                          </button>
+                          {isPending && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (onDismiss) onDismiss(booking.id);
+                              }}
+                              className="opacity-0 group-hover:opacity-100 p-1 text-natural-text-light hover:text-green-600 hover:bg-green-50 rounded transition-all"
+                              title="Mark as read"
+                            >
+                              <CheckCircle className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           <span className="text-[9px] font-medium bg-natural-accent/10 text-natural-accent px-1.5 py-0.5 rounded">
                             {isExpanded ? "Hide" : "View"}
                           </span>

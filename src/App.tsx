@@ -61,9 +61,27 @@ function Dashboard({ onNavigate }: { onNavigate: (id: string) => void }) {
 function AppContent() {
   const [activeTab, setActiveTab] = React.useState("dashboard");
   const [isNotificationOpen, setIsNotificationOpen] = React.useState(false);
-  const [dismissedIds, setDismissedIds] = React.useState<number[]>([]);
   const { currentUser, logout } = useUser();
   const { bookings } = useBooking();
+
+  const [dismissedIds, setDismissedIds] = React.useState<number[]>(() => {
+    if (!currentUser) return [];
+    const saved = localStorage.getItem(`dismissedBookingIds_${currentUser.id}`);
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return [];
+      }
+    }
+    return [];
+  });
+
+  React.useEffect(() => {
+    if (currentUser) {
+      localStorage.setItem(`dismissedBookingIds_${currentUser.id}`, JSON.stringify(dismissedIds));
+    }
+  }, [dismissedIds, currentUser]);
 
   const pendingCount = bookings.filter((b) => {
     const status = b.status || "Pending";
@@ -144,7 +162,9 @@ function AppContent() {
                         >
                           <Bell className="w-4 h-4 text-natural-text-main" />
                           {pendingCount > 0 && (
-                            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-white animate-pulse" />
+                            <span className="absolute -top-1.5 -right-1.5 flex items-center justify-center min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[9px] font-bold rounded-full border border-white shadow-sm">
+                              {pendingCount > 99 ? '99+' : pendingCount}
+                            </span>
                           )}
                         </button>
 

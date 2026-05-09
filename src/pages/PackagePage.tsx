@@ -22,7 +22,6 @@ import { supabase } from "../utils/supabase"; // Database connection
 export interface CateringPackage {
   id: string;
   name: string;
-  type: string;
   pax: string;
   price: string;
   tag?: string;
@@ -125,7 +124,6 @@ export function PackagePage() {
       const query = searchQuery.toLowerCase();
       const matchesSearch =
         pkg.name.toLowerCase().includes(query) ||
-        (pkg.type || "").toLowerCase().includes(query) ||
         (pkg.tag || "").toLowerCase().includes(query);
 
       const matchesStatus = showArchived ? pkg.status === "Archived" : pkg.status !== "Archived";
@@ -161,7 +159,6 @@ export function PackagePage() {
       inclusions: [],
       status: "Available",
       tag: "",
-      type: "Social",
     });
     setIsModalOpen(true);
   };
@@ -313,7 +310,6 @@ export function PackagePage() {
         const { error } = await supabase.from("packages").insert([
           {
             name: editingPackage?.name,
-            type: editingPackage?.type,
             pax: editingPackage?.pax,
             price: editingPackage?.price ? String(editingPackage.price).replace(/,/g, "") : null,
             tag: editingPackage?.tag,
@@ -332,7 +328,6 @@ export function PackagePage() {
           .from("packages")
           .update({
             name: editingPackage?.name,
-            type: editingPackage?.type,
             pax: editingPackage?.pax,
             price: editingPackage?.price ? String(editingPackage.price).replace(/,/g, "") : null,
             tag: editingPackage?.tag,
@@ -391,7 +386,7 @@ export function PackagePage() {
         <div className="relative w-full md:w-80">
           <input
             type="text"
-            placeholder="Search packages by name, type..."
+            placeholder="Search packages by name, tag..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-9 pr-4 py-2 bg-natural-bg/50 border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white transition-all shadow-xs"
@@ -451,10 +446,7 @@ export function PackagePage() {
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-bold text-natural-accent uppercase tracking-widest">
-                          {pkg.type}
-                        </span>
-                        {pkg.tag && (
+                        {pkg.tag && pkg.tag !== "None" && (
                           <span className="flex items-center gap-1 text-[9px] font-bold bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded uppercase tracking-tighter">
                             <Sparkles className="w-2.5 h-2.5 fill-amber-600" />{" "}
                             {pkg.tag}
@@ -581,28 +573,6 @@ export function PackagePage() {
                         />
                       </div>
 
-                      <div className="grid grid-cols-3 gap-3 items-center">
-                        <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest col-span-1">
-                          Event Type
-                        </label>
-                        <select
-                          value={editingPackage.type || "Social"}
-                          onChange={(e) =>
-                            setEditingPackage({
-                              ...editingPackage,
-                              type: e.target.value,
-                            })
-                          }
-                          className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 col-span-2 cursor-pointer"
-                        >
-                          <option value="Social">Social</option>
-                          <option value="Corporate">Corporate</option>
-                          <option value="Wedding">Wedding</option>
-                          <option value="Debut">Debut</option>
-                          <option value="Kids Party">Kids Party</option>
-                        </select>
-                      </div>
-
                       {/* Guest range (separate row) */}
                       <div className="grid grid-cols-3 gap-3 items-center">
                         <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest col-span-1">
@@ -671,6 +641,7 @@ export function PackagePage() {
                           <option value="" disabled>
                             Select status
                           </option>
+                          <option value="None">None</option>
                           <option>Popular</option>
                           <option>Premium</option>
                           <option>Budget-Friendly</option>
@@ -695,6 +666,7 @@ export function PackagePage() {
                         >
                           <option value="Available">Available</option>
                           <option value="Not Available">Not Available</option>
+                          <option value="None">None</option>
                         </select>
                       </div>
                     </div>
@@ -881,11 +853,8 @@ export function PackagePage() {
                       <div className="p-4 bg-natural-bg/5 border-b border-natural-border/50">
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <p className="text-[10px] font-bold text-natural-accent uppercase tracking-widest">
-                              {editingPackage.type || "Event Type"}
-                            </p>
-                            <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest mt-1">
-                              {editingPackage.tag ? editingPackage.tag : "Tag: —"}
+                            <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest">
+                              {editingPackage.tag && editingPackage.tag !== "None" ? editingPackage.tag : "Tag: —"}
                             </p>
                             <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest mt-1">
                               Status: <span className={editingPackage.status === "Not Available" ? "text-orange-600" : "text-green-600"}>{editingPackage.status || "Available"}</span>
