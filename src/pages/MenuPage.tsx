@@ -101,6 +101,7 @@ export function MenuPage() {
   const handleAddClick = () => {
     setEditingItem(null);
     setFormData({ name: "", category: "Main Course", sub_category: "", status: "Available" });
+    setFormError(null);
     setIsModalOpen(true);
   };
 
@@ -113,6 +114,7 @@ export function MenuPage() {
       sub_category: item.sub_category || "",
       status: item.status === "Active" ? "Available" : (item.status || "Available"),
     });
+    setFormError(null);
     setIsModalOpen(true);
   };
 
@@ -127,6 +129,23 @@ export function MenuPage() {
 
   // Transitions the user from the input form to the final validation check before altering the database
   const handleConfirmSave = () => {
+    // Prevent names with numbers or special characters (allows letters, spaces, hyphens, apostrophes, and ñ)
+    const nameRegex = /^[a-zA-Z\sñÑ\-']+$/;
+    if (!nameRegex.test(formData.name)) {
+      setFormError("Dish name cannot contain numbers or special characters.");
+      return;
+    }
+
+    const candidate = normalizeDishName(formData.name);
+    const duplicate = menuItems.some(
+      (item) => item.id !== editingItem?.id && normalizeDishName(item.name) === candidate
+    );
+    if (duplicate) {
+      setFormError("A dish with this name already exists in the catalog.");
+      return;
+    }
+
+    setFormError(null);
     setIsModalOpen(false);
     setConfirmAction({
       type: editingItem ? "edit" : "create",
@@ -146,17 +165,6 @@ export function MenuPage() {
     setFormError(null);
 
     if (confirmAction.type === "create") {
-      const candidate = normalizeDishName(formData.name);
-
-      const duplicate = menuItems.some(
-        (item) => normalizeDishName(item.name) === candidate,
-      );
-
-      if (duplicate) {
-        setFormError("A dish with this name already exists in the catalog.");
-        return;
-      }
-
       // Inserts a new row into the menu_items table
       const { error } = await supabase.from("menu_items").insert([
         {
@@ -172,19 +180,6 @@ export function MenuPage() {
         return;
       }
     } else if (confirmAction.type === "edit" && confirmAction.itemId) {
-      const candidate = normalizeDishName(formData.name);
-
-      const duplicate = menuItems.some(
-        (item) =>
-          item.id !== confirmAction.itemId &&
-          normalizeDishName(item.name) === candidate,
-      );
-
-      if (duplicate) {
-        setFormError("Another dish with this name already exists.");
-        return;
-      }
-
       // Updates an existing row in the menu_items table using its unique ID
       const { error } = await supabase
         .from("menu_items")
@@ -221,6 +216,7 @@ export function MenuPage() {
     if (addAnother) {
       setConfirmAction(null);
       setFormData({ name: "", category: formData.category, sub_category: formData.sub_category, status: "Available" }); // Keep same category selected for bulk adding
+      setFormError(null);
       setIsModalOpen(true);
     } else {
       setConfirmAction(null);
@@ -478,6 +474,12 @@ export function MenuPage() {
             </div>
 
             <div className="p-6 space-y-6">
+              {formError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl">
+                  <p className="text-xs font-bold text-red-600">{formError}</p>
+                </div>
+              )}
+
               <div className="space-y-2">
                 <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
                   Dish Name
@@ -485,9 +487,10 @@ export function MenuPage() {
                 <input
                   type="text"
                   value={formData.name}
-                  onChange={(e) =>
-                    setFormData({ ...formData, name: e.target.value })
-                  }
+                  onChange={(e) => {
+                    setFormData({ ...formData, name: e.target.value });
+                    setFormError(null);
+                  }}
                   placeholder="e.g. Adobo Special"
                   className="w-full px-4 py-2.5 bg-natural-bg border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 transition-all font-medium"
                 />

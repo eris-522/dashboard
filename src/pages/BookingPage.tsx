@@ -224,7 +224,7 @@ export function BookingPage() {
       const currentStatus = booking.status || "Pending";
       const matchesStatus =
         statusFilter === "All Status"
-          ? currentStatus !== "Archived"
+          ? currentStatus !== "Archived" && currentStatus !== "Cancelled"
           : currentStatus === statusFilter;
 
 
@@ -252,8 +252,14 @@ export function BookingPage() {
         valA = new Date(a.created_at || 0).getTime();
         valB = new Date(b.created_at || 0).getTime();
       } else if (field === "status") {
-        valA = a.status || "Pending";
-        valB = b.status || "Pending";
+        const statusOrder: Record<string, number> = {
+          Confirmed: 1,
+          Pending: 2,
+          Cancelled: 3,
+          Archived: 4,
+        };
+        valA = statusOrder[a.status || "Pending"] || 5;
+        valB = statusOrder[b.status || "Pending"] || 5;
       }
 
       if (valA === undefined || valA === null) valA = "";

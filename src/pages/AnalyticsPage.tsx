@@ -172,11 +172,11 @@ export function AnalyticsPage() {
            <h3 className="font-serif font-bold text-lg text-natural-text-main mb-6">Account Overview</h3>
            <div className="grid grid-cols-2 gap-4">
               <div className="p-4 bg-natural-bg/20 rounded-xl border border-natural-border text-center">
-                <span className="text-2xl font-bold font-serif text-natural-accent">{users.length}</span>
+                <span className="text-2xl font-bold font-serif text-natural-accent">{users.filter((u) => u.id !== 0).length}</span>
                 <p className="text-[0.6rem] font-bold text-natural-text-light uppercase tracking-widest mt-1">Total Registered Users</p>
               </div>
               <div className="p-4 bg-natural-bg/20 rounded-xl border border-natural-border text-center">
-                <span className="text-2xl font-bold font-serif text-natural-accent">{users.filter(u => u.status === 'Active').length}</span>
+                <span className="text-2xl font-bold font-serif text-natural-accent">{users.filter((u) => u.id !== 0 && u.status === 'Active').length}</span>
                 <p className="text-[0.6rem] font-bold text-natural-text-light uppercase tracking-widest mt-1">Active Accounts</p>
               </div>
            </div>

@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState, ReactNo
 import { supabase } from '../utils/supabase';
 
 export interface User {
-  id: number;
+  id: string | number;
   name: string;
   email: string;
   password?: string;
@@ -16,13 +16,13 @@ interface UserContextType {
   users: User[];
   currentUser: User | null;
   isLoading: boolean;
-  refreshUsers: () => Promise<void>;
+  refreshUsers: (silent?: boolean) => Promise<void>;
   activeUserCount: number;
   totalUserCount: number;
   addUser: (user: Omit<User, 'id' | 'joined'>) => void;
-  updateUser: (id: number, userData: Partial<User>) => void;
-  archiveUser: (id: number) => void;
-  removeUser: (id: number) => void;
+  updateUser: (id: string | number, userData: Partial<User>) => void;
+  archiveUser: (id: string | number) => void;
+  removeUser: (id: string | number) => void;
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
 }
@@ -42,8 +42,8 @@ const DEFAULT_ADMIN: User = {
 
 function toUser(row: any): User {
   return {
-    id: typeof row?.id === 'number' ? row.id : Number(row?.id ?? 0),
-    name: row?.name ?? '',
+    id: row?.id ?? 0,
+    name: row?.name || row?.full_name || row?.fullName || '',
     email: row?.email ?? '',
     password: row?.password,
     role: row?.role ?? 'Customer',
@@ -58,9 +58,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const refreshUsers = async () => {
+  const refreshUsers = async (silent = false) => {
     try {
-      setIsLoading(true);
+      if (!silent) setIsLoading(true);
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
@@ -76,38 +76,58 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
         // Preserve the local DEFAULT_ADMIN so login still works even if Supabase
         // doesn't contain (or doesn't include a matching password for) that admin.
-        // Also prevent duplicates by email.
-        const mergedByEmail = new Map<string, User>();
-        mergedByEmail.set(DEFAULT_ADMIN.email.toLowerCase(), DEFAULT_ADMIN);
+        // Deduplicate by ID to ensure all users are counted properly
+        const mergedById = new Map<string | number, User>();
+        mergedById.set(DEFAULT_ADMIN.id, DEFAULT_ADMIN);
 
         for (const u of mapped) {
-          if (!u?.email) continue;
-          mergedByEmail.set(u.email.toLowerCase(), u);
+          if (u.id === 0 && u.email !== DEFAULT_ADMIN.email) continue;
+          mergedById.set(u.id, u);
         }
 
-        // Ensure DEFAULT_ADMIN stays present even if Supabase has a row with the
-        // same email but missing required fields.
-        if (!mergedByEmail.has(DEFAULT_ADMIN.email.toLowerCase())) {
-          mergedByEmail.set(DEFAULT_ADMIN.email.toLowerCase(), DEFAULT_ADMIN);
+        // Ensure DEFAULT_ADMIN stays present
+        if (!mergedById.has(DEFAULT_ADMIN.id)) {
+          mergedById.set(DEFAULT_ADMIN.id, DEFAULT_ADMIN);
         }
 
-        setUsers(Array.from(mergedByEmail.values()));
+        setUsers(Array.from(mergedById.values()));
       }
     } catch (err) {
       console.error('Unexpected error fetching profiles:', err);
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   };
 
   useEffect(() => {
     refreshUsers();
+
+    // Fallback polling: Refresh users silently every 10 seconds 
+    // in case real-time WebSockets fail or drop.
+    const intervalId = setInterval(() => refreshUsers(true), 10000);
+
+    // Subscribe to real-time changes on the profiles table so Dashboard metrics stay synced
+    const channel = supabase
+      .channel("users-channel-context")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "profiles" },
+        () => {
+          refreshUsers(true);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      clearInterval(intervalId);
+      supabase.removeChannel(channel);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const totalUserCount = users.length;
+  const totalUserCount = users.filter((u) => u.id !== 0).length;
   const activeUserCount = useMemo(
-    () => users.filter((u) => (u.status ?? '').toLowerCase() === 'active').length,
+    () => users.filter((u) => u.id !== 0 && u.status === 'Active').length,
     [users],
   );
 
@@ -118,13 +138,13 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const addUser = (userData: Omit<User, 'id' | 'joined'>) => {
     const newUser: User = {
       ...userData,
-      id: users.length > 0 ? Math.max(...users.map((u) => u.id)) + 1 : 1,
+      id: users.length > 0 ? Math.max(...users.map((u) => typeof u.id === 'number' ? u.id : 0)) + 1 : 1,
       joined: new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
     };
     setUsers((prev) => [...prev, newUser]);
   };
 
-  const updateUser = (id: number, userData: Partial<User>) => {
+  const updateUser = (id: string | number, userData: Partial<User>) => {
     if (id === 0) return; // Protect admin
     setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, ...userData } : u)));
     if (currentUser?.id === id) {
@@ -132,12 +152,12 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const archiveUser = (id: number) => {
+  const archiveUser = (id: string | number) => {
     if (id === 0) return; // Protect admin
     setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, status: 'Archived' } : u)));
   };
 
-  const removeUser = (id: number) => {
+  const removeUser = (id: string | number) => {
     if (id === 0) return; // Protect admin
     setUsers((prev) => prev.filter((u) => u.id !== id));
   };
