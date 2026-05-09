@@ -14,7 +14,7 @@ import { InventoryPage } from "./pages/InventoryPage";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { AuditTrailPage } from "./pages/AuditTrailPage";
 import { SettingsPage } from "./pages/SettingsPage";
-import { Search, Bell, Mail } from "lucide-react";
+import { Bell, Mail } from "lucide-react";
 import { NotificationCenter } from "./components/NotificationCenter";
 import { cn } from "./lib/utils";
 import { InventoryProvider } from "./context/InventoryContext";
@@ -134,15 +134,6 @@ function MainApp() {
                     </div>
 
                     <div className="flex items-center gap-6">
-                      <div className="relative">
-                        <input
-                          type="text"
-                          placeholder="Search resources..."
-                          className="pl-9 pr-4 py-2 bg-white border border-natural-border rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-natural-accent/10 transition-all w-60 shadow-xs placeholder:text-natural-text-light/50"
-                        />
-                        <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-natural-text-light" />
-                      </div>
-
                       <div className="flex items-center gap-2 relative">
                         <button
                           onClick={() =>

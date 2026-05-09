@@ -17,6 +17,7 @@ import {
   Lock,
   Eye,
   EyeOff,
+  Phone,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { supabase } from "../utils/supabase";
@@ -36,6 +37,8 @@ export interface User {
   role: string;
   status: string;
   created_at: string;
+  phone?: string;
+  phone_number?: string;
 }
 
 export function UserPage() {
@@ -53,7 +56,7 @@ export function UserPage() {
   const [formData, setFormData] = useState<
     Partial<User> & { password?: string }
   >({});
-  const [isCensored, setIsCensored] = useState(true);
+  const [visibleEmails, setVisibleEmails] = useState<Record<string, boolean>>({});
   const [confirmAction, setConfirmAction] = useState<{
     type: "create" | "edit" | "archive";
     userId?: string;
@@ -110,9 +113,16 @@ export function UserPage() {
     setUsers(normalized);
   };
 
-  const censorEmail = (email: string) => {
+  const toggleEmailVisibility = (id: string) => {
+    setVisibleEmails((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
+
+  const censorEmail = (email: string, isVisible: boolean) => {
     if (!email) return "";
-    if (!isCensored) return email;
+    if (isVisible) return email;
     const [name, domain] = email.split("@");
     if (!name || !domain) return email;
     return `${name[0]}${"*".repeat(Math.min(name.length - 1, 5))}@${domain}`;
@@ -255,7 +265,7 @@ export function UserPage() {
         email,
         name: trimmedName,
         full_name: trimmedName,
-        role: formData.role || "Staff",
+        role: formData.role || "Customer",
         status: formData.status || "Active",
       };
 
@@ -333,14 +343,14 @@ export function UserPage() {
             User Management
           </h2>
           <p className="text-natural-text-light text-[0.8rem] font-medium uppercase tracking-wider">
-            Manage your staff and clients
+            Manage your clients
           </p>
         </div>
 
         <button
           onClick={() => {
             setEditingUser(null);
-            setFormData({ role: "Staff", status: "Active" });
+            setFormData({ role: "Customer", status: "Active" });
             setIsModalOpen(true);
           }}
           className="flex items-center gap-2 bg-natural-accent text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-natural-accent/90 transition-all shadow-sm"
@@ -364,18 +374,6 @@ export function UserPage() {
           </div>
 
           <div className="flex items-center gap-3 w-full md:w-auto">
-            <button
-              onClick={() => setIsCensored(!isCensored)}
-              className="flex items-center gap-2 px-3 py-2 border border-natural-border rounded-lg text-[0.6rem] font-bold text-natural-text-main hover:bg-natural-bg transition-all uppercase tracking-widest shadow-xs"
-              title={isCensored ? "Show Emails" : "Censor Emails"}
-            >
-              {isCensored ? (
-                <Eye className="w-3.5 h-3.5" />
-              ) : (
-                <EyeOff className="w-3.5 h-3.5" />
-              )}
-              {isCensored ? "Show" : "Hide"}
-            </button>
             <select
               value={roleFilter}
               onChange={(e) => setRoleFilter(e.target.value)}
@@ -384,7 +382,6 @@ export function UserPage() {
               <option>All Roles</option>
               <option>Customer</option>
               <option>Owner</option>
-              <option>Staff</option>
             </select>
             <select
               value={statusFilter}
@@ -421,6 +418,14 @@ export function UserPage() {
                 </th>
                 <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border">
                   Contact
+                </th>
+                <th
+                  className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
+                  onClick={() => handleSort("created_at")}
+                >
+                  <div className="flex items-center">
+                    Date Joined <SortIcon field="created_at" />
+                  </div>
                 </th>
                 <th
                   className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
@@ -466,7 +471,7 @@ export function UserPage() {
                             "Unnamed User"}
                         </p>
                         <p className="text-[0.7rem] text-natural-text-light font-medium flex items-center gap-1">
-                          <Mail className="w-3 h-3" /> {censorEmail(user.email)}
+                          <Mail className="w-3 h-3" /> {censorEmail(user.email, !!visibleEmails[user.id])}
                         </p>
                       </div>
                     </div>
@@ -475,6 +480,13 @@ export function UserPage() {
                     <span className="text-[0.65rem] font-bold uppercase tracking-widest text-natural-sidebar px-2.5 py-1 bg-natural-sidebar/5 rounded-md">
                       {user.role || "Unassigned"}
                     </span>
+                  </td>
+                  <td className="px-6 py-4 border-b border-natural-border/50">
+                    <div className="space-y-1">
+                      <p className="text-[0.65rem] text-natural-text-light font-medium flex items-center gap-1.5 opacity-70">
+                        <Phone className="w-3.5 h-3.5" /> {user.phone_number || user.phone || "No phone"}
+                      </p>
+                    </div>
                   </td>
                   <td className="px-6 py-4 border-b border-natural-border/50">
                     <div className="space-y-1">
@@ -501,7 +513,18 @@ export function UserPage() {
                     </span>
                   </td>
                   <td className="px-6 py-4 border-b border-natural-border/50 text-right">
-                    <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity min-h-[32px]">
+                    <div className="flex items-center justify-end gap-2 min-h-[32px]">
+                      <button
+                        onClick={() => toggleEmailVisibility(user.id)}
+                        className="p-1.5 text-natural-text-light hover:text-natural-text-main hover:bg-white hover:shadow-xs rounded-lg transition-all"
+                        title={visibleEmails[user.id] ? "Hide Email" : "Show Email"}
+                      >
+                        {visibleEmails[user.id] ? (
+                          <EyeOff className="w-4 h-4" />
+                        ) : (
+                          <Eye className="w-4 h-4" />
+                        )}
+                      </button>
                       {user.status !== "Archived" ? (
                         <>
                           <button
@@ -618,7 +641,7 @@ export function UserPage() {
                     User Role
                   </label>
                   <select
-                    value={formData.role || "Staff"}
+                    value={formData.role || "Customer"}
                     onChange={(e) =>
                       setFormData({ ...formData, role: e.target.value })
                     }
@@ -626,7 +649,6 @@ export function UserPage() {
                   >
                     <option>Customer</option>
                     <option>Owner</option>
-                    <option>Staff</option>
                   </select>
                 </div>
                 <div className="space-y-1.5">

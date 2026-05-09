@@ -13,6 +13,8 @@ import {
   Archive,
   Trash2,
   Check,
+  ArrowLeft,
+  ChevronDown,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { supabase } from "../utils/supabase";
@@ -22,6 +24,7 @@ export interface MenuItem {
   id: string;
   name: string;
   category: string;
+  sub_category?: string;
   status: string;
 }
 
@@ -38,12 +41,15 @@ export function MenuPage() {
   // State management for UI and Data
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [activeCategory, setActiveCategory] = useState("All");
+  const [expandedSections, setExpandedSections] = useState<string[]>(["Beef"]);
   const [searchQuery, setSearchQuery] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [formData, setFormData] = useState({
     name: "",
     category: "Main Course",
+    sub_category: "",
+    status: "Available",
   });
 
   const [confirmAction, setConfirmAction] = useState<{
@@ -76,7 +82,8 @@ export function MenuPage() {
       const query = searchQuery.toLowerCase();
       const matchesSearch =
         item.name.toLowerCase().includes(query) ||
-        item.category.toLowerCase().includes(query);
+        item.category.toLowerCase().includes(query) ||
+        (item.sub_category || "").toLowerCase().includes(query);
 
       if (activeCategory === "Archived") {
         return item.status === "Archived" && matchesSearch;
@@ -84,6 +91,7 @@ export function MenuPage() {
 
       const matchesCategory =
         activeCategory === "All" || item.category === activeCategory;
+
       const isNotArchived = item.status !== "Archived";
       return matchesCategory && matchesSearch && isNotArchived;
     });
@@ -92,14 +100,19 @@ export function MenuPage() {
   // Prepares the UI form for adding a completely new menu item
   const handleAddClick = () => {
     setEditingItem(null);
-    setFormData({ name: "", category: "Main Course" });
+    setFormData({ name: "", category: "Main Course", sub_category: "", status: "Available" });
     setIsModalOpen(true);
   };
 
   // Populates the UI form with the data of an existing item so it can be edited
   const handleEditClick = (item: MenuItem) => {
     setEditingItem(item);
-    setFormData({ name: item.name, category: item.category });
+    setFormData({ 
+      name: item.name, 
+      category: item.category,
+      sub_category: item.sub_category || "",
+      status: item.status === "Active" ? "Available" : (item.status || "Available"),
+    });
     setIsModalOpen(true);
   };
 
@@ -128,7 +141,7 @@ export function MenuPage() {
   const [formError, setFormError] = useState<string | null>(null);
 
   // The core database execution function. Handles Insert, Update, and Archive operations directly to Supabase.
-  const handleExecuteAction = async () => {
+  const handleExecuteAction = async (addAnother: boolean = false) => {
     if (!confirmAction) return;
     setFormError(null);
 
@@ -149,7 +162,8 @@ export function MenuPage() {
         {
           name: formData.name,
           category: formData.category,
-          status: "Active",
+          sub_category: ["Main Course", "Appetizers"].includes(formData.category) ? formData.sub_category : null,
+          status: formData.status || "Available",
         },
       ]);
       if (error) {
@@ -177,6 +191,8 @@ export function MenuPage() {
         .update({
           name: formData.name,
           category: formData.category,
+          sub_category: ["Main Course", "Appetizers"].includes(formData.category) ? formData.sub_category : null,
+          status: formData.status,
         })
         .eq("id", confirmAction.itemId);
       if (error) {
@@ -201,10 +217,86 @@ export function MenuPage() {
 
     // Refreshes the UI data from the database and resets the form states
     await fetchMenuItems();
-    setConfirmAction(null);
-    setEditingItem(null);
-    setFormData({ name: "", category: "Main Course" });
+    
+    if (addAnother) {
+      setConfirmAction(null);
+      setFormData({ name: "", category: formData.category, sub_category: formData.sub_category, status: "Available" }); // Keep same category selected for bulk adding
+      setIsModalOpen(true);
+    } else {
+      setConfirmAction(null);
+      setEditingItem(null);
+      setFormData({ name: "", category: "Main Course", sub_category: "", status: "Available" });
+    }
   };
+
+  const renderDishCard = (item: MenuItem) => (
+    <div
+      key={item.id}
+      className={cn(
+        "p-6 hover:bg-natural-bg/10 transition-all flex flex-col group relative",
+        item.status === "Archived" &&
+          "bg-natural-bg/40 opacity-60 grayscale-[0.5]",
+      )}
+    >
+      <div className="absolute top-4 right-4 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        {item.status !== "Archived" ? (
+          <>
+            <button
+              onClick={() => handleEditClick(item)}
+              className="p-1.5 text-natural-text-light hover:text-natural-accent hover:bg-white hover:shadow-xs rounded-lg transition-all"
+              title="Edit Dish"
+            >
+              <Edit3 className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => handleArchiveClick(item)}
+              className="p-1.5 text-natural-text-light hover:text-red-500 hover:bg-white hover:shadow-xs rounded-lg transition-all"
+              title="Archive Dish"
+            >
+              <Archive className="w-4 h-4" />
+            </button>
+          </>
+        ) : (
+          <span className="text-[0.6rem] font-bold text-natural-text-light/40 uppercase tracking-widest bg-natural-bg/50 px-2 py-1 rounded">
+            Archived
+          </span>
+        )}
+      </div>
+
+      <div className="flex items-start justify-between mb-4">
+        <div className="p-3 bg-natural-bg border border-natural-border rounded-xl">
+          <Utensils className="w-6 h-6 text-natural-accent opacity-70" />
+        </div>
+      </div>
+
+      <div className="mb-2">
+        <p className="text-[0.6rem] font-bold text-natural-accent uppercase tracking-[0.15em] mb-1">
+          {item.category}
+        </p>
+        <h4 className="text-base font-bold text-natural-text-main tracking-tight leading-snug">
+          {item.name}
+        </h4>
+      </div>
+
+      <div className="mt-auto pt-6 flex items-center justify-between">
+        <span className="text-[0.65rem] font-bold text-natural-text-light/60 uppercase tracking-widest">
+          ID: #{item.id.substring(0, 8)}
+        </span>
+        <span
+          className={cn(
+            "text-[0.65rem] font-bold px-2 py-0.5 rounded border uppercase tracking-wider whitespace-nowrap",
+            item.status === "Archived"
+              ? "text-gray-500 bg-gray-50 border-gray-200"
+              : item.status === "Not Available"
+                ? "text-orange-600 bg-orange-50 border-orange-100"
+                : "text-green-600 bg-green-50 border-green-100",
+          )}
+        >
+          {item.status === "Active" ? "Available" : (item.status || "Available")}
+        </span>
+      </div>
+    </div>
+  );
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -231,7 +323,9 @@ export function MenuPage() {
         {categories.map((cat) => (
           <button
             key={cat}
-            onClick={() => setActiveCategory(cat)}
+            onClick={() => {
+              setActiveCategory(cat);
+            }}
             className={cn(
               "px-4 py-1.5 rounded-full text-[0.7rem] font-bold uppercase tracking-widest transition-all whitespace-nowrap border",
               activeCategory === cat
@@ -264,88 +358,108 @@ export function MenuPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-0 divide-x divide-y divide-natural-border">
-          {filteredItems.map((item) => (
-            <div
-              key={item.id}
-              className={cn(
-                "p-6 hover:bg-natural-bg/10 transition-all flex flex-col group relative",
-                item.status === "Archived" &&
-                  "bg-natural-bg/40 opacity-60 grayscale-[0.5]",
-              )}
-            >
-              <div className="absolute top-4 right-4 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                {item.status !== "Archived" ? (
-                  <>
-                    <button
-                      onClick={() => handleEditClick(item)}
-                      className="p-1.5 text-natural-text-light hover:text-natural-accent hover:bg-white hover:shadow-xs rounded-lg transition-all"
-                      title="Edit Dish"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleArchiveClick(item)}
-                      className="p-1.5 text-natural-text-light hover:text-red-500 hover:bg-white hover:shadow-xs rounded-lg transition-all"
-                      title="Archive Dish"
-                    >
-                      <Archive className="w-4 h-4" />
-                    </button>
-                  </>
-                ) : (
-                  <span className="text-[0.6rem] font-bold text-natural-text-light/40 uppercase tracking-widest bg-natural-bg/50 px-2 py-1 rounded">
-                    Archived
-                  </span>
-                )}
-              </div>
-
-              <div className="flex items-start justify-between mb-4">
-                <div className="p-3 bg-natural-bg border border-natural-border rounded-xl">
-                  <Utensils className="w-6 h-6 text-natural-accent opacity-70" />
-                </div>
-              </div>
-
-              <div className="mb-2">
-                <p className="text-[0.6rem] font-bold text-natural-accent uppercase tracking-[0.15em] mb-1">
-                  {item.category}
+        {["Desserts", "Beverages"].includes(activeCategory) ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-0 divide-x divide-y divide-natural-border bg-white border-t border-natural-border">
+            {filteredItems.map(renderDishCard)}
+            {filteredItems.length === 0 && (
+              <div className="col-span-full p-20 text-center">
+                <Utensils className="w-12 h-12 text-natural-text-light/20 mx-auto mb-4" />
+                <p className="text-natural-text-light font-medium">
+                  No dishes found matching your criteria.
                 </p>
-                <h4 className="text-base font-bold text-natural-text-main tracking-tight leading-snug">
-                  {item.name}
-                </h4>
               </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col divide-y divide-natural-border">
+            {(() => {
+              let sectionsConfig: { title: string, match: (i: MenuItem) => boolean }[] = [];
+              if (activeCategory === "Main Course") {
+                sectionsConfig = [
+                  { title: "Beef", match: (i: MenuItem) => i.sub_category === "Beef" },
+                  { title: "Pork", match: (i: MenuItem) => i.sub_category === "Pork" },
+                  { title: "Chicken", match: (i: MenuItem) => i.sub_category === "Chicken" },
+                  { title: "Fish & Shrimp", match: (i: MenuItem) => i.sub_category === "Fish & Shrimp" },
+                  { title: "Other Dishes", match: (i: MenuItem) => !["Beef", "Pork", "Chicken", "Fish & Shrimp"].includes(i.sub_category || "") }
+                ];
+              } else if (activeCategory === "Appetizers") {
+                sectionsConfig = [
+                  { title: "Appetizer", match: (i: MenuItem) => i.sub_category === "Appetizer" },
+                  { title: "Vegetables", match: (i: MenuItem) => i.sub_category === "Vegetables" },
+                  { title: "Soup", match: (i: MenuItem) => i.sub_category === "Soup" },
+                  { title: "Other Dishes", match: (i: MenuItem) => !["Appetizer", "Vegetables", "Soup"].includes(i.sub_category || "") }
+                ];
+              } else {
+                sectionsConfig = [
+                  { title: "Beef", match: (i: MenuItem) => i.sub_category === "Beef" && i.category === "Main Course" },
+                  { title: "Pork", match: (i: MenuItem) => i.sub_category === "Pork" && i.category === "Main Course" },
+                  { title: "Chicken", match: (i: MenuItem) => i.sub_category === "Chicken" && i.category === "Main Course" },
+                  { title: "Fish & Shrimp", match: (i: MenuItem) => i.sub_category === "Fish & Shrimp" && i.category === "Main Course" },
+                  { title: "Appetizer", match: (i: MenuItem) => i.sub_category === "Appetizer" && i.category === "Appetizers" },
+                  { title: "Vegetables", match: (i: MenuItem) => i.sub_category === "Vegetables" && i.category === "Appetizers" },
+                  { title: "Soup", match: (i: MenuItem) => i.sub_category === "Soup" && i.category === "Appetizers" },
+                  { title: "Desserts", match: (i: MenuItem) => i.category === "Desserts" },
+                  { title: "Beverages", match: (i: MenuItem) => i.category === "Beverages" },
+                  { title: "Other Dishes", match: (i: MenuItem) => 
+                      (!["Beef", "Pork", "Chicken", "Fish & Shrimp"].includes(i.sub_category || "") && i.category === "Main Course") || 
+                      (!["Appetizer", "Vegetables", "Soup"].includes(i.sub_category || "") && i.category === "Appetizers") ||
+                      (!["Main Course", "Appetizers", "Desserts", "Beverages"].includes(i.category))
+                  }
+                ];
+              }
 
-              <div className="mt-auto pt-6 flex items-center justify-between">
-                <span className="text-[0.65rem] font-bold text-natural-text-light/60 uppercase tracking-widest">
-                  ID: #{item.id.substring(0, 8)}
-                </span>
-                <span
-                  className={cn(
-                    "text-[0.65rem] font-bold px-2 py-0.5 rounded border uppercase tracking-wider",
-                    item.status === "Archived"
-                      ? "text-gray-500 bg-gray-50 border-gray-200"
-                      : "text-green-600 bg-green-50 border-green-100",
-                  )}
-                >
-                  {item.status || "Active"}
-                </span>
+              return sectionsConfig.map(({ title, match }) => {
+                const sectionItems = filteredItems.filter(match);
+                if (sectionItems.length === 0 && title === "Other Dishes") return null;
+                
+                const isExpanded = expandedSections.includes(title);
+                
+                return (
+                  <div key={title} className="flex flex-col bg-white">
+                    <button
+                      onClick={() => {
+                        setExpandedSections(prev => 
+                          prev.includes(title) ? prev.filter(t => t !== title) : [...prev, title]
+                        )
+                      }}
+                      className="flex items-center justify-between p-4 bg-natural-bg/5 hover:bg-natural-bg/10 transition-colors w-full text-left"
+                    >
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-serif font-bold text-natural-text-main text-lg">{title}</h3>
+                        <span className="px-2 py-0.5 rounded-full bg-natural-bg border border-natural-border text-[10px] font-bold text-natural-text-light">
+                          {sectionItems.length}
+                        </span>
+                      </div>
+                      <ChevronDown className={cn("w-5 h-5 text-natural-text-light transition-transform", isExpanded && "rotate-180")} />
+                    </button>
+                    
+                    {isExpanded && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-0 divide-x divide-y divide-natural-border border-t border-natural-border">
+                        {sectionItems.map(renderDishCard)}
+                        {sectionItems.length === 0 && (
+                          <div className="col-span-full p-12 text-center">
+                            <Utensils className="w-8 h-8 text-natural-text-light/20 mx-auto mb-3" />
+                            <p className="text-sm text-natural-text-light font-medium italic">
+                              No {title.toLowerCase()} found in this section.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              });
+            })()}
+            {filteredItems.length === 0 && (
+              <div className="p-20 text-center bg-white">
+                <Utensils className="w-12 h-12 text-natural-text-light/20 mx-auto mb-4" />
+                <p className="text-natural-text-light font-medium">
+                  No dishes found matching your criteria.
+                </p>
               </div>
-            </div>
-          ))}
-          {filteredItems.length === 0 && (
-            <div className="col-span-full p-20 text-center">
-              <Utensils className="w-12 h-12 text-natural-text-light/20 mx-auto mb-4" />
-              <p className="text-natural-text-light font-medium">
-                No dishes found in this category.
-              </p>
-            </div>
-          )}
-        </div>
-
-        <div className="p-4 bg-natural-bg/10 text-center border-t border-natural-border">
-          <button className="text-[0.7rem] font-bold text-natural-text-light uppercase tracking-[0.2em] hover:text-natural-accent transition-colors">
-            Load More Specialties
-          </button>
-        </div>
+            )}
+          </div>
+        )}
       </div>
 
       {isModalOpen && (
@@ -385,9 +499,14 @@ export function MenuPage() {
                 </label>
                 <select
                   value={formData.category}
-                  onChange={(e) =>
-                    setFormData({ ...formData, category: e.target.value })
-                  }
+                  onChange={(e) => {
+                    const newCategory = e.target.value;
+                    setFormData({ 
+                      ...formData, 
+                      category: newCategory,
+                      sub_category: ""
+                    });
+                  }}
                   className="w-full px-4 py-2.5 bg-natural-bg border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 transition-all font-medium"
                 >
                   {categories
@@ -399,19 +518,69 @@ export function MenuPage() {
                     ))}
                 </select>
               </div>
+
+              {["Main Course", "Appetizers"].includes(formData.category) && (
+                <div className="space-y-2 animate-in fade-in duration-200">
+                  <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                    Sub Category
+                  </label>
+                  <select
+                    value={formData.sub_category}
+                    onChange={(e) =>
+                      setFormData({ ...formData, sub_category: e.target.value })
+                    }
+                    className="w-full px-4 py-2.5 bg-natural-bg border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 transition-all font-medium"
+                  >
+                    <option value="" disabled>Select a sub category</option>
+                    {formData.category === "Main Course" && (
+                      <>
+                        <option value="Beef">Beef</option>
+                        <option value="Pork">Pork</option>
+                        <option value="Chicken">Chicken</option>
+                        <option value="Fish & Shrimp">Fish & Shrimp</option>
+                      </>
+                    )}
+                    {formData.category === "Appetizers" && (
+                      <>
+                        <option value="Appetizer">Appetizer</option>
+                        <option value="Vegetables">Vegetables</option>
+                        <option value="Soup">Soup</option>
+                      </>
+                    )}
+                  </select>
+                </div>
+              )}
+
+              {editingItem && (
+                <div className="space-y-2 animate-in fade-in duration-200">
+                  <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                    Availability Status
+                  </label>
+                  <select
+                    value={formData.status}
+                    onChange={(e) =>
+                      setFormData({ ...formData, status: e.target.value })
+                    }
+                    className="w-full px-4 py-2.5 bg-natural-bg border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 transition-all font-medium cursor-pointer"
+                  >
+                    <option value="Available">Available</option>
+                    <option value="Not Available">Not Available</option>
+                  </select>
+                </div>
+              )}
             </div>
 
             <div className="p-6 bg-natural-bg/30 border-t border-natural-border flex items-center justify-end gap-3">
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="px-6 py-2.5 text-[0.65rem] font-bold text-natural-text-light uppercase tracking-[0.2em] hover:text-natural-text-main transition-colors"
+                className="px-4 py-2.5 text-[0.65rem] font-bold text-natural-text-light uppercase tracking-[0.2em] hover:text-natural-text-main transition-colors mr-auto"
               >
                 Cancel
               </button>
               <button
                 onClick={handleConfirmSave}
-                disabled={!formData.name}
-                className="bg-natural-accent text-white px-8 py-2.5 rounded-xl text-[0.65rem] font-bold uppercase tracking-[0.2em] hover:bg-natural-accent/90 transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={!formData.name || (["Main Course", "Appetizers"].includes(formData.category) && !formData.sub_category)}
+                className="bg-natural-accent text-white px-6 py-2.5 rounded-xl text-[0.65rem] font-bold uppercase tracking-[0.2em] hover:bg-natural-accent/90 transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {editingItem ? "Save Changes" : "Add Dish"}
               </button>
@@ -422,7 +591,21 @@ export function MenuPage() {
 
       {confirmAction && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200 border border-natural-border">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200 border border-natural-border relative">
+            {(confirmAction.type === "create" || confirmAction.type === "edit") && (
+              <button
+                onClick={() => {
+                  setConfirmAction(null);
+                  setFormError(null);
+                  setIsModalOpen(true);
+                }}
+                className="absolute top-4 left-4 p-2 text-natural-text-light hover:text-natural-text-main hover:bg-natural-bg/50 rounded-full transition-colors z-10"
+                title="Back to Form"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+            )}
+
             <div className="p-8 text-center">
               <div
                 className={cn(
@@ -489,23 +672,40 @@ export function MenuPage() {
                   </p>
                 )}
 
-                <button
-                  onClick={handleExecuteAction}
-                  className={cn(
-                    "w-full py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] text-white transition-all shadow-md active:scale-[0.98]",
-                    confirmAction.type === "create"
-                      ? "bg-blue-600 hover:bg-blue-700"
-                      : confirmAction.type === "edit"
+                {confirmAction.type === "create" ? (
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => handleExecuteAction(false)}
+                      className="flex-1 py-3 rounded-xl text-[0.65rem] font-bold uppercase tracking-[0.1em] text-blue-600 bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-all shadow-sm active:scale-[0.98]"
+                    >
+                      Confirm & Close
+                    </button>
+                    <button
+                      onClick={() => handleExecuteAction(true)}
+                      className="flex-1 py-3 rounded-xl text-[0.65rem] font-bold uppercase tracking-[0.1em] text-white bg-blue-600 hover:bg-blue-700 transition-all shadow-md active:scale-[0.98]"
+                    >
+                      Confirm & Add Another
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => handleExecuteAction(false)}
+                    className={cn(
+                      "w-full py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] text-white transition-all shadow-md active:scale-[0.98]",
+                      confirmAction.type === "edit"
                         ? "bg-natural-accent hover:bg-natural-accent/90"
-                        : "bg-red-600 hover:bg-red-700",
-                  )}
-                >
-                  Confirm {confirmAction.type}
-                </button>
+                        : "bg-red-600 hover:bg-red-700"
+                    )}
+                  >
+                    Confirm {confirmAction.type}
+                  </button>
+                )}
                 <button
                   onClick={() => {
+                    const wasCreateOrEdit = confirmAction.type === "create" || confirmAction.type === "edit";
                     setConfirmAction(null);
                     setFormError(null);
+                    if (wasCreateOrEdit) setIsModalOpen(true);
                   }}
                   className="w-full py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] text-natural-text-light border border-natural-border hover:bg-natural-bg transition-all active:scale-[0.98]"
                 >

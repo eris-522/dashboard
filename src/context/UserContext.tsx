@@ -32,7 +32,7 @@ const UserContext = createContext<UserContextType | undefined>(undefined);
 const DEFAULT_ADMIN: User = {
   id: 0,
   name: 'Kyle Erica Santos',
-  email: 'santoskyleerica@gmail.com',
+  email: 'erica@gmail.com',
   password: 'admin123',
   phone: '09467158519',
   role: 'Admin',
@@ -46,9 +46,9 @@ function toUser(row: any): User {
     name: row?.name ?? '',
     email: row?.email ?? '',
     password: row?.password,
-    role: row?.role ?? 'Staff',
+    role: row?.role ?? 'Customer',
     status: row?.status ?? 'Inactive',
-    phone: row?.phone ?? '',
+    phone: row?.phone_number ?? row?.phone ?? '',
     joined: row?.joined ?? row?.created_at ?? '',
   };
 }
@@ -188,4 +188,3 @@ export function useUser() {
   }
   return context;
 }
-

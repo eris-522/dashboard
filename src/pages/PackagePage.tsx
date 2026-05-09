@@ -12,8 +12,6 @@ import {
   Edit3,
   Archive,
   Trash2,
-  Zap,
-  DollarSign,
   ChevronDown,
   ArrowLeft,
 } from "lucide-react";
@@ -29,14 +27,6 @@ export interface CateringPackage {
   price: string;
   tag?: string;
   inclusions: string[];
-  status: string;
-}
-
-// Feature: Defines the structure for Add-ons based on the Supabase table
-export interface AdditionalService {
-  id: string;
-  name: string;
-  price: number;
   status: string;
 }
 
@@ -84,19 +74,12 @@ const initialInclusionCategories: Record<string, string[]> = {
 export function PackagePage() {
   // Feature: State management for database arrays and UI toggles
   const [packages, setPackages] = useState<CateringPackage[]>([]);
-  const [additionalServices, setAdditionalServices] = useState<
-    AdditionalService[]
-  >([]);
-  const [activeTab, setActiveTab] = useState<"packages" | "services">(
-    "packages",
-  );
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
 
   const [editingPackage, setEditingPackage] =
     useState<Partial<CateringPackage> | null>(null);
-  const [editingService, setEditingService] =
-    useState<Partial<AdditionalService> | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isServiceModalOpen, setIsServiceModalOpen] = useState(false);
   const [openInclusionSections, setOpenInclusionSections] = useState<string[]>([
     "Catering",
   ]);
@@ -112,7 +95,7 @@ export function PackagePage() {
 
   const [confirmAction, setConfirmAction] = useState<{
     type: "create" | "edit" | "archive" | "delete";
-    itemType: "package" | "service" | "category" | "item";
+    itemType: "package" | "category" | "item";
     itemId?: string;
     itemName: string;
     parentCategory?: string;
@@ -120,49 +103,43 @@ export function PackagePage() {
 
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Feature: Fetches both packages and services from the database on page load
+  // Feature: Fetches packages from the database on page load
   useEffect(() => {
     fetchData();
   }, []);
 
-  // Feature: Main database read function. Queries both tables simultaneously.
+  // Feature: Main database read function.
   const fetchData = async () => {
-    const [pkgResponse, srvResponse] = await Promise.all([
-      supabase
+    const pkgResponse = await supabase
         .from("packages")
         .select("*")
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("add_ons")
-        .select("*")
-        .order("created_at", { ascending: false }),
-    ]);
+        .order("created_at", { ascending: false });
 
     if (pkgResponse.error)
       console.error("Error fetching packages:", pkgResponse.error);
     else setPackages(pkgResponse.data as CateringPackage[]);
-
-    if (srvResponse.error)
-      console.error("Error fetching services:", srvResponse.error);
-    else setAdditionalServices(srvResponse.data as AdditionalService[]);
   };
 
-  const displayedPackages = useMemo(() => packages, [packages]);
-  const displayedServices = useMemo(
-    () => additionalServices,
-    [additionalServices],
-  );
+  const displayedPackages = useMemo(() => {
+    return packages.filter((pkg) => {
+      const query = searchQuery.toLowerCase();
+      const matchesSearch =
+        pkg.name.toLowerCase().includes(query) ||
+        (pkg.type || "").toLowerCase().includes(query) ||
+        (pkg.tag || "").toLowerCase().includes(query);
+
+      const matchesStatus = showArchived ? pkg.status === "Archived" : pkg.status !== "Archived";
+      return matchesSearch && matchesStatus;
+    });
+  }, [packages, searchQuery, showArchived]);
 
   // Feature: Prepares the package modal for editing an existing database row
   const handleEditClick = (pkg: CateringPackage) => {
-    setEditingPackage({ ...pkg });
+    setEditingPackage({ 
+      ...pkg,
+      status: pkg.status === "Active" ? "Available" : (pkg.status || "Available")
+    });
     setIsModalOpen(true);
-  };
-
-  // Feature: Prepares the service modal for editing an existing database row
-  const handleEditServiceClick = (service: AdditionalService) => {
-    setEditingService({ ...service });
-    setIsServiceModalOpen(true);
   };
 
   // Feature: Triggers the archive warning dialog for packages
@@ -175,16 +152,6 @@ export function PackagePage() {
     });
   };
 
-  // Feature: Triggers the archive warning dialog for services
-  const handleArchiveServiceClick = (service: AdditionalService) => {
-    setConfirmAction({
-      type: "archive",
-      itemType: "service",
-      itemId: service.id,
-      itemName: service.name,
-    });
-  };
-
   // Feature: Resets the form to completely empty for creating a new package
   const handleCreateNew = () => {
     setEditingPackage({
@@ -192,21 +159,11 @@ export function PackagePage() {
       pax: "",
       price: "",
       inclusions: [],
-      status: "Active",
+      status: "Available",
       tag: "",
       type: "Social",
     });
     setIsModalOpen(true);
-  };
-
-  // Feature: Resets the form to completely empty for creating a new service
-  const handleCreateNewService = () => {
-    setEditingService({
-      name: "",
-      price: 0,
-      status: "Active",
-    });
-    setIsServiceModalOpen(true);
   };
 
   const handleInclusionChange = (inclusion: string, isChecked: boolean) => {
@@ -310,18 +267,7 @@ export function PackagePage() {
     });
   };
 
-  // Feature: Moves user from the service input form to the final validation step
-  const handleConfirmServiceSave = () => {
-    setIsServiceModalOpen(false);
-    setConfirmAction({
-      type: editingService?.id ? "edit" : "create",
-      itemType: "service",
-      itemId: editingService?.id,
-      itemName: editingService?.name || "New Service",
-    });
-  };
-
-  // Feature: The core database execution function handling Insert, Update, and Archive for BOTH tables.
+  // Feature: The core database execution function handling Insert, Update, and Archive for tables.
   const handleExecuteAction = async () => {
     if (!confirmAction) return;
     setFormError(null);
@@ -372,7 +318,7 @@ export function PackagePage() {
             price: editingPackage?.price ? String(editingPackage.price).replace(/,/g, "") : null,
             tag: editingPackage?.tag,
             inclusions: editingPackage?.inclusions || [],
-            status: "Active",
+            status: editingPackage?.status || "Available",
           },
         ]);
         if (error) {
@@ -391,6 +337,7 @@ export function PackagePage() {
             price: editingPackage?.price ? String(editingPackage.price).replace(/,/g, "") : null,
             tag: editingPackage?.tag,
             inclusions: editingPackage?.inclusions || [],
+            status: editingPackage?.status || "Available",
           })
           .eq("id", confirmAction.itemId);
         if (error) {
@@ -410,47 +357,6 @@ export function PackagePage() {
           return;
         }
       }
-    } else {
-      if (confirmAction.type === "create") {
-        // Inserts new service into the 'add_ons' table
-        const { error } = await supabase.from("add_ons").insert([
-          {
-            name: editingService?.name,
-            price: editingService?.price,
-            status: "Active",
-          },
-        ]);
-        if (error) {
-          console.error("Error adding service:", error);
-          setFormError(error.message);
-          return;
-        }
-      } else if (confirmAction.type === "edit" && confirmAction.itemId) {
-        // Updates existing service
-        const { error } = await supabase
-          .from("add_ons")
-          .update({
-            name: editingService?.name,
-            price: editingService?.price,
-          })
-          .eq("id", confirmAction.itemId);
-        if (error) {
-          console.error("Error updating service:", error);
-          setFormError(error.message);
-          return;
-        }
-      } else if (confirmAction.type === "archive" && confirmAction.itemId) {
-        // Archives service
-        const { error } = await supabase
-          .from("add_ons")
-          .update({ status: "Archived" })
-          .eq("id", confirmAction.itemId);
-        if (error) {
-          console.error("Error archiving service:", error);
-          setFormError(error.message);
-          return;
-        }
-      }
     }
 
     // Refresh UI data and reset forms
@@ -458,7 +364,6 @@ export function PackagePage() {
     setConfirmAction(null);
     setFormError(null);
     setEditingPackage(null);
-    setEditingService(null);
   };
 
   return (
@@ -469,47 +374,58 @@ export function PackagePage() {
             Offerings Management
           </h2>
           <p className="text-natural-text-light text-[0.8rem] font-medium uppercase tracking-wider">
-            Configure event bundles and add-on services
+            Configure event bundles
           </p>
         </div>
 
-        <div className="flex items-center gap-2 bg-natural-bg/50 p-1 rounded-xl border border-natural-border/50">
-          <button
-            onClick={() => setActiveTab("packages")}
-            className={cn(
-              "px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all",
-              activeTab === "packages"
-                ? "bg-white text-natural-accent shadow-sm"
-                : "text-natural-text-light hover:text-natural-text-main",
-            )}
-          >
-            Packages
-          </button>
-          <button
-            onClick={() => setActiveTab("services")}
-            className={cn(
-              "px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all",
-              activeTab === "services"
-                ? "bg-white text-natural-accent shadow-sm"
-                : "text-natural-text-light hover:text-natural-text-main",
-            )}
-          >
-            Add-ons
-          </button>
-        </div>
-
         <button
-          onClick={
-            activeTab === "packages" ? handleCreateNew : handleCreateNewService
-          }
+          onClick={handleCreateNew}
           className="flex items-center gap-2 bg-natural-accent text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-natural-accent/90 transition-all shadow-sm"
         >
           <Plus className="w-4 h-4" />
-          Add {activeTab === "packages" ? "Package" : "Service"}
+          Add Package
         </button>
       </div>
 
-      {activeTab === "packages" ? (
+      <div className="glass-card bg-white p-4 flex flex-col md:flex-row gap-4 items-center justify-between border border-natural-border/50 rounded-xl">
+        <div className="relative w-full md:w-80">
+          <input
+            type="text"
+            placeholder="Search packages by name, type..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-4 py-2 bg-natural-bg/50 border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white transition-all shadow-xs"
+          />
+          <Search className="absolute left-3 top-2.5 w-4 h-4 text-natural-text-light" />
+        </div>
+
+        <div className="flex items-center gap-2 w-full md:w-auto">
+          <button
+            onClick={() => setShowArchived(false)}
+            className={cn(
+              "px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all w-full md:w-auto",
+              !showArchived
+                ? "bg-natural-accent text-white shadow-sm"
+                : "bg-natural-bg text-natural-text-light hover:text-natural-text-main",
+            )}
+          >
+            Active
+          </button>
+          <button
+            onClick={() => setShowArchived(true)}
+            className={cn(
+              "px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2 w-full md:w-auto",
+              showArchived
+                ? "bg-natural-text-main text-white shadow-sm"
+                : "bg-natural-bg text-natural-text-light hover:text-natural-text-main",
+            )}
+          >
+            <Archive className="w-3.5 h-3.5" />
+            Archived
+          </button>
+        </div>
+      </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {displayedPackages.map((pkg) => (
             <div
@@ -544,6 +460,16 @@ export function PackagePage() {
                             {pkg.tag}
                           </span>
                         )}
+                        <span
+                          className={cn(
+                            "flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-tighter border",
+                            pkg.status === "Not Available"
+                              ? "bg-orange-50 text-orange-600 border-orange-100"
+                              : "bg-green-50 text-green-600 border-green-100"
+                          )}
+                        >
+                          {pkg.status === "Not Available" ? "Not Available" : "Available"}
+                        </span>
                       </div>
                       <h3 className="text-lg font-bold text-natural-text-main tracking-tight leading-tight">
                         {pkg.name}
@@ -551,25 +477,23 @@ export function PackagePage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    {pkg.status !== "Archived" ? (
-                      <>
-                        <button
-                          onClick={() => handleEditClick(pkg)}
-                          className="p-1.5 text-natural-text-light hover:text-natural-accent hover:bg-white hover:shadow-xs rounded-lg transition-all"
-                          title="Edit Package"
-                        >
-                          <Edit3 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleArchiveClick(pkg)}
-                          className="p-1.5 text-natural-text-light hover:text-red-500 hover:bg-white hover:shadow-xs rounded-lg transition-all"
-                          title="Archive Package"
-                        >
-                          <Archive className="w-4 h-4" />
-                        </button>
-                      </>
+                <button
+                  onClick={() => handleEditClick(pkg)}
+                  className="p-1.5 text-natural-text-light hover:text-natural-accent hover:bg-white hover:shadow-xs rounded-lg transition-all"
+                  title="Edit Package"
+                >
+                  <Edit3 className="w-4 h-4" />
+                </button>
+                {pkg.status !== "Archived" ? (
+                  <button
+                    onClick={() => handleArchiveClick(pkg)}
+                    className="p-1.5 text-natural-text-light hover:text-red-500 hover:bg-white hover:shadow-xs rounded-lg transition-all"
+                    title="Archive Package"
+                  >
+                    <Archive className="w-4 h-4" />
+                  </button>
                     ) : (
-                      <span className="text-[0.6rem] font-bold text-natural-text-light/40 uppercase tracking-widest bg-natural-bg/50 px-2 py-1 rounded">
+                  <span className="text-[0.6rem] font-bold text-natural-text-light/40 uppercase tracking-widest bg-natural-bg/50 px-2 py-1 rounded ml-1">
                         Archived
                       </span>
                     )}
@@ -611,99 +535,11 @@ export function PackagePage() {
             </div>
           ))}
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {displayedServices.map((service) => (
-            <div
-              key={service.id}
-              className={cn(
-                "glass-card group p-6 flex flex-col justify-between transition-all duration-300 overflow-hidden relative",
-                service.status === "Archived"
-                  ? "bg-natural-bg/40 opacity-60 grayscale-[0.5]"
-                  : "hover:border-natural-accent/30",
-              )}
-            >
-              <div className="absolute top-4 right-4 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                {service.status !== "Archived" ? (
-                  <>
-                    <button
-                      onClick={() => handleEditServiceClick(service)}
-                      className="p-1.5 text-natural-text-light hover:text-natural-accent hover:bg-white hover:shadow-xs rounded-lg transition-all"
-                      title="Edit Service"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleArchiveServiceClick(service)}
-                      className="p-1.5 text-natural-text-light hover:text-red-500 hover:bg-white hover:shadow-xs rounded-lg transition-all"
-                      title="Archive Service"
-                    >
-                      <Archive className="w-4 h-4" />
-                    </button>
-                  </>
-                ) : (
-                  <span className="text-[0.6rem] font-bold text-natural-text-light/40 uppercase tracking-widest bg-natural-bg/50 px-2 py-1 rounded shadow-xs">
-                    Archived
-                  </span>
-                )}
-              </div>
-
-              <div className="flex items-center gap-4 mb-4">
-                <div
-                  className={cn(
-                    "p-3 bg-natural-bg rounded-2xl border border-natural-border transition-all shadow-sm",
-                    service.status !== "Archived" &&
-                      "group-hover:bg-natural-accent group-hover:border-natural-accent group-hover:rotate-6",
-                  )}
-                >
-                  <Zap
-                    className={cn(
-                      "w-5 h-5 transition-colors",
-                      service.status !== "Archived"
-                        ? "text-natural-accent group-hover:text-white"
-                        : "text-natural-text-light",
-                    )}
-                  />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-natural-text-main tracking-tight leading-tight">
-                    {service.name}
-                  </h3>
-                  <span className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest">
-                    Add-on Service
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex items-end justify-between mt-4 pt-4 border-t border-natural-border/50">
-                <div>
-                  <p className="text-[9px] font-bold text-natural-text-light uppercase tracking-tighter mb-1">
-                    Standard Rate
-                  </p>
-                  <p className="text-lg font-bold text-natural-accent font-serif italic">
-                    ₱{service.price?.toLocaleString()}
-                  </p>
-                </div>
-                <div
-                  className={cn(
-                    "px-2 py-1 rounded-full text-[9px] font-bold uppercase tracking-widest border",
-                    service.status === "Active"
-                      ? "text-green-600 bg-green-50 border-green-100"
-                      : "text-gray-500 bg-gray-50 border-gray-200",
-                  )}
-                >
-                  {service.status || "Active"}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* Package Modal */}
       {isModalOpen && editingPackage && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden animate-in zoom-in duration-200 border border-natural-border">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl overflow-hidden animate-in zoom-in duration-200 border border-natural-border">
             <div className="p-6 border-b border-natural-border flex items-center justify-between">
               <h3 className="text-lg font-serif font-bold text-natural-text-main">
                 {editingPackage.id ? "Edit Package" : "Create New Package"}
@@ -734,7 +570,7 @@ export function PackagePage() {
                         </label>
                         <input
                           type="text"
-                          value={editingPackage.name}
+                          value={editingPackage.name || ""}
                           onChange={(e) =>
                             setEditingPackage({
                               ...editingPackage,
@@ -745,6 +581,28 @@ export function PackagePage() {
                         />
                       </div>
 
+                      <div className="grid grid-cols-3 gap-3 items-center">
+                        <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest col-span-1">
+                          Event Type
+                        </label>
+                        <select
+                          value={editingPackage.type || "Social"}
+                          onChange={(e) =>
+                            setEditingPackage({
+                              ...editingPackage,
+                              type: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 col-span-2 cursor-pointer"
+                        >
+                          <option value="Social">Social</option>
+                          <option value="Corporate">Corporate</option>
+                          <option value="Wedding">Wedding</option>
+                          <option value="Debut">Debut</option>
+                          <option value="Kids Party">Kids Party</option>
+                        </select>
+                      </div>
+
                       {/* Guest range (separate row) */}
                       <div className="grid grid-cols-3 gap-3 items-center">
                         <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest col-span-1">
@@ -752,7 +610,7 @@ export function PackagePage() {
                         </label>
                         <input
                           type="text"
-                          value={editingPackage.pax}
+                          value={editingPackage.pax || ""}
                           onChange={(e) =>
                             setEditingPackage({
                               ...editingPackage,
@@ -775,7 +633,7 @@ export function PackagePage() {
                           </span>
                           <input
                             type="text"
-                            value={editingPackage.price}
+                            value={editingPackage.price || ""}
                             onChange={(e) => {
                               let raw = e.target.value.replace(/,/g, '');
                               raw = raw.replace(/[^0-9.]/g, '');
@@ -818,6 +676,25 @@ export function PackagePage() {
                           <option>Budget-Friendly</option>
                           <option>Kids Special</option>
                           <option>Styling Only</option>
+                        </select>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-3 items-center">
+                        <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest col-span-1">
+                          Status
+                        </label>
+                        <select
+                          value={editingPackage.status || "Available"}
+                          onChange={(e) =>
+                            setEditingPackage({
+                              ...editingPackage,
+                              status: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 col-span-2 cursor-pointer"
+                        >
+                          <option value="Available">Available</option>
+                          <option value="Not Available">Not Available</option>
                         </select>
                       </div>
                     </div>
@@ -873,9 +750,9 @@ export function PackagePage() {
                                       <label className="flex items-center gap-2 text-xs text-natural-text-main cursor-pointer flex-1">
                                         <input
                                           type="checkbox"
-                                          checked={editingPackage.inclusions?.includes(
-                                            item,
-                                          )}
+                                          checked={
+                                            editingPackage.inclusions?.includes(item) || false
+                                          }
                                           onChange={(e) =>
                                             handleInclusionChange(
                                               item,
@@ -1010,6 +887,9 @@ export function PackagePage() {
                             <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest mt-1">
                               {editingPackage.tag ? editingPackage.tag : "Tag: —"}
                             </p>
+                            <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest mt-1">
+                              Status: <span className={editingPackage.status === "Not Available" ? "text-orange-600" : "text-green-600"}>{editingPackage.status || "Available"}</span>
+                            </p>
                           </div>
 
                           <div className="text-right">
@@ -1096,100 +976,14 @@ export function PackagePage() {
               <button
                 onClick={handleConfirmSave}
                 disabled={
-                  !editingPackage.name?.trim() ||
-                  !editingPackage.pax?.trim() ||
-                  !editingPackage.price?.trim() ||
+                  !String(editingPackage.name || "").trim() ||
+                  !String(editingPackage.pax || "").trim() ||
+                  !String(editingPackage.price || "").trim() ||
                   !editingPackage.tag
                 }
                 className="bg-natural-accent text-white px-6 py-2 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm disabled:opacity-50"
               >
                 {editingPackage.id ? "Save Changes" : "Create Package"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Service Modal */}
-      {isServiceModalOpen && editingService && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden animate-in zoom-in duration-200 border border-natural-border">
-            <div className="p-6 border-b border-natural-border flex items-center justify-between">
-              <h3 className="text-lg font-serif font-bold text-natural-text-main">
-                {editingService.id ? "Edit Service" : "Add New Service"}
-              </h3>
-              <button
-                onClick={() => setIsServiceModalOpen(false)}
-                className="p-1 hover:bg-natural-bg rounded-lg transition-colors"
-              >
-                <X className="w-5 h-5 text-natural-text-light" />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4">
-              <div className="space-y-1">
-                <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
-                  Service Name
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-natural-text-light">
-                    <Zap className="w-4 h-4" />
-                  </span>
-                  <input
-                    type="text"
-                    value={editingService.name}
-                    onChange={(e) =>
-                      setEditingService({
-                        ...editingService,
-                        name: e.target.value,
-                      })
-                    }
-                    placeholder="e.g. Mobile Bar"
-                    className="w-full pl-10 pr-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
-                  Rate (PHP)
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-natural-text-light">
-                    <DollarSign className="w-4 h-4" />
-                  </span>
-                  <input
-                    type="number"
-                    value={editingService.price}
-                    onChange={(e) =>
-                      setEditingService({
-                        ...editingService,
-                        price: parseFloat(e.target.value) || 0,
-                      })
-                    }
-                    className="w-full pl-10 pr-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 font-mono"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="p-6 bg-natural-bg/30 border-t border-natural-border flex items-center justify-end gap-3">
-              <button
-                onClick={() => setIsServiceModalOpen(false)}
-                className="px-4 py-2 text-xs font-bold text-natural-text-light uppercase tracking-widest hover:text-natural-text-main transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmServiceSave}
-                disabled={
-                  !editingService.name ||
-                  (editingService.price !== undefined &&
-                    editingService.price <= 0)
-                }
-                className="bg-natural-accent text-white px-6 py-2 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm disabled:opacity-50"
-              >
-                {editingService.id ? "Save Changes" : "Add Service"}
               </button>
             </div>
           </div>
@@ -1208,7 +1002,6 @@ export function PackagePage() {
                   setConfirmAction(null);
                   setFormError(null);
                   if (actionType === "package") setIsModalOpen(true);
-                  if (actionType === "service") setIsServiceModalOpen(true);
                 }}
                 className="absolute top-4 left-4 p-2 text-natural-text-light hover:text-natural-text-main hover:bg-natural-bg/50 rounded-full transition-colors z-10"
                 title="Back to Form"

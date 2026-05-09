@@ -111,7 +111,7 @@ export function BookingPage() {
         .select(
           `
           *,
-          profiles (name, email),
+          profiles (name, email, phone, phone_number),
           packages (name, price)
         `,
         )
@@ -512,8 +512,8 @@ export function BookingPage() {
                             {booking.profiles?.email || "N/A"}
                           </p>
                           <p className="text-[10px] text-natural-text-light flex items-center gap-1">
-                            <Phone className="w-2.5 h-2.5" />{" "}
-                            {booking.profiles?.phone || "N/A"}
+                          <Phone className="w-2.5 h-2.5" />{" "}
+                          {booking.profiles?.phone_number || booking.profiles?.phone || "N/A"}
                           </p>
                         </div>
                       </div>
@@ -887,7 +887,7 @@ export function BookingPage() {
                         <span className="text-xs font-medium text-natural-text-main group-hover:text-natural-accent transition-colors">
                           {item.name}{" "}
                           <span className="text-[9px] text-gray-400">
-                            ({item.category})
+                            ({item.category}{item.sub_category ? ` - ${item.sub_category}` : ""})
                           </span>
                         </span>
                       </label>
@@ -1060,7 +1060,7 @@ export function BookingPage() {
                         Contact
                       </p>
                       <p className="text-sm font-semibold text-natural-text-main">
-                        {selectedBooking.profiles?.phone}
+                        {selectedBooking.profiles?.phone_number || selectedBooking.profiles?.phone || "N/A"}
                       </p>
                       <p className="text-xs text-natural-text-light mt-0.5">
                         {selectedBooking.profiles?.email}

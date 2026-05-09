@@ -88,7 +88,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
         .select(
           `
           *,
-          profiles (name, email),
+          profiles (name, email, phone, phone_number),
           packages (name, price)
         `,
         )
@@ -104,7 +104,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
           id: booking.id,
           customerName: booking.profiles?.name || "Unknown",
           email: booking.profiles?.email || "",
-          phone: "", // Not available in database
+          phone: booking.profiles?.phone_number || booking.profiles?.phone || "",
           eventType: booking.event_type || "",
           package: booking.packages?.name || "",
           date: booking.event_date || "",
