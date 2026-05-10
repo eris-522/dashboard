@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, Plus, Filter, MoreVertical, PackageSearch, AlertTriangle, ArrowUpRight, ArrowDownRight, Warehouse, X, CheckCircle2, Trash2, Archive } from 'lucide-react';
+import { Search, Plus, Filter, MoreVertical, PackageSearch, AlertTriangle, ArrowUpRight, ArrowDownRight, Warehouse, X, CheckCircle2, Trash2, Archive, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useInventory, InventoryItem, getStatus } from '../context/InventoryContext';
 
@@ -22,6 +22,7 @@ export function InventoryPage() {
   const [confirmUpdate, setConfirmUpdate] = React.useState(false);
   const [formError, setFormError] = React.useState<string | null>(null);
   const [itemToArchive, setItemToArchive] = React.useState<number | null>(null);
+  const [sortStatus, setSortStatus] = React.useState<'asc' | 'desc' | null>(null);
 
   const [newItem, setNewItem] = React.useState<Partial<InventoryItem>>({
     name: '',
@@ -88,6 +89,23 @@ export function InventoryPage() {
     
     return matchesSearch && matchesCategory && matchesStatus;
   });
+
+  const sortedItems = React.useMemo(() => {
+    if (!sortStatus) return filteredItems;
+    return [...filteredItems].sort((a, b) => {
+      const statusOrder: Record<string, number> = {
+        'Critical': 1,
+        'Low Stock': 2,
+        'Healthy': 3,
+        'Archived': 4
+      };
+      const valA = statusOrder[a.status] || 5;
+      const valB = statusOrder[b.status] || 5;
+      if (valA < valB) return sortStatus === 'asc' ? -1 : 1;
+      if (valA > valB) return sortStatus === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [filteredItems, sortStatus]);
 
   const activeItems = items.filter(i => i.status !== 'Archived');
   const stats = {
@@ -225,12 +243,26 @@ export function InventoryPage() {
                   <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border">Item & Category</th>
                   <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border text-center">Stock Level</th>
                   <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border">Min. Req</th>
-                  <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border">Status</th>
+                  <th 
+                    className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
+                    onClick={() => setSortStatus(prev => prev === 'asc' ? 'desc' : prev === 'desc' ? null : 'asc')}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      Status
+                      {sortStatus === 'asc' ? (
+                        <ArrowUp className="w-3 h-3 text-natural-accent" />
+                      ) : sortStatus === 'desc' ? (
+                        <ArrowDown className="w-3 h-3 text-natural-accent" />
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-30" />
+                      )}
+                    </div>
+                  </th>
                   <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border"></th>
                 </tr>
               </thead>
               <tbody>
-                {filteredItems.map((item) => {
+                {sortedItems.map((item) => {
                   const stockPercentage = item.status === 'Archived' ? 0 : Math.min(((item.stock / (item.minStock * 2)) * 100), 100);
                   return (
                     <tr key={item.id} className={cn(
@@ -412,7 +444,7 @@ export function InventoryPage() {
       {/* Update Stock Modal */}
       {isUpdateModalOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-natural-border">
               <h3 className="text-xl font-serif font-bold text-natural-text-main">
                 Quick Update
@@ -427,29 +459,64 @@ export function InventoryPage() {
               )}
               {!selectedItemId ? (
                 <div className="space-y-2">
-                  <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">Select Item to Update</label>
-                  <div className="max-h-[200px] overflow-y-auto space-y-2 pr-2">
-                    {items.filter(i => i.status !== 'Archived').map(item => (
-                      <button
-                        key={item.id}
-                        onClick={() => {
-                          setSelectedItemId(item.id);
-                          setEditName(item.name);
-                          setEditCategory(item.category);
-                          setEditMinStock(item.minStock);
-                          setFormError(null);
-                        }}
-                        className={cn(
-                          "w-full text-left p-3 rounded-xl border transition-all",
-                          selectedItemId === item.id 
-                            ? "border-natural-accent bg-natural-accent/5 ring-2 ring-natural-accent/10" 
-                            : "border-natural-border hover:bg-natural-bg"
-                        )}
-                      >
-                        <p className="text-sm font-bold text-natural-text-main">{item.name}</p>
-                        <p className="text-[10px] text-natural-text-light uppercase">{item.stock} {item.unit} available</p>
-                      </button>
-                    ))}
+                  <div className="flex items-center justify-between">
+                    <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">Select Item to Update</label>
+                    <span className="text-[0.6rem] font-bold text-natural-accent bg-natural-accent/10 px-2 py-0.5 rounded">Needs Attention</span>
+                  </div>
+                  <div className="max-h-[350px] overflow-y-auto space-y-3 pr-2 scrollbar-thin">
+                    {items
+                      .filter(i => i.status === 'Critical' || i.status === 'Low Stock')
+                      .sort((a, b) => {
+                        if (a.status === 'Critical' && b.status !== 'Critical') return -1;
+                        if (a.status !== 'Critical' && b.status === 'Critical') return 1;
+                        return 0;
+                      })
+                      .map(item => (
+                        <button
+                          key={item.id}
+                          onClick={() => {
+                            setSelectedItemId(item.id);
+                            setEditName(item.name);
+                            setEditCategory(item.category);
+                            setEditMinStock(item.minStock);
+                            setFormError(null);
+                          }}
+                          className={cn(
+                            "w-full text-left p-4 rounded-xl border-2 transition-all relative overflow-hidden group",
+                            selectedItemId === item.id 
+                              ? "border-natural-accent bg-natural-accent/5 ring-2 ring-natural-accent/10" 
+                              : item.status === 'Critical'
+                                ? "border-red-200 bg-red-50/50 hover:bg-red-50 hover:border-red-300"
+                                : "border-orange-200 bg-orange-50/50 hover:bg-orange-50 hover:border-orange-300"
+                          )}
+                        >
+                          <div className={cn(
+                            "absolute left-0 top-0 bottom-0 w-1.5",
+                            item.status === 'Critical' ? "bg-red-500" : "bg-orange-400"
+                          )} />
+                          <div className="pl-2 flex justify-between items-center">
+                            <div>
+                              <p className="text-base font-bold text-natural-text-main">{item.name}</p>
+                              <p className="text-xs text-natural-text-light uppercase mt-1">
+                                Stock: <span className={cn("font-bold", item.status === 'Critical' ? "text-red-600" : "text-orange-600")}>{item.stock}</span> / {item.minStock} {item.unit}
+                              </p>
+                            </div>
+                            <span className={cn(
+                              "text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-md",
+                              item.status === 'Critical' ? "bg-red-100 text-red-600" : "bg-orange-100 text-orange-600"
+                            )}>
+                              {item.status}
+                            </span>
+                          </div>
+                        </button>
+                      ))}
+                    {items.filter(i => i.status === 'Critical' || i.status === 'Low Stock').length === 0 && (
+                      <div className="p-8 text-center border-2 border-dashed border-natural-border rounded-xl">
+                        <CheckCircle2 className="w-8 h-8 text-[#6b8e23] mx-auto mb-2 opacity-50" />
+                        <p className="text-sm font-bold text-natural-text-main">All caught up!</p>
+                        <p className="text-xs text-natural-text-light mt-1">No items are currently low on stock.</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : (

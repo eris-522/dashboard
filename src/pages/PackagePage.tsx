@@ -29,47 +29,6 @@ export interface CateringPackage {
   status: string;
 }
 
-const initialInclusionCategories: Record<string, string[]> = {
-  Catering: [
-    "Buffet Setup",
-    "Plated Dinner Service",
-    "Cocktail Hour Appetizers",
-    "Dessert Station",
-    "Beverage Station (Non-alcoholic)",
-    "Mobile Bar Service",
-  ],
-  "Venue Styling": [
-    "Thematic Backdrop",
-    "Table Centerpieces",
-    "Guest Seating Chart",
-    "Welcome Signage",
-    "Aisle Decor",
-    "Stage Design",
-  ],
-  "Photo & Video": [
-    "Full Day Photo Coverage",
-    "Full Day Video Coverage",
-    "Same-Day Edit Video",
-    "Pre-event Photoshoot",
-    "Drone Videography",
-    "Photo Album",
-  ],
-  Entertainment: [
-    "Live Band",
-    "DJ/Emcee",
-    "String Quartet",
-    "Photobooth",
-    "Dancers/Performers",
-  ],
-  "Flowers & Ceremony": [
-    "Bridal Bouquet",
-    "Entourage Flowers",
-    "Ceremony Arch Flowers",
-    "Table Centerpiece Flowers",
-    "Aisle Petals",
-  ],
-};
-
 export function PackagePage() {
   // Feature: State management for database arrays and UI toggles
   const [packages, setPackages] = useState<CateringPackage[]>([]);
@@ -79,12 +38,8 @@ export function PackagePage() {
   const [editingPackage, setEditingPackage] =
     useState<Partial<CateringPackage> | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [openInclusionSections, setOpenInclusionSections] = useState<string[]>([
-    "Catering",
-  ]);
-  const [dynamicInclusionCategories, setDynamicInclusionCategories] = useState<Record<string, string[]>>(
-    initialInclusionCategories,
-  );
+  const [openInclusionSections, setOpenInclusionSections] = useState<string[]>([]);
+  const [dynamicInclusionCategories, setDynamicInclusionCategories] = useState<Record<string, string[]>>({});
   const [addingItemToCategory, setAddingItemToCategory] = useState<string | null>(
     null,
   );
@@ -105,6 +60,21 @@ export function PackagePage() {
   // Feature: Fetches packages from the database on page load
   useEffect(() => {
     fetchData();
+    fetchInclusions();
+
+    const channel = supabase
+      .channel("packages-channel-sync")
+      .on("postgres_changes", { event: "*", schema: "public", table: "packages" }, () => {
+        fetchData();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "inclusions" }, () => {
+        fetchInclusions();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   // Feature: Main database read function.
@@ -117,6 +87,27 @@ export function PackagePage() {
     if (pkgResponse.error)
       console.error("Error fetching packages:", pkgResponse.error);
     else setPackages(pkgResponse.data as CateringPackage[]);
+  };
+
+  const fetchInclusions = async () => {
+    const { data, error } = await supabase.from("inclusions").select("*");
+    if (error) {
+      console.error("Error fetching inclusions:", error);
+      return;
+    }
+    
+    const grouped: Record<string, string[]> = {};
+    if (data) {
+      data.forEach((row: any) => {
+        if (!grouped[row.category]) grouped[row.category] = [];
+        if (row.items && row.items.trim() !== "" && row.items !== "-") {
+          if (!grouped[row.category].includes(row.items)) {
+            grouped[row.category].push(row.items);
+          }
+        }
+      });
+    }
+    setDynamicInclusionCategories(grouped);
   };
 
   const displayedPackages = useMemo(() => {
@@ -137,6 +128,7 @@ export function PackagePage() {
       ...pkg,
       status: pkg.status === "Active" ? "Available" : (pkg.status || "Available")
     });
+    setFormError(null);
     setIsModalOpen(true);
   };
 
@@ -188,7 +180,7 @@ export function PackagePage() {
     );
   };
 
-  const handleAddNewItemToCategory = (category: string) => {
+  const handleAddNewItemToCategory = async (category: string) => {
     if (
       !newItemName.trim() ||
       dynamicInclusionCategories[category]?.includes(newItemName.trim())
@@ -197,22 +189,36 @@ export function PackagePage() {
       setAddingItemToCategory(null);
       return;
     }
-    const updatedCategoryItems = [
-      ...(dynamicInclusionCategories[category] || []),
-      newItemName.trim(),
-    ];
+
+    const trimmedName = newItemName.trim();
+
+    // Optimistic UI Update so the checkbox appears immediately
     setDynamicInclusionCategories((prev) => ({
       ...prev,
-      [category]: updatedCategoryItems,
+      [category]: [...(prev[category] || []), trimmedName],
     }));
+
+    const { error } = await supabase.from("inclusions").insert([{
+      category,
+      items: trimmedName
+    }]);
+
+    if (error) {
+      console.error("Error adding inclusion item:", error);
+      setFormError(`Failed to save item: ${error.message}`);
+      return;
+    }
+
     // Automatically check the new item
-    handleInclusionChange(newItemName.trim(), true);
+    handleInclusionChange(trimmedName, true);
     setNewItemName("");
     setAddingItemToCategory(null);
   };
 
-  const handleAddNewCategory = () => {
+  const handleAddNewCategory = async () => {
     const trimmedCategoryName = newCategoryName.trim();
+    setFormError(null);
+
     if (
       !trimmedCategoryName ||
       Object.keys(dynamicInclusionCategories)
@@ -223,16 +229,29 @@ export function PackagePage() {
       setIsAddingCategory(false);
       return;
     }
+
+    // Optimistic UI Update
     setDynamicInclusionCategories((prev) => ({
       ...prev,
       [trimmedCategoryName]: [],
     }));
-    // Also expand the new category
+
     if (!openInclusionSections.includes(trimmedCategoryName)) {
       toggleInclusionSection(trimmedCategoryName);
     }
     setNewCategoryName("");
     setIsAddingCategory(false);
+
+    // Insert a placeholder name alongside the category to officially establish it in the database
+    const { error } = await supabase.from("inclusions").insert([{
+      category: trimmedCategoryName,
+      items: "-"
+    }]);
+
+    if (error) {
+      console.error("Error adding inclusion category:", error);
+      setFormError(`Failed to save category to database: ${error.message}`);
+    }
   };
 
   const confirmDeleteCategory = (e: React.MouseEvent, category: string) => {
@@ -255,6 +274,36 @@ export function PackagePage() {
 
   // Feature: Moves user from the package input form to the final validation step
   const handleConfirmSave = () => {
+    if (editingPackage?.name) {
+      const nameRegex = /^[a-zA-Z\sñÑ\-']+$/;
+      if (!nameRegex.test(editingPackage.name)) {
+        setFormError("Package name cannot contain numbers or special characters.");
+        return;
+      }
+    }
+
+    if (editingPackage?.pax) {
+      const nums = editingPackage.pax.match(/\d+/g);
+      if (!nums) {
+        setFormError("Please enter a valid guest count.");
+        return;
+      }
+      const hasInvalid = nums.some(n => {
+        const num = parseInt(n, 10);
+        return num < 10 || num > 500;
+      });
+      if (hasInvalid) {
+        setFormError("Guest count must be between 10 and 500.");
+        return;
+      }
+    }
+
+    if (!editingPackage?.inclusions || editingPackage.inclusions.length < 5) {
+      setFormError("Please select at least 5 inclusions for this package.");
+      return;
+    }
+
+    setFormError(null);
     setIsModalOpen(false);
     setConfirmAction({
       type: editingPackage?.id ? "edit" : "create",
@@ -270,10 +319,14 @@ export function PackagePage() {
     setFormError(null);
 
     if (confirmAction.type === "delete") {
+      let packagesWereUpdated = false;
+
       if (confirmAction.itemType === "category") {
         const category = confirmAction.itemName;
         const itemsInCategory = dynamicInclusionCategories[category] || [];
         
+        await supabase.from("inclusions").delete().eq("category", category);
+
         setDynamicInclusionCategories((prev) => {
           const updated = { ...prev };
           delete updated[category];
@@ -286,10 +339,20 @@ export function PackagePage() {
           );
           setEditingPackage({ ...editingPackage, inclusions: newInclusions });
         }
+
+        // Remove these deleted items from all existing packages in the DB to reflect on client side
+        const affectedPackages = packages.filter((pkg) => pkg.inclusions && pkg.inclusions.some((inc) => itemsInCategory.includes(inc)));
+        for (const pkg of affectedPackages) {
+          const updatedInclusions = pkg.inclusions.filter((inc) => !itemsInCategory.includes(inc));
+          await supabase.from("packages").update({ inclusions: updatedInclusions }).eq("id", pkg.id);
+          packagesWereUpdated = true;
+        }
       } else if (confirmAction.itemType === "item" && confirmAction.parentCategory) {
         const category = confirmAction.parentCategory;
         const item = confirmAction.itemName;
         
+        await supabase.from("inclusions").delete().eq("category", category).eq("items", item);
+
         setDynamicInclusionCategories((prev) => ({
           ...prev,
           [category]: prev[category].filter((i) => i !== item),
@@ -298,8 +361,20 @@ export function PackagePage() {
         if (editingPackage && editingPackage.inclusions?.includes(item)) {
           handleInclusionChange(item, false);
         }
+
+        // Remove the deleted item from all existing packages in the DB to reflect on client side
+        const affectedPackages = packages.filter((pkg) => pkg.inclusions && pkg.inclusions.includes(item));
+        for (const pkg of affectedPackages) {
+          const updatedInclusions = pkg.inclusions.filter((inc) => inc !== item);
+          await supabase.from("packages").update({ inclusions: updatedInclusions }).eq("id", pkg.id);
+          packagesWereUpdated = true;
+        }
       }
-      // Clear the modal without calling fetchData() to prevent closing the Package Editor
+      
+      if (packagesWereUpdated) {
+        await fetchData();
+      }
+
       setConfirmAction(null);
       return;
     }
@@ -508,21 +583,57 @@ export function PackagePage() {
                 </div>
               </div>
 
-              <div className="p-6 flex-1 bg-natural-bg/5 space-y-3">
+              <div className="p-6 flex-1 bg-natural-bg/5 space-y-4">
                 <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest">
                   Inclusions
                 </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
-                  {pkg.inclusions &&
-                    pkg.inclusions.map((inc: string, i: number) => (
-                      <div key={i} className="flex items-start gap-2">
-                        <Check className="w-3.5 h-3.5 text-natural-accent mt-0.5" />
-                        <span className="text-[0.7rem] font-medium text-natural-text-main/80">
-                          {inc}
-                        </span>
-                      </div>
-                    ))}
-                </div>
+                {pkg.inclusions && pkg.inclusions.length > 0 ? (
+                  <div className="space-y-4">
+                    {Object.entries(dynamicInclusionCategories).map(([cat, items]) => {
+                      const selectedInThisCategory = pkg.inclusions.filter((inc) => items.includes(inc));
+                      if (selectedInThisCategory.length === 0) return null;
+                      return (
+                        <div key={cat} className="space-y-1.5">
+                          <p className="text-[0.65rem] font-bold text-natural-text-main/70 uppercase tracking-widest border-b border-natural-border/50 pb-1 mb-2">{cat}</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+                            {selectedInThisCategory.map((inc, i) => (
+                              <div key={`${inc}-${i}`} className="flex items-start gap-2">
+                                <Check className="w-3.5 h-3.5 text-natural-accent shrink-0 mt-0.5" />
+                                <span className="text-[0.7rem] font-medium text-natural-text-main/80 leading-tight">
+                                  {inc}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {(() => {
+                      const allCategorizedItems = Object.values(dynamicInclusionCategories).flat();
+                      const uncategorized = pkg.inclusions.filter((inc) => !allCategorizedItems.includes(inc));
+                      if (uncategorized.length === 0) return null;
+                      return (
+                        <div className="space-y-1.5">
+                          <p className="text-[0.65rem] font-bold text-natural-text-main/70 uppercase tracking-widest border-b border-natural-border/50 pb-1 mb-2">Other</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+                            {uncategorized.map((inc, i) => (
+                              <div key={`uncat-${inc}-${i}`} className="flex items-start gap-2">
+                                <Check className="w-3.5 h-3.5 text-natural-accent shrink-0 mt-0.5" />
+                                <span className="text-[0.7rem] font-medium text-natural-text-main/80 leading-tight">
+                                  {inc}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                ) : (
+                  <p className="text-[0.75rem] font-medium text-natural-text-light/80">
+                    No inclusions specified.
+                  </p>
+                )}
               </div>
             </div>
           ))}
@@ -545,6 +656,11 @@ export function PackagePage() {
             </div>
 
             <div className="p-6 space-y-4">
+              {formError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl">
+                  <p className="text-xs font-bold text-red-600">{formError}</p>
+                </div>
+              )}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
                 {/* LEFT: input layout */}
                 <div className="space-y-4">
@@ -563,12 +679,13 @@ export function PackagePage() {
                         <input
                           type="text"
                           value={editingPackage.name || ""}
-                          onChange={(e) =>
+                          onChange={(e) => {
                             setEditingPackage({
                               ...editingPackage,
                               name: e.target.value,
-                            })
-                          }
+                            });
+                            setFormError(null);
+                          }}
                           className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 col-span-2"
                         />
                       </div>
@@ -891,20 +1008,46 @@ export function PackagePage() {
                           <div className="p-3">
                             {editingPackage.inclusions &&
                             editingPackage.inclusions.length > 0 ? (
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
-                                {editingPackage.inclusions
-                                  .slice(0, 6)
-                                  .map((inc, i) => (
-                                    <div
-                                      key={`${inc}-${i}`}
-                                      className="flex items-start gap-2"
-                                    >
-                                      <Check className="w-3.5 h-3.5 text-natural-accent mt-0.5" />
-                                      <span className="text-[0.7rem] font-medium text-natural-text-main/80">
-                                        {inc}
-                                      </span>
+                              <div className="space-y-4 max-h-64 overflow-y-auto pr-2 scrollbar-thin">
+                                {Object.entries(dynamicInclusionCategories).map(([cat, items]) => {
+                                  const selectedInThisCategory = editingPackage.inclusions!.filter((inc) => items.includes(inc));
+                                  if (selectedInThisCategory.length === 0) return null;
+                                  return (
+                                    <div key={cat} className="space-y-1.5">
+                                      <p className="text-[0.6rem] font-bold text-natural-text-main uppercase tracking-widest border-b border-natural-border/50 pb-1 mb-2">{cat}</p>
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+                                        {selectedInThisCategory.map((inc, i) => (
+                                          <div key={`${inc}-${i}`} className="flex items-start gap-2">
+                                            <Check className="w-3.5 h-3.5 text-natural-accent shrink-0 mt-0.5" />
+                                            <span className="text-[0.7rem] font-medium text-natural-text-main/80 leading-tight">
+                                              {inc}
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
                                     </div>
-                                  ))}
+                                  );
+                                })}
+                                {(() => {
+                                  const allCategorizedItems = Object.values(dynamicInclusionCategories).flat();
+                                  const uncategorized = editingPackage.inclusions!.filter((inc) => !allCategorizedItems.includes(inc));
+                                  if (uncategorized.length === 0) return null;
+                                  return (
+                                    <div className="space-y-1.5">
+                                      <p className="text-[0.6rem] font-bold text-natural-text-main uppercase tracking-widest border-b border-natural-border/50 pb-1 mb-2">Other</p>
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+                                        {uncategorized.map((inc, i) => (
+                                          <div key={`uncat-${inc}-${i}`} className="flex items-start gap-2">
+                                            <Check className="w-3.5 h-3.5 text-natural-accent shrink-0 mt-0.5" />
+                                            <span className="text-[0.7rem] font-medium text-natural-text-main/80 leading-tight">
+                                              {inc}
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             ) : (
                               <p className="text-[0.75rem] font-medium text-natural-text-light/80">

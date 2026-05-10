@@ -27,8 +27,8 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
   const allNotifications = bookings
     .filter((b) => (b.status || "Pending") !== "Archived")
     .sort((a, b) => {
-      const isUnreadA = ((a.status || "Pending") === "Pending" || a.status === "Inquiry" || a.status === "Cancelled") && !dismissedIds.includes(a.id);
-      const isUnreadB = ((b.status || "Pending") === "Pending" || b.status === "Inquiry" || b.status === "Cancelled") && !dismissedIds.includes(b.id);
+      const isUnreadA = ((a.status || "Pending") === "Pending" || a.status === "Inquiry" || a.status === "Cancelled" || a.status === "Confirmed") && !dismissedIds.includes(a.id);
+      const isUnreadB = ((b.status || "Pending") === "Pending" || b.status === "Inquiry" || b.status === "Cancelled" || b.status === "Confirmed") && !dismissedIds.includes(b.id);
 
       if (isUnreadA && !isUnreadB) return -1;
       if (!isUnreadA && isUnreadB) return 1;
@@ -39,7 +39,7 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
 
   const pendingCount = bookings.filter((b) => {
     const status = b.status || "Pending";
-    return (status === "Pending" || status === "Inquiry" || status === "Cancelled") && !dismissedIds.includes(b.id);
+    return (status === "Pending" || status === "Inquiry" || status === "Cancelled" || status === "Confirmed") && !dismissedIds.includes(b.id);
   }).length;
 
   return (
@@ -68,13 +68,13 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
               <div className="flex items-center gap-3">
                 {allNotifications.some(b => {
                   const status = b.status || "Pending";
-                  return (status === "Pending" || status === "Inquiry" || status === "Cancelled") && !dismissedIds.includes(b.id);
+                  return (status === "Pending" || status === "Inquiry" || status === "Cancelled" || status === "Confirmed") && !dismissedIds.includes(b.id);
                 }) && (
                   <button 
                     onClick={() => {
                       allNotifications.forEach(b => {
                         const status = b.status || "Pending";
-                        if ((status === "Pending" || status === "Inquiry" || status === "Cancelled") && !dismissedIds.includes(b.id)) {
+                        if ((status === "Pending" || status === "Inquiry" || status === "Cancelled" || status === "Confirmed") && !dismissedIds.includes(b.id)) {
                           if (onDismiss) onDismiss(b.id);
                         }
                       });
@@ -98,7 +98,7 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
                 </div>
               ) : (
                 displayBookings.map((booking) => {
-                  const isUnreadNotif = ((booking.status || "Pending") === "Pending" || booking.status === "Inquiry" || booking.status === "Cancelled") && !dismissedIds.includes(booking.id);
+                  const isUnreadNotif = ((booking.status || "Pending") === "Pending" || booking.status === "Inquiry" || booking.status === "Cancelled" || booking.status === "Confirmed") && !dismissedIds.includes(booking.id);
                   const isExpanded = expandedId === booking.id;
 
                   return (
@@ -123,6 +123,9 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
                           </p>
                           <p className="text-[10px] text-natural-text-light mt-0.5">
                             from {booking.customerName}
+                          </p>
+                          <p className="text-[9px] text-natural-text-light mt-0.5 opacity-70">
+                            {booking.status === "Cancelled" ? "Cancelled on" : booking.status === "Confirmed" ? "Confirmed on" : "Updated on"}: {booking.updated_at ? new Date(booking.updated_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : (booking.created_at ? new Date(booking.created_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : "Recently")}
                           </p>
                           {booking.status === "Cancelled" && !isExpanded && (
                             <p className="text-[10px] text-red-800/70 mt-1 italic truncate max-w-[180px]">

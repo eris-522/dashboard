@@ -107,6 +107,12 @@ export function BookingPage() {
     // Fetch initial data
     fetchAllData();
 
+    const intervalId = setInterval(() => {
+      supabase.from("menu_items").select("*").neq("status", "Archived").then(({ data }) => {
+        if (data) setMenuItems(data);
+      });
+    }, 10000);
+
     // Subscribe to real-time changes on the bookings table
     const channel = supabase
       .channel("bookings-channel")
@@ -118,10 +124,20 @@ export function BookingPage() {
           fetchAllData(); // Refresh data when any booking changes
         },
       )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "menu_items" },
+        () => {
+          supabase.from("menu_items").select("*").neq("status", "Archived").then(({ data }) => {
+            if (data) setMenuItems(data);
+          });
+        }
+      )
       .subscribe();
 
     // Cleanup subscription on unmount
     return () => {
+      clearInterval(intervalId);
       channel.unsubscribe();
     };
   }, []);
@@ -960,18 +976,20 @@ export function BookingPage() {
                     Menu Selection
                   </h4>
                   <div className="grid grid-cols-1 gap-1 max-h-60 overflow-y-auto pr-2 scrollbar-thin">
-                    {menuItems.map((item) => (
+                    {menuItems.map((item) => {
+                      const isUnavailable = item.status === "Not Available";
+                      return (
                       <label
                         key={item.id}
-                        className="flex items-center gap-2 p-2 hover:bg-natural-bg/50 rounded-lg transition-colors cursor-pointer group"
+                        className={cn("flex items-center gap-2 p-2 rounded-lg transition-colors group", isUnavailable ? "opacity-50 cursor-not-allowed" : "hover:bg-natural-bg/50 cursor-pointer")}
                       >
                         <input
                           type="checkbox"
+                          disabled={isUnavailable}
                           className="w-3.5 h-3.5 rounded border-natural-border text-natural-accent focus:ring-natural-accent/20"
-                          checked={newBooking.selected_menu_items.includes(
-                            item.name,
-                          )}
+                          checked={newBooking.selected_menu_items.includes(item.name)}
                           onChange={(e) => {
+                            if (isUnavailable) return;
                             const current = newBooking.selected_menu_items;
                             const updated = e.target.checked
                               ? [...current, item.name]
@@ -982,14 +1000,22 @@ export function BookingPage() {
                             });
                           }}
                         />
-                        <span className="text-xs font-medium text-natural-text-main group-hover:text-natural-accent transition-colors">
-                          {item.name}{" "}
-                          <span className="text-[9px] text-gray-400">
-                            ({item.category}{item.sub_category ? ` - ${item.sub_category}` : ""})
+                        <div className="flex flex-1 justify-between items-center">
+                          <span className="text-xs font-medium text-natural-text-main group-hover:text-natural-accent transition-colors">
+                            {item.name}{" "}
+                            <span className="text-[9px] text-gray-400">
+                              ({item.category}{item.sub_category ? ` - ${item.sub_category}` : ""})
+                            </span>
                           </span>
-                        </span>
+                          {isUnavailable && (
+                            <span className="text-[9px] font-bold text-orange-600 bg-orange-50 border border-orange-100 px-1.5 py-0.5 rounded uppercase tracking-widest">
+                              Not Available
+                            </span>
+                          )}
+                        </div>
                       </label>
-                    ))}
+                      );
+                    })}
                   </div>
                 </section>
 
@@ -1095,20 +1121,27 @@ export function BookingPage() {
                     </span>
                   </p>
                 </div>
-                <span
-                  className={cn(
-                    "text-[0.6rem] font-bold uppercase tracking-widest px-3 py-1.5 rounded-full border",
-                    (selectedBooking.status || "Pending") === "Confirmed"
-                      ? "bg-green-50 text-green-700 border-green-200"
-                      : (selectedBooking.status || "Pending") === "Cancelled"
-                        ? "bg-red-50 text-red-700 border-red-200"
-                        : (selectedBooking.status || "Pending") === "Archived"
-                          ? "bg-gray-100 text-gray-600 border-gray-300"
-                          : "bg-orange-50 text-orange-700 border-orange-200",
+                <div className="flex flex-col items-end gap-1.5">
+                  <span
+                    className={cn(
+                      "text-[0.6rem] font-bold uppercase tracking-widest px-3 py-1.5 rounded-full border",
+                      (selectedBooking.status || "Pending") === "Confirmed"
+                        ? "bg-green-50 text-green-700 border-green-200"
+                        : (selectedBooking.status || "Pending") === "Cancelled"
+                          ? "bg-red-50 text-red-700 border-red-200"
+                          : (selectedBooking.status || "Pending") === "Archived"
+                            ? "bg-gray-100 text-gray-600 border-gray-300"
+                            : "bg-orange-50 text-orange-700 border-orange-200",
+                    )}
+                  >
+                    {selectedBooking.status || "Pending"}
+                  </span>
+                  {((selectedBooking.status || "Pending") === "Confirmed" || (selectedBooking.status || "Pending") === "Cancelled") && (
+                    <span className="text-[9px] font-bold text-natural-text-light uppercase tracking-widest">
+                      {selectedBooking.status === "Confirmed" ? "Confirmed on" : "Cancelled on"}: {selectedBooking.updated_at ? new Date(selectedBooking.updated_at).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : (selectedBooking.created_at ? new Date(selectedBooking.created_at).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : "N/A")}
+                    </span>
                   )}
-                >
-                  {selectedBooking.status || "Pending"}
-                </span>
+                </div>
               </div>
 
               {(selectedBooking.status || "Pending") === "Cancelled" && (
@@ -1183,17 +1216,57 @@ export function BookingPage() {
                 <h5 className="text-[0.65rem] font-bold text-natural-accent uppercase tracking-widest">
                   Menu Selection
                 </h5>
-                <div className="flex flex-wrap gap-2">
+                <div className="space-y-3">
                   {selectedBooking.selected_menu_items &&
                   selectedBooking.selected_menu_items.length > 0 ? (
-                    selectedBooking.selected_menu_items.map((m: string) => (
-                      <span
-                        key={m}
-                        className="px-2 py-1 bg-natural-bg border border-natural-border rounded text-[9px] font-bold text-natural-text-main uppercase tracking-tighter"
-                      >
-                        {m}
-                      </span>
-                    ))
+                    (() => {
+                      const groupedMenu: Record<string, string[]> = {};
+                      const uncategorized: string[] = [];
+
+                      selectedBooking.selected_menu_items.forEach((m: string) => {
+                        const itemDef = menuItems.find(mi => mi.name === m);
+                        if (itemDef && itemDef.category) {
+                          const cat = itemDef.category;
+                          if (!groupedMenu[cat]) groupedMenu[cat] = [];
+                          groupedMenu[cat].push(m);
+                        } else {
+                          uncategorized.push(m);
+                        }
+                      });
+
+                      const renderGroups: React.ReactNode[] = [];
+                      Object.entries(groupedMenu).forEach(([cat, items]) => {
+                        renderGroups.push(
+                          <div key={cat} className="space-y-1.5">
+                            <p className="text-[0.6rem] font-bold text-natural-text-light uppercase tracking-widest border-b border-natural-border/50 pb-1">{cat}</p>
+                            <div className="flex flex-wrap gap-2">
+                              {items.map((m) => (
+                                <span key={m} className="px-2 py-1 bg-natural-bg border border-natural-border rounded text-[9px] font-bold text-natural-text-main uppercase tracking-tighter">
+                                  {m}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      });
+
+                      if (uncategorized.length > 0) {
+                        renderGroups.push(
+                          <div key="Other" className="space-y-1.5">
+                            <p className="text-[0.6rem] font-bold text-natural-text-light uppercase tracking-widest border-b border-natural-border/50 pb-1">Other</p>
+                            <div className="flex flex-wrap gap-2">
+                              {uncategorized.map((m) => (
+                                <span key={m} className="px-2 py-1 bg-natural-bg border border-natural-border rounded text-[9px] font-bold text-natural-text-main uppercase tracking-tighter">
+                                  {m}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return renderGroups;
+                    })()
                   ) : (
                     <span className="text-xs text-natural-text-light italic">
                       No menu items selected

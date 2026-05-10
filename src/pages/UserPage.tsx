@@ -53,12 +53,10 @@ export function UserPage() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [formData, setFormData] = useState<
-    Partial<User> & { password?: string }
-  >({});
+  const [formData, setFormData] = useState<Partial<User>>({});
   const [visibleEmails, setVisibleEmails] = useState<Record<string, boolean>>({});
   const [confirmAction, setConfirmAction] = useState<{
-    type: "create" | "edit" | "archive";
+    type: "edit" | "archive";
     userId?: string;
     userName: string;
   } | null>(null);
@@ -197,106 +195,16 @@ export function UserPage() {
   const handleConfirmSave = () => {
     setIsModalOpen(false);
     setConfirmAction({
-      type: editingUser ? "edit" : "create",
+      type: "edit",
       userId: editingUser?.id,
-      userName: formData.name || "New User",
+      userName: formData.name || "User",
     });
   };
-
-  const isCreateValid = useMemo(() => {
-    if (editingUser) return false;
-    const trimmedName = (formData.name ?? "").toString().trim();
-    const email = (formData.email ?? "").toString().trim();
-    const password = (formData.password ?? "").toString();
-
-    return Boolean(trimmedName && email && password);
-  }, [editingUser, formData.name, formData.email, formData.password]);
 
   const handleExecuteAction = async () => {
     if (!confirmAction) return;
 
-    if (confirmAction.type === "create" && !isCreateValid) return;
-
-
-    if (confirmAction.type === "create") {
-      const trimmedName = (formData.name ?? "").toString().trim();
-      const email = (formData.email ?? "").toString().trim();
-      const password = (formData.password ?? "").toString();
-
-      if (!trimmedName) {
-        console.error("Cannot create user: name is empty.");
-        return;
-      }
-      if (!email) {
-        console.error("Cannot create user: email is empty.");
-        return;
-      }
-      if (!password) {
-        console.error("Cannot create user: password is empty.");
-        return;
-      }
-
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            full_name: trimmedName,
-          },
-        },
-      });
-
-      if (signUpError) {
-        console.error("Error creating user auth:", signUpError.message);
-        return;
-      }
-
-      if (!data?.user) {
-        console.error("SignUp succeeded but data.user is missing.");
-        return;
-      }
-
-      const userId = data.user.id;
-
-      // Upsert into public.profiles so BookingPage can render profiles.name.
-      // NOTE: We intentionally set both `name` and `full_name` in case your DB uses either.
-      const upsertPayload: Record<string, any> = {
-        id: userId,
-        email,
-        name: trimmedName,
-        full_name: trimmedName,
-        role: formData.role || "Customer",
-        status: formData.status || "Active",
-      };
-
-      const { error: profileError, data: upsertData } = await supabase
-        .from("profiles")
-        .upsert(upsertPayload)
-        .select();
-
-      if (profileError) {
-        console.error("Error saving profile:", profileError.message, {
-          upsertPayload,
-          userId,
-        });
-        return;
-      }
-
-      console.log("Profile upsert result:", { upsertData, upsertPayload });
-
-      // Verify the stored name immediately to catch schema/column mismatch.
-      const { data: verifyData, error: verifyError } = await supabase
-        .from("profiles")
-        .select("id,name,full_name,email")
-        .eq("id", userId)
-        .maybeSingle();
-
-      if (verifyError) {
-        console.error("Error verifying profile after upsert:", verifyError.message);
-      } else {
-        console.log("Profile verify:", verifyData);
-      }
-    } else if (confirmAction.type === "edit" && confirmAction.userId) {
+    if (confirmAction.type === "edit" && confirmAction.userId) {
       const trimmedName = (formData.name ?? "").toString().trim();
 
       const { error: updateError } = await supabase
@@ -346,18 +254,6 @@ export function UserPage() {
             Manage your clients
           </p>
         </div>
-
-        <button
-          onClick={() => {
-            setEditingUser(null);
-            setFormData({ role: "Customer", status: "Active" });
-            setIsModalOpen(true);
-          }}
-          className="flex items-center gap-2 bg-natural-accent text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-natural-accent/90 transition-all shadow-sm"
-        >
-          <UserPlus className="w-4 h-4" />
-          Add New User
-        </button>
       </div>
 
       <div className="glass-card bg-white overflow-hidden">
@@ -570,7 +466,7 @@ export function UserPage() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 border border-natural-border">
             <div className="p-6 border-b border-natural-border flex items-center justify-between bg-natural-bg/10">
               <h3 className="text-xl font-serif font-bold text-natural-text-main">
-                {editingUser ? "Edit User Profile" : "Register New User"}
+                Edit User Profile
               </h3>
               <button
                 onClick={() => setIsModalOpen(false)}
@@ -607,33 +503,13 @@ export function UserPage() {
                     onChange={(e) =>
                       setFormData({ ...formData, email: e.target.value })
                     }
-                    disabled={!!editingUser}
+                    disabled={true}
                     className="w-full pl-10 pr-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white transition-all shadow-xs disabled:opacity-50"
                     placeholder="name@example.com"
                   />
                   <Mail className="absolute left-3.5 top-3 w-4 h-4 text-natural-text-light" />
                 </div>
               </div>
-
-              {!editingUser && (
-                <div className="space-y-1.5">
-                  <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest pl-1">
-                    Account Password
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="password"
-                      value={formData.password || ""}
-                      onChange={(e) =>
-                        setFormData({ ...formData, password: e.target.value })
-                      }
-                      className="w-full pl-10 pr-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white transition-all shadow-xs"
-                      placeholder="••••••••"
-                    />
-                    <Lock className="absolute left-3.5 top-3 w-4 h-4 text-natural-text-light" />
-                  </div>
-                </div>
-              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
@@ -681,7 +557,7 @@ export function UserPage() {
                 className="flex-1 bg-natural-accent text-white py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm flex items-center justify-center gap-2"
               >
                 <Check className="w-4 h-4" />
-                {editingUser ? "Update Profile" : "Create User"}
+                Update Profile
               </button>
             </div>
           </div>
@@ -695,16 +571,11 @@ export function UserPage() {
               <div
                 className={cn(
                   "w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 rotate-3 shadow-lg transition-transform hover:rotate-0",
-                  confirmAction.type === "create"
-                    ? "bg-blue-600 shadow-blue-200"
-                    : confirmAction.type === "edit"
-                      ? "bg-natural-accent shadow-natural-accent/20"
-                      : "bg-red-600 shadow-red-200",
+                  confirmAction.type === "edit"
+                    ? "bg-natural-accent shadow-natural-accent/20"
+                    : "bg-red-600 shadow-red-200",
                 )}
               >
-                {confirmAction.type === "create" && (
-                  <UserPlus className="w-8 h-8 text-white" />
-                )}
                 {confirmAction.type === "edit" && (
                   <Edit3 className="w-8 h-8 text-white" />
                 )}
@@ -714,23 +585,13 @@ export function UserPage() {
               </div>
 
               <h3 className="text-xl font-serif font-bold text-natural-text-main mb-2">
-                {confirmAction.type === "create"
-                  ? "Create New Account?"
-                  : confirmAction.type === "edit"
-                    ? "Save Changes?"
-                    : "Archive Account?"}
+                {confirmAction.type === "edit"
+                  ? "Save Changes?"
+                  : "Archive Account?"}
               </h3>
 
               <p className="text-sm text-natural-text-light mb-8 leading-relaxed">
-                {confirmAction.type === "create" ? (
-                  <>
-                    Are you sure you want to register{" "}
-                    <span className="font-bold text-natural-text-main">
-                      {confirmAction.userName}
-                    </span>{" "}
-                    as a new user in the system?
-                  </>
-                ) : confirmAction.type === "edit" ? (
+                {confirmAction.type === "edit" ? (
                   <>
                     You are about to update the profile details for{" "}
                     <span className="font-bold text-natural-text-main">
@@ -753,14 +614,11 @@ export function UserPage() {
               <div className="flex flex-col gap-3">
               <button
                 onClick={handleExecuteAction}
-                disabled={confirmAction.type === "create" && !isCreateValid}
                 className={cn(
                   "w-full py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] text-white transition-all shadow-md active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-inherit",
-                  confirmAction.type === "create"
-                    ? "bg-blue-600 hover:bg-blue-700"
-                    : confirmAction.type === "edit"
-                      ? "bg-natural-accent hover:bg-natural-accent/90"
-                      : "bg-red-600 hover:bg-red-700",
+                  confirmAction.type === "edit"
+                    ? "bg-natural-accent hover:bg-natural-accent/90"
+                    : "bg-red-600 hover:bg-red-700",
                 )}
               >
                 Confirm {confirmAction.type}

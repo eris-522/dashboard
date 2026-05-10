@@ -35,7 +35,6 @@ const categories = [
   "Pasta",
   "Desserts",
   "Beverages",
-  "Archived",
 ];
 
 export function MenuPage() {
@@ -62,6 +61,20 @@ export function MenuPage() {
   // Automatically fetches the menu items from the database when the page loads
   useEffect(() => {
     fetchMenuItems();
+
+    const intervalId = setInterval(() => fetchMenuItems(), 10000);
+
+    const channel = supabase
+      .channel("admin-menu-items")
+      .on("postgres_changes", { event: "*", schema: "public", table: "menu_items" }, () => {
+        fetchMenuItems();
+      })
+      .subscribe();
+
+    return () => {
+      clearInterval(intervalId);
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   // Queries the 'menu_items' table in Supabase and updates the local state
@@ -85,10 +98,6 @@ export function MenuPage() {
         item.name.toLowerCase().includes(query) ||
         item.category.toLowerCase().includes(query) ||
         (item.sub_category || "").toLowerCase().includes(query);
-
-      if (activeCategory === "Archived") {
-        return item.status === "Archived" && matchesSearch;
-      }
 
       const matchesCategory =
         activeCategory === "All" || item.category === activeCategory;
