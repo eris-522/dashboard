@@ -85,7 +85,7 @@ function AppContent() {
 
   const pendingCount = bookings.filter((b) => {
     const status = b.status || "Pending";
-    return (status === "Pending" || status === "Inquiry") && !dismissedIds.includes(b.id);
+    return (status === "Pending" || status === "Inquiry" || status === "Cancelled") && !dismissedIds.includes(b.id);
   }).length;
 
   React.useEffect(() => {

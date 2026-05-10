@@ -31,6 +31,7 @@ export interface Booking {
     | "Completed"
     | "Rejected"
     | "Archived";
+  cancellation_reason?: string;
 }
 
 interface BookingContextType {
@@ -121,6 +122,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
           additionalServices: booking.selected_add_ons || [],
           budget: 0, // Will be calculated by components if needed
           status: booking.status || "Pending",
+          cancellation_reason: booking.cancellation_reason || booking.cancel_reason || booking.reason || "",
         }));
         setBookings(transformedBookings);
         setError(null);

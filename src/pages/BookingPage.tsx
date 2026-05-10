@@ -1111,6 +1111,13 @@ export function BookingPage() {
                 </span>
               </div>
 
+              {(selectedBooking.status || "Pending") === "Cancelled" && (
+                <div className="mt-4 p-4 bg-red-50 border border-red-100 rounded-xl">
+                  <p className="text-[10px] font-bold text-red-800 uppercase tracking-widest mb-1">Reason for Cancellation</p>
+                  <p className="text-sm text-red-900 italic">"{selectedBooking.cancellation_reason && selectedBooking.cancellation_reason.trim() !== "" ? selectedBooking.cancellation_reason : "No reason provided"}"</p>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-8 py-6 border-y border-natural-border/50">
                 <div className="space-y-4">
                   <div className="flex items-start gap-3">

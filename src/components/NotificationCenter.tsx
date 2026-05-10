@@ -16,14 +16,30 @@ interface NotificationCenterProps {
 export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBooking, dismissedIds = [], onDismiss }: NotificationCenterProps) {
   const { bookings } = useBooking();
   const [expandedId, setExpandedId] = React.useState<number | null>(null);
+  const [showAll, setShowAll] = React.useState(false);
 
-  const recentBookings = bookings
+  React.useEffect(() => {
+    if (!isOpen) {
+      setTimeout(() => setShowAll(false), 200);
+    }
+  }, [isOpen]);
+
+  const allNotifications = bookings
     .filter((b) => (b.status || "Pending") !== "Archived")
-    .slice(0, 5);
+    .sort((a, b) => {
+      const isUnreadA = ((a.status || "Pending") === "Pending" || a.status === "Inquiry" || a.status === "Cancelled") && !dismissedIds.includes(a.id);
+      const isUnreadB = ((b.status || "Pending") === "Pending" || b.status === "Inquiry" || b.status === "Cancelled") && !dismissedIds.includes(b.id);
+
+      if (isUnreadA && !isUnreadB) return -1;
+      if (!isUnreadA && isUnreadB) return 1;
+      
+      return typeof b.id === 'number' && typeof a.id === 'number' ? b.id - a.id : 0;
+    });
+  const displayBookings = showAll ? allNotifications : allNotifications.slice(0, 5);
 
   const pendingCount = bookings.filter((b) => {
     const status = b.status || "Pending";
-    return (status === "Pending" || status === "Inquiry") && !dismissedIds.includes(b.id);
+    return (status === "Pending" || status === "Inquiry" || status === "Cancelled") && !dismissedIds.includes(b.id);
   }).length;
 
   return (
@@ -41,28 +57,48 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.95 }}
             transition={{ duration: 0.2 }}
-            className="absolute right-0 top-12 w-80 bg-white border border-natural-border rounded-xl shadow-2xl z-50 overflow-hidden glass-card"
+            className="absolute right-0 top-12 w-96 bg-white border border-natural-border rounded-xl shadow-2xl z-50 overflow-hidden glass-card"
           >
             <div className="p-4 border-b border-natural-border flex items-center justify-between bg-natural-bg/30">
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-bold text-natural-text-main uppercase tracking-widest">Recent Bookings</h3>
+                <h3 className="text-sm font-bold text-natural-text-main uppercase tracking-widest">
+                  {showAll ? "All Notifications" : "Recent Notifications"}
+                </h3>
               </div>
               <div className="flex items-center gap-3">
+                {allNotifications.some(b => {
+                  const status = b.status || "Pending";
+                  return (status === "Pending" || status === "Inquiry" || status === "Cancelled") && !dismissedIds.includes(b.id);
+                }) && (
+                  <button 
+                    onClick={() => {
+                      allNotifications.forEach(b => {
+                        const status = b.status || "Pending";
+                        if ((status === "Pending" || status === "Inquiry" || status === "Cancelled") && !dismissedIds.includes(b.id)) {
+                          if (onDismiss) onDismiss(b.id);
+                        }
+                      });
+                    }}
+                    className="text-[9px] font-bold text-natural-accent hover:underline uppercase tracking-widest"
+                  >
+                    Mark all read
+                  </button>
+                )}
                 <button onClick={onClose} className="p-1 hover:bg-natural-bg rounded-lg transition-colors">
                   <X className="w-4 h-4 text-natural-text-light" />
                 </button>
               </div>
             </div>
 
-            <div className="max-h-80 overflow-y-auto divide-y divide-natural-border scrollbar-none">
-              {recentBookings.length === 0 ? (
+            <div className="max-h-96 overflow-y-auto divide-y divide-natural-border scrollbar-none">
+              {displayBookings.length === 0 ? (
                 <div className="p-10 text-center">
                   <Bell className="w-8 h-8 text-natural-text-light opacity-20 mx-auto mb-3" />
-                  <p className="text-xs font-serif italic text-natural-text-light">No recent bookings found.</p>
+                  <p className="text-xs font-serif italic text-natural-text-light">No notifications found.</p>
                 </div>
               ) : (
-                recentBookings.map((booking) => {
-                  const isPending = ((booking.status || "Pending") === "Pending" || booking.status === "Inquiry") && !dismissedIds.includes(booking.id);
+                displayBookings.map((booking) => {
+                  const isUnreadNotif = ((booking.status || "Pending") === "Pending" || booking.status === "Inquiry" || booking.status === "Cancelled") && !dismissedIds.includes(booking.id);
                   const isExpanded = expandedId === booking.id;
 
                   return (
@@ -70,27 +106,32 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
                       key={booking.id} 
                       className={cn(
                         "p-4 hover:bg-natural-bg/30 transition-all cursor-pointer group",
-                        isPending && "bg-natural-accent/5"
+                        isUnreadNotif && (booking.status === "Cancelled" ? "bg-red-50/50" : "bg-natural-accent/5")
                       )}
                       onClick={() => {
                         setExpandedId(isExpanded ? null : booking.id);
-                        if (isPending && onDismiss) onDismiss(booking.id);
+                        if (isUnreadNotif && onDismiss) onDismiss(booking.id);
                       }}
                     >
                       <div className="flex justify-between items-start">
                         <div>
                           <p className="text-xs font-bold text-natural-text-main flex items-center gap-2">
-                            {booking.eventType || "Event"} Booking
-                            {isPending && (
-                              <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse"></span>
+                            {booking.status === "Cancelled" ? "Cancelled Booking" : `${booking.eventType || "Event"} Booking`}
+                            {isUnreadNotif && (
+                              <span className={cn("w-1.5 h-1.5 rounded-full animate-pulse", booking.status === "Cancelled" ? "bg-orange-500" : "bg-red-500")}></span>
                             )}
                           </p>
                           <p className="text-[10px] text-natural-text-light mt-0.5">
                             from {booking.customerName}
                           </p>
+                          {booking.status === "Cancelled" && !isExpanded && (
+                            <p className="text-[10px] text-red-800/70 mt-1 italic truncate max-w-[180px]">
+                              Reason: {booking.cancellation_reason && booking.cancellation_reason.trim() !== "" ? booking.cancellation_reason : "No reason provided"}
+                            </p>
+                          )}
                         </div>
                         <div className="flex items-center gap-2">
-                          {isPending && (
+                          {isUnreadNotif && (
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -110,6 +151,12 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
                       
                       {isExpanded && (
                         <div className="mt-3 pt-3 border-t border-natural-border/50 animate-in slide-in-from-top-1 fade-in duration-200">
+                          {booking.status === "Cancelled" && (
+                            <div className="mb-3 p-2.5 bg-red-50 border border-red-100 rounded-lg">
+                              <p className="text-[9px] font-bold text-red-800 uppercase tracking-widest mb-1">Reason for Cancellation</p>
+                              <p className="text-[11px] text-red-900 italic">"{booking.cancellation_reason && booking.cancellation_reason.trim() !== "" ? booking.cancellation_reason : "No reason provided"}"</p>
+                            </div>
+                          )}
                           <p className="text-[11px] text-natural-text-main mb-1">
                             <span className="font-semibold text-natural-text-light">Email:</span> {booking.email || "N/A"}
                           </p>
@@ -141,15 +188,24 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
             </div>
 
             <div className="p-3 bg-natural-bg/50 border-t border-natural-border text-center">
-              <button 
-                onClick={() => {
-                  if (onManageBooking) onManageBooking();
-                  onClose();
-                }}
-                className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest hover:text-natural-accent transition-colors"
-              >
-                View All Bookings
-              </button>
+              {!showAll && allNotifications.length > 5 ? (
+                <button 
+                  onClick={() => setShowAll(true)}
+                  className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest hover:text-natural-accent transition-colors"
+                >
+                  View All Notifications
+                </button>
+              ) : (
+                <button 
+                  onClick={() => {
+                    if (onManageBooking) onManageBooking();
+                    onClose();
+                  }}
+                  className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest hover:text-natural-accent transition-colors"
+                >
+                  Manage Bookings
+                </button>
+              )}
             </div>
           </motion.div>
         </>

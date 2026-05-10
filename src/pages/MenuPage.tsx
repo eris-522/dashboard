@@ -32,6 +32,7 @@ const categories = [
   "All",
   "Main Course",
   "Appetizers",
+  "Pasta",
   "Desserts",
   "Beverages",
   "Archived",
@@ -354,7 +355,7 @@ export function MenuPage() {
           </div>
         </div>
 
-        {["Desserts", "Beverages"].includes(activeCategory) ? (
+      {["Desserts", "Beverages", "Pasta"].includes(activeCategory) ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-0 divide-x divide-y divide-natural-border bg-white border-t border-natural-border">
             {filteredItems.map(renderDishCard)}
             {filteredItems.length === 0 && (
@@ -376,7 +377,8 @@ export function MenuPage() {
                   { title: "Pork", match: (i: MenuItem) => i.sub_category === "Pork" },
                   { title: "Chicken", match: (i: MenuItem) => i.sub_category === "Chicken" },
                   { title: "Fish & Shrimp", match: (i: MenuItem) => i.sub_category === "Fish & Shrimp" },
-                  { title: "Other Dishes", match: (i: MenuItem) => !["Beef", "Pork", "Chicken", "Fish & Shrimp"].includes(i.sub_category || "") }
+                  { title: "Rice", match: (i: MenuItem) => i.sub_category === "Rice" },
+                  { title: "Other Dishes", match: (i: MenuItem) => !["Beef", "Pork", "Chicken", "Fish & Shrimp", "Rice"].includes(i.sub_category || "") }
                 ];
               } else if (activeCategory === "Appetizers") {
                 sectionsConfig = [
@@ -391,15 +393,17 @@ export function MenuPage() {
                   { title: "Pork", match: (i: MenuItem) => i.sub_category === "Pork" && i.category === "Main Course" },
                   { title: "Chicken", match: (i: MenuItem) => i.sub_category === "Chicken" && i.category === "Main Course" },
                   { title: "Fish & Shrimp", match: (i: MenuItem) => i.sub_category === "Fish & Shrimp" && i.category === "Main Course" },
+                  { title: "Rice", match: (i: MenuItem) => i.sub_category === "Rice" && i.category === "Main Course" },
                   { title: "Appetizer", match: (i: MenuItem) => i.sub_category === "Appetizer" && i.category === "Appetizers" },
                   { title: "Vegetables", match: (i: MenuItem) => i.sub_category === "Vegetables" && i.category === "Appetizers" },
                   { title: "Soup", match: (i: MenuItem) => i.sub_category === "Soup" && i.category === "Appetizers" },
+                  { title: "Pasta", match: (i: MenuItem) => i.category === "Pasta" },
                   { title: "Desserts", match: (i: MenuItem) => i.category === "Desserts" },
                   { title: "Beverages", match: (i: MenuItem) => i.category === "Beverages" },
                   { title: "Other Dishes", match: (i: MenuItem) => 
-                      (!["Beef", "Pork", "Chicken", "Fish & Shrimp"].includes(i.sub_category || "") && i.category === "Main Course") || 
+                      (!["Beef", "Pork", "Chicken", "Fish & Shrimp", "Rice"].includes(i.sub_category || "") && i.category === "Main Course") || 
                       (!["Appetizer", "Vegetables", "Soup"].includes(i.sub_category || "") && i.category === "Appetizers") ||
-                      (!["Main Course", "Appetizers", "Desserts", "Beverages"].includes(i.category))
+                      (!["Main Course", "Appetizers", "Desserts", "Beverages", "Pasta"].includes(i.category))
                   }
                 ];
               }
@@ -541,6 +545,7 @@ export function MenuPage() {
                         <option value="Pork">Pork</option>
                         <option value="Chicken">Chicken</option>
                         <option value="Fish & Shrimp">Fish & Shrimp</option>
+                        <option value="Rice">Rice</option>
                       </>
                     )}
                     {formData.category === "Appetizers" && (

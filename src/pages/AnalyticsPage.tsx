@@ -57,7 +57,7 @@ export function AnalyticsPage() {
   }));
 
   // Low Stock Items
-  const lowStockCount = items.filter(i => i.status !== 'Healthy').length;
+  const lowStockCount = items.filter(i => i.status !== 'Healthy' && i.status !== 'Archived').length;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-12">
@@ -204,8 +204,8 @@ export function AnalyticsPage() {
            <h3 className="font-serif font-bold text-lg text-natural-text-main mb-6">Inventory Health</h3>
            <div className="h-[200px] w-full text-center flex flex-col justify-center border-2 border-dashed border-natural-border rounded-xl bg-natural-bg/20 p-6">
               <p className="text-xs text-natural-text-light italic leading-relaxed">
-                {items.length > 0 
-                  ? `Monitoring ${items.length} items. ${lowStockCount > 0 ? `${lowStockCount} items require immediate restocking.` : "All supplies are within healthy margins."}`
+                {items.filter(i => i.status !== 'Archived').length > 0 
+                  ? `Monitoring ${items.filter(i => i.status !== 'Archived').length} active items. ${lowStockCount > 0 ? `${lowStockCount} items require immediate restocking.` : "All supplies are within healthy margins."}`
                   : "No inventory data found. Please add supplies in the inventory management tab."}
               </p>
            </div>
