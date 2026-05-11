@@ -35,6 +35,7 @@ const categories = [
   "Pasta",
   "Desserts",
   "Beverages",
+  "Archived",
 ];
 
 export function MenuPage() {
@@ -98,6 +99,10 @@ export function MenuPage() {
         item.name.toLowerCase().includes(query) ||
         item.category.toLowerCase().includes(query) ||
         (item.sub_category || "").toLowerCase().includes(query);
+
+      if (activeCategory === "Archived") {
+        return item.status === "Archived" && matchesSearch;
+      }
 
       const matchesCategory =
         activeCategory === "All" || item.category === activeCategory;
@@ -364,7 +369,7 @@ export function MenuPage() {
           </div>
         </div>
 
-      {["Desserts", "Beverages", "Pasta"].includes(activeCategory) ? (
+      {["Desserts", "Beverages", "Pasta", "Archived"].includes(activeCategory) ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-0 divide-x divide-y divide-natural-border bg-white border-t border-natural-border">
             {filteredItems.map(renderDishCard)}
             {filteredItems.length === 0 && (
