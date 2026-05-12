@@ -9,55 +9,59 @@ interface NotificationCenterProps {
   onClose: () => void;
   onViewAllLogs?: () => void;
   onManageBooking?: () => void;
-  dismissedIds?: number[];
-  onDismiss?: (id: number) => void;
+  dismissedIds?: string[];
+  onDismiss?: (id: string) => void;
 }
 
 export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBooking, dismissedIds = [], onDismiss }: NotificationCenterProps) {
   const { bookings } = useBooking();
   const [expandedId, setExpandedId] = React.useState<number | null>(null);
   const [showAll, setShowAll] = React.useState(false);
+  const [readDuringSession, setReadDuringSession] = React.useState<string[]>([]);
 
   React.useEffect(() => {
     if (!isOpen) {
-      setTimeout(() => setShowAll(false), 200);
+      setTimeout(() => {
+        setShowAll(false);
+        setReadDuringSession([]);
+      }, 200);
     }
   }, [isOpen]);
 
   const allNotifications = bookings
     .filter((b) => (b.status || "Pending") !== "Archived")
     .sort((a, b) => {
-      const isUnreadA = ((a.status || "Pending") === "Pending" || a.status === "Inquiry" || a.status === "Cancelled" || a.status === "Confirmed") && !dismissedIds.includes(a.id);
-      const isUnreadB = ((b.status || "Pending") === "Pending" || b.status === "Inquiry" || b.status === "Cancelled" || b.status === "Confirmed") && !dismissedIds.includes(b.id);
+      const notifKeyA = `${a.id}-${a.status || "Pending"}`;
+      const notifKeyB = `${b.id}-${b.status || "Pending"}`;
+      const isUnreadA = ((a.status || "Pending") === "Pending" || a.status === "Inquiry" || a.status === "Cancelled" || a.status === "Confirmed") && (!dismissedIds.includes(notifKeyA) || readDuringSession.includes(notifKeyA));
+      const isUnreadB = ((b.status || "Pending") === "Pending" || b.status === "Inquiry" || b.status === "Cancelled" || b.status === "Confirmed") && (!dismissedIds.includes(notifKeyB) || readDuringSession.includes(notifKeyB));
 
       if (isUnreadA && !isUnreadB) return -1;
       if (!isUnreadA && isUnreadB) return 1;
       
-      return typeof b.id === 'number' && typeof a.id === 'number' ? b.id - a.id : 0;
+      // Sort by newest update or creation date
+      const timeA = new Date(a.updated_at || a.created_at || 0).getTime();
+      const timeB = new Date(b.updated_at || b.created_at || 0).getTime();
+      return timeB - timeA;
     });
   const displayBookings = showAll ? allNotifications : allNotifications.slice(0, 5);
 
   const pendingCount = bookings.filter((b) => {
     const status = b.status || "Pending";
-    return (status === "Pending" || status === "Inquiry" || status === "Cancelled" || status === "Confirmed") && !dismissedIds.includes(b.id);
+    const notifKey = `${b.id}-${status}`;
+    return (status === "Pending" || status === "Inquiry" || status === "Cancelled" || status === "Confirmed") && !dismissedIds.includes(notifKey);
   }).length;
 
   return (
     <AnimatePresence>
       {isOpen && (
         <>
-          {/* Overlay to handle closing when clicking outside */}
-          <div 
-            className="fixed inset-0 z-40 bg-black/5" 
-            onClick={onClose}
-          />
-          
           <motion.div
             initial={{ opacity: 0, y: 10, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.95 }}
             transition={{ duration: 0.2 }}
-            className="absolute right-0 top-12 w-96 bg-white border border-natural-border rounded-xl shadow-2xl z-50 overflow-hidden glass-card"
+            className="absolute right-0 top-12 w-[30rem] bg-white border border-natural-border rounded-xl shadow-2xl z-50 overflow-hidden glass-card"
           >
             <div className="p-4 border-b border-natural-border flex items-center justify-between bg-natural-bg/30">
               <div className="flex items-center gap-2">
@@ -68,16 +72,21 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
               <div className="flex items-center gap-3">
                 {allNotifications.some(b => {
                   const status = b.status || "Pending";
-                  return (status === "Pending" || status === "Inquiry" || status === "Cancelled" || status === "Confirmed") && !dismissedIds.includes(b.id);
+                const notifKey = `${b.id}-${status}`;
+                return (status === "Pending" || status === "Inquiry" || status === "Cancelled" || status === "Confirmed") && !dismissedIds.includes(notifKey);
                 }) && (
                   <button 
                     onClick={() => {
+                      const newlyRead: string[] = [];
                       allNotifications.forEach(b => {
                         const status = b.status || "Pending";
-                        if ((status === "Pending" || status === "Inquiry" || status === "Cancelled" || status === "Confirmed") && !dismissedIds.includes(b.id)) {
-                          if (onDismiss) onDismiss(b.id);
+                      const notifKey = `${b.id}-${status}`;
+                      if ((status === "Pending" || status === "Inquiry" || status === "Cancelled" || status === "Confirmed") && !dismissedIds.includes(notifKey)) {
+                        newlyRead.push(notifKey);
+                        if (onDismiss) onDismiss(notifKey);
                         }
                       });
+                      setReadDuringSession(prev => [...prev, ...newlyRead]);
                     }}
                     className="text-[9px] font-bold text-natural-accent hover:underline uppercase tracking-widest"
                   >
@@ -98,7 +107,8 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
                 </div>
               ) : (
                 displayBookings.map((booking) => {
-                  const isUnreadNotif = ((booking.status || "Pending") === "Pending" || booking.status === "Inquiry" || booking.status === "Cancelled" || booking.status === "Confirmed") && !dismissedIds.includes(booking.id);
+                  const notifKey = `${booking.id}-${booking.status || "Pending"}`;
+                  const isUnreadNotif = ((booking.status || "Pending") === "Pending" || booking.status === "Inquiry" || booking.status === "Cancelled" || booking.status === "Confirmed") && !dismissedIds.includes(notifKey);
                   const isExpanded = expandedId === booking.id;
 
                   return (
@@ -110,15 +120,19 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
                       )}
                       onClick={() => {
                         setExpandedId(isExpanded ? null : booking.id);
-                        if (isUnreadNotif && onDismiss) onDismiss(booking.id);
+                        if (isUnreadNotif && onDismiss) {
+                          setReadDuringSession(prev => [...prev, notifKey]);
+                          onDismiss(notifKey);
+                        }
                       }}
                     >
                       <div className="flex justify-between items-start">
                         <div>
-                          <p className="text-xs font-bold text-natural-text-main flex items-center gap-2">
+                          <p className={cn("text-xs font-bold flex items-center gap-2", booking.status === "Cancelled" ? "text-red-600" : "text-natural-text-main")}>
+                            {booking.status === "Cancelled" && <AlertTriangle className="w-3.5 h-3.5" />}
                             {booking.status === "Cancelled" ? "Cancelled Booking" : `${booking.eventType || "Event"} Booking`}
                             {isUnreadNotif && (
-                              <span className={cn("w-1.5 h-1.5 rounded-full animate-pulse", booking.status === "Cancelled" ? "bg-orange-500" : "bg-red-500")}></span>
+                              <span className={cn("w-2 h-2 rounded-full animate-pulse", booking.status === "Cancelled" ? "bg-red-500" : "bg-natural-accent")}></span>
                             )}
                           </p>
                           <p className="text-[10px] text-natural-text-light mt-0.5">
@@ -138,7 +152,10 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (onDismiss) onDismiss(booking.id);
+                                if (onDismiss) {
+                                  setReadDuringSession(prev => [...prev, notifKey]);
+                                  onDismiss(notifKey);
+                                }
                               }}
                               className="opacity-0 group-hover:opacity-100 p-1 text-natural-text-light hover:text-green-600 hover:bg-green-50 rounded transition-all"
                               title="Mark as read"

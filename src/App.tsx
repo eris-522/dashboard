@@ -64,7 +64,22 @@ function AppContent() {
   const { currentUser, logout } = useUser();
   const { bookings } = useBooking();
 
-  const [dismissedIds, setDismissedIds] = React.useState<number[]>(() => {
+  const notificationRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (notificationRef.current && !notificationRef.current.contains(event.target as Node)) {
+        setIsNotificationOpen(false);
+      }
+    };
+
+    if (isNotificationOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isNotificationOpen]);
+
+  const [dismissedIds, setDismissedIds] = React.useState<string[]>(() => {
     if (!currentUser) return [];
     const saved = localStorage.getItem(`dismissedBookingIds_${currentUser.id}`);
     if (saved) {
@@ -78,6 +93,16 @@ function AppContent() {
   });
 
   React.useEffect(() => {
+    const handleMarkRead = (e: any) => {
+      const { id, status } = e.detail;
+      const key = `${id}-${status}`;
+      setDismissedIds((prev) => prev.includes(key) ? prev : [...prev, key]);
+    };
+    window.addEventListener("markAdminNotifRead", handleMarkRead);
+    return () => window.removeEventListener("markAdminNotifRead", handleMarkRead);
+  }, []);
+
+  React.useEffect(() => {
     if (currentUser) {
       localStorage.setItem(`dismissedBookingIds_${currentUser.id}`, JSON.stringify(dismissedIds));
     }
@@ -85,7 +110,8 @@ function AppContent() {
 
   const pendingCount = bookings.filter((b) => {
     const status = b.status || "Pending";
-    return (status === "Pending" || status === "Inquiry" || status === "Cancelled" || status === "Confirmed") && !dismissedIds.includes(b.id);
+    const notifKey = `${b.id}-${status}`;
+    return (status === "Pending" || status === "Inquiry" || status === "Cancelled" || status === "Confirmed") && !dismissedIds.includes(notifKey);
   }).length;
 
   React.useEffect(() => {
@@ -149,10 +175,10 @@ function AppContent() {
                     </div>
 
                     <div className="flex items-center gap-6">
-                      <div className="flex items-center gap-2 relative">
+                      <div className="flex items-center gap-2 relative" ref={notificationRef}>
                         <button
                           onClick={() =>
-                            setIsNotificationOpen(true)
+                            setIsNotificationOpen(!isNotificationOpen)
                           }
                           className={cn(
                             "p-2 bg-white border border-natural-border rounded-lg relative hover:bg-natural-bg transition-colors shadow-xs",

@@ -8,8 +8,9 @@ import { useInventory } from '../context/InventoryContext';
 export function InventorySummary({ onViewAll }: { onViewAll?: () => void }) {
   const { items } = useInventory();
   
-  const displayItems = items.slice(0, 5);
-  const restockNeededCount = items.filter(i => i.status !== 'Healthy').length;
+  const activeItems = items.filter(item => item.status !== 'Archived' && item.status?.toLowerCase() !== 'archived');
+  const displayItems = activeItems.slice(0, 5);
+  const restockNeededCount = activeItems.filter(i => i.status !== 'Healthy').length;
 
   return (
     <div className="glass-card p-6 h-full flex flex-col bg-white">
@@ -27,7 +28,7 @@ export function InventorySummary({ onViewAll }: { onViewAll?: () => void }) {
       </div>
 
       <div className="flex-1 space-y-4">
-        {items.length === 0 ? (
+        {activeItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-6 text-natural-text-light opacity-60">
             <PackageSearch className="w-8 h-8 mb-2" />
             <p className="text-[0.7rem] font-serif italic">No inventory records</p>
@@ -67,4 +68,3 @@ export function InventorySummary({ onViewAll }: { onViewAll?: () => void }) {
     </div>
   );
 }
-

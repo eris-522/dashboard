@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { supabase } from "../utils/supabase";
+import { useUser } from "../context/UserContext";
 
 type SortField = "name" | "role" | "created_at" | "status";
 type SortOrder = "asc" | "desc" | null;
@@ -42,6 +43,7 @@ export interface User {
 }
 
 export function UserPage() {
+  const { currentUser } = useUser();
   const [users, setUsers] = useState<User[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState("All Roles");
@@ -138,6 +140,9 @@ export function UserPage() {
 
   const filteredUsers = useMemo(() => {
     return users.filter((user) => {
+      // Hide the currently logged-in user, the fallback admin ("0"), and any 'Admin' accounts
+      if (String(user.id) === String(currentUser?.id) || String(user.id) === "0" || user.role === "Admin") return false;
+
       const query = searchQuery.toLowerCase();
       const matchesSearch =
         (user.name || "").toLowerCase().includes(query) ||
@@ -153,7 +158,7 @@ export function UserPage() {
 
       return matchesSearch && matchesRole && matchesStatus;
     });
-  }, [users, searchQuery, roleFilter, statusFilter]);
+  }, [users, searchQuery, roleFilter, statusFilter, currentUser?.id]);
 
   const sortedUsers = useMemo(() => {
     if (!sortConfig.field || !sortConfig.order) return filteredUsers;
@@ -430,15 +435,17 @@ export function UserPage() {
                           >
                             <Edit3 className="w-4 h-4" />
                           </button>
-                          <button
-                            onClick={() =>
-                              handleArchiveClick(user.id, user.name || "User")
-                            }
-                            className="p-1.5 text-natural-text-light hover:text-red-500 hover:bg-white hover:shadow-xs rounded-lg transition-all"
-                            title="Archive User"
-                          >
-                            <Archive className="w-4 h-4" />
-                          </button>
+                          {user.id !== currentUser?.id && (
+                            <button
+                              onClick={() =>
+                                handleArchiveClick(user.id, user.name || "User")
+                              }
+                              className="p-1.5 text-natural-text-light hover:text-red-500 hover:bg-white hover:shadow-xs rounded-lg transition-all"
+                              title="Archive User"
+                            >
+                              <Archive className="w-4 h-4" />
+                            </button>
+                          )}
                         </>
                       ) : (
                         <span className="text-[0.6rem] font-bold text-natural-text-light/40 uppercase tracking-widest bg-natural-bg/50 px-2 py-1 rounded">
@@ -521,7 +528,8 @@ export function UserPage() {
                     onChange={(e) =>
                       setFormData({ ...formData, role: e.target.value })
                     }
-                    className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white transition-all shadow-xs cursor-pointer"
+                disabled={String(editingUser?.id) === String(currentUser?.id)}
+                    className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white transition-all shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option>Customer</option>
                     <option>Owner</option>
@@ -536,7 +544,8 @@ export function UserPage() {
                     onChange={(e) =>
                       setFormData({ ...formData, status: e.target.value })
                     }
-                    className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white transition-all shadow-xs cursor-pointer"
+                    disabled={editingUser?.id === currentUser?.id}
+                    className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white transition-all shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option>Active</option>
                     <option>Inactive</option>

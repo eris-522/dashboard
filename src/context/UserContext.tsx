@@ -29,17 +29,6 @@ interface UserContextType {
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
-const DEFAULT_ADMIN: User = {
-  id: 0,
-  name: 'Kyle Erica Santos',
-  email: 'erica@gmail.com',
-  password: 'admin123',
-  phone: '09467158519',
-  role: 'Admin',
-  status: 'Active',
-  joined: 'Apr 24, 2026',
-};
-
 function toUser(row: any): User {
   return {
     id: row?.id ?? 0,
@@ -54,7 +43,7 @@ function toUser(row: any): User {
 }
 
 export function UserProvider({ children }: { children: ReactNode }) {
-  const [users, setUsers] = useState<User[]>([DEFAULT_ADMIN]);
+  const [users, setUsers] = useState<User[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -72,25 +61,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       }
 
       if (data) {
-        const mapped = (data as any[]).map(toUser);
-
-        // Preserve the local DEFAULT_ADMIN so login still works even if Supabase
-        // doesn't contain (or doesn't include a matching password for) that admin.
-        // Deduplicate by ID to ensure all users are counted properly
-        const mergedById = new Map<string | number, User>();
-        mergedById.set(DEFAULT_ADMIN.id, DEFAULT_ADMIN);
-
-        for (const u of mapped) {
-          if (u.id === 0 && u.email !== DEFAULT_ADMIN.email) continue;
-          mergedById.set(u.id, u);
-        }
-
-        // Ensure DEFAULT_ADMIN stays present
-        if (!mergedById.has(DEFAULT_ADMIN.id)) {
-          mergedById.set(DEFAULT_ADMIN.id, DEFAULT_ADMIN);
-        }
-
-        setUsers(Array.from(mergedById.values()));
+        setUsers((data as any[]).map(toUser));
       }
     } catch (err) {
       console.error('Unexpected error fetching profiles:', err);
@@ -145,7 +116,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
   };
 
   const updateUser = (id: string | number, userData: Partial<User>) => {
-    if (id === 0) return; // Protect admin
     setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, ...userData } : u)));
     if (currentUser?.id === id) {
       setCurrentUser((prev) => (prev ? { ...prev, ...userData } : null));
@@ -165,17 +135,52 @@ export function UserProvider({ children }: { children: ReactNode }) {
   // NOTE: This local login is used only in parts of the app relying on in-memory auth.
   // Your UserPage creates users via Supabase Auth.
   const login = async (email: string, password: string) => {
-    const user = users.find((u) => u.email === email && u.password === password);
-    if (user) {
-      if (user.status === 'Active' || user.status === 'Inactive') {
-        setCurrentUser(user);
-        return true;
+    try {
+      // Attempt actual authentication via Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (!authError && authData?.user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', authData.user.id)
+          .single();
+
+        if (profile) {
+          const user = toUser(profile);
+          if (user.status === 'Active' || user.status === 'Inactive') {
+            setCurrentUser(user);
+            return true;
+          }
+        }
+        await supabase.auth.signOut();
       }
+    } catch (err) {
+      console.error('Supabase login failed:', err);
     }
+
+    // Development-only fallback
+    if (import.meta.env.DEV && email === 'erica@gmail.com' && password === 'admin123') {
+      setCurrentUser({
+        id: 0,
+        name: 'Kyle Erica Santos',
+        email: 'erica@gmail.com',
+        role: 'Admin',
+        status: 'Active',
+        phone: '09467158519',
+        joined: 'Apr 24, 2026',
+      });
+      return true;
+    }
+
     return false;
   };
 
   const logout = () => {
+    supabase.auth.signOut().catch(console.error);
     setCurrentUser(null);
   };
 

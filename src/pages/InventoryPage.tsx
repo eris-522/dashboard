@@ -85,7 +85,8 @@ export function InventoryPage() {
     const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           item.category.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesCategory = filterCategory === 'All' || item.category === filterCategory || (filterCategory === 'Event Equipment' && item.category === 'Equipment');
-    const matchesStatus = showArchived ? item.status === 'Archived' : item.status !== 'Archived';
+    const isArchived = item.status === 'Archived' || item.status?.toLowerCase() === 'archived';
+    const matchesStatus = showArchived ? isArchived : !isArchived;
     
     return matchesSearch && matchesCategory && matchesStatus;
   });
@@ -107,7 +108,7 @@ export function InventoryPage() {
     });
   }, [filteredItems, sortStatus]);
 
-  const activeItems = items.filter(i => i.status !== 'Archived');
+  const activeItems = items.filter(i => i.status !== 'Archived' && i.status?.toLowerCase() !== 'archived');
   const stats = {
     totalItemStock: activeItems.length,
     restockNeeded: activeItems.filter(i => i.status !== 'Healthy').length,
@@ -465,7 +466,7 @@ export function InventoryPage() {
                   </div>
                   <div className="max-h-[350px] overflow-y-auto space-y-3 pr-2 scrollbar-thin">
                     {items
-                      .filter(i => i.status === 'Critical' || i.status === 'Low Stock')
+                      .filter(i => i.status !== 'Archived' && i.status?.toLowerCase() !== 'archived' && (i.status === 'Critical' || i.status === 'Low Stock'))
                       .sort((a, b) => {
                         if (a.status === 'Critical' && b.status !== 'Critical') return -1;
                         if (a.status !== 'Critical' && b.status === 'Critical') return 1;

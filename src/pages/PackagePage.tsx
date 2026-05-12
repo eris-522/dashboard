@@ -544,14 +544,15 @@ export function PackagePage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button
-                  onClick={() => handleEditClick(pkg)}
-                  className="p-1.5 text-natural-text-light hover:text-natural-accent hover:bg-white hover:shadow-xs rounded-lg transition-all"
-                  title="Edit Package"
-                >
-                  <Edit3 className="w-4 h-4" />
-                </button>
                 {pkg.status !== "Archived" ? (
+                  <>
+                    <button
+                      onClick={() => handleEditClick(pkg)}
+                      className="p-1.5 text-natural-text-light hover:text-natural-accent hover:bg-white hover:shadow-xs rounded-lg transition-all"
+                      title="Edit Package"
+                    >
+                      <Edit3 className="w-4 h-4" />
+                    </button>
                   <button
                     onClick={() => handleArchiveClick(pkg)}
                     className="p-1.5 text-natural-text-light hover:text-red-500 hover:bg-white hover:shadow-xs rounded-lg transition-all"
@@ -559,6 +560,7 @@ export function PackagePage() {
                   >
                     <Archive className="w-4 h-4" />
                   </button>
+                  </>
                     ) : (
                   <span className="text-[0.6rem] font-bold text-natural-text-light/40 uppercase tracking-widest bg-natural-bg/50 px-2 py-1 rounded ml-1">
                         Archived

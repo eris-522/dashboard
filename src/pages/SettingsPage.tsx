@@ -6,7 +6,7 @@ import { supabase } from '../utils/supabase';
 import { useUser } from '../context/UserContext';
 
 export function SettingsPage() {
-  const { currentUser } = useUser();
+  const { currentUser, updateUser } = useUser();
   const [activeSection, setActiveSection] = useState('profile');
   const [formData, setFormData] = useState({
     name: '',
@@ -42,18 +42,31 @@ export function SettingsPage() {
     setSaveMessage({ type: '', text: '' });
     
     try {
+      if (currentUser.id === 0 || currentUser.id === '0') {
+        // Update local context only for the fallback account
+        updateUser(currentUser.id, { 
+          name: formData.name, 
+          phone: formData.phone 
+        });
+        setSaveMessage({ type: 'success', text: 'Settings saved locally for fallback account!' });
+        setTimeout(() => {
+          setShowConfirm(false);
+        }, 1500);
+        return;
+      }
+
       const { error } = await supabase
         .from('profiles')
         .update({
           name: formData.name,
-          full_name: formData.name,
-          phone: formData.phone,
-          phone_number: formData.phone,
+          phone_number: formData.phone ? Number(formData.phone.replace(/\D/g, '')) : null,
         })
         .eq('id', currentUser.id);
 
       if (error) throw error;
       
+      updateUser(currentUser.id, { name: formData.name, phone: formData.phone });
+
       setSaveMessage({ type: 'success', text: 'Settings saved successfully!' });
       
       setTimeout(() => {

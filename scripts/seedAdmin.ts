@@ -1,4 +1,6 @@
-import 'dotenv/config';
+import * as dotenv from 'dotenv';
+dotenv.config({ path: '.env.local' });
+dotenv.config(); // Fallback to .env if .env.local doesn't exist
 import { createClient } from '@supabase/supabase-js';
 
 async function main() {
@@ -65,11 +67,9 @@ async function main() {
         id: authId,
         email: adminEmail,
         name: adminFullName,
-        full_name: adminFullName,
         role: 'Admin',
         status: 'Active',
-        phone: '09467158519',
-        joined: 'Apr 24, 2026',
+        phone_number: 9467158519,
       });
 
     if (profileErr) throw profileErr;
@@ -83,11 +83,8 @@ async function main() {
         id: authId,
         email: adminEmail,
         name: adminFullName,
-        full_name: adminFullName,
         role: 'Admin',
         status: 'Active',
-        phone: '09467158519',
-        joined: 'Apr 24, 2026',
       });
 
     if (profileErr) throw profileErr;
@@ -102,4 +99,3 @@ main()
     console.error(e);
     process.exit(1);
   });
-

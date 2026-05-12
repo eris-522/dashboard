@@ -330,8 +330,8 @@ export function MenuPage() {
         </button>
       </div>
 
-      <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
-        {categories.map((cat) => (
+      <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none w-full">
+        {categories.filter((c) => c !== "Archived").map((cat) => (
           <button
             key={cat}
             onClick={() => {
@@ -347,6 +347,19 @@ export function MenuPage() {
             {cat}
           </button>
         ))}
+        <div className="flex-1 min-w-4"></div>
+        <button
+          onClick={() => setActiveCategory("Archived")}
+          className={cn(
+            "flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[0.7rem] font-bold uppercase tracking-widest transition-all whitespace-nowrap border",
+            activeCategory === "Archived"
+              ? "bg-natural-text-main text-white border-natural-text-main shadow-sm"
+              : "bg-white text-natural-text-light border-natural-border hover:bg-natural-bg",
+          )}
+        >
+          <Archive className="w-3.5 h-3.5" />
+          Archived
+        </button>
       </div>
 
       <div className="glass-card bg-white overflow-hidden shadow-sm border border-natural-border/50">
