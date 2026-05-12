@@ -207,6 +207,7 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
                   className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest hover:text-natural-accent transition-colors"
                 >
                   Manage Bookings
+                  View All Bookings
                 </button>
               )}
             </div>

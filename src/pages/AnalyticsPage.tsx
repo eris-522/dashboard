@@ -7,19 +7,12 @@ import {
   CartesianGrid, 
   Tooltip, 
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  LineChart,
-  Line
 } from 'recharts';
 import { TrendingUp, Users, Calendar, DollarSign, Download, Filter } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useBooking } from '../context/BookingContext';
 import { useInventory } from '../context/InventoryContext';
 import { useUser } from '../context/UserContext';
-
-const COLORS = ['#a68a56', '#3d4035', '#8a8b82', '#e8e7e0', '#6b8e23', '#d4af37'];
 
 export function AnalyticsPage() {
   const { bookings } = useBooking();
@@ -48,13 +41,6 @@ export function AnalyticsPage() {
       count: dayBookings.length
     };
   });
-
-  // Category Distribution
-  const eventTypes = Array.from(new Set(bookings.map(b => b.eventType)));
-  const categoryData = eventTypes.map(type => ({
-    name: type,
-    value: bookings.filter(b => b.eventType === type).length
-  }));
 
   // Low Stock Items
   const lowStockCount = items.filter(i => i.status !== 'Healthy' && i.status !== 'Archived').length;
@@ -101,9 +87,9 @@ export function AnalyticsPage() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="w-full">
         {/* Weekly Traffic/Revenue */}
-        <div className="lg:col-span-2 glass-card p-6">
+        <div className="glass-card p-6">
            <div className="mb-6 flex items-center justify-between">
               <h3 className="font-serif font-bold text-lg text-natural-text-main">Weekly Revenue Distribution</h3>
               <div className="flex gap-2 text-[0.6rem] font-bold text-natural-text-light uppercase">
@@ -120,48 +106,6 @@ export function AnalyticsPage() {
                   <Bar dataKey="total" fill="#a68a56" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
-           </div>
-        </div>
-
-        {/* Category Breakdown */}
-        <div className="lg:col-span-1 glass-card p-6 flex flex-col">
-           <h3 className="font-serif font-bold text-lg text-natural-text-main mb-6">Event Type Distribution</h3>
-           <div className="flex-1 min-h-[220px]">
-              {categoryData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={categoryData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={80}
-                      paddingAngle={5}
-                      dataKey="value"
-                    >
-                      {categoryData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-full flex items-center justify-center border-2 border-dashed border-natural-border rounded-xl">
-                  <p className="text-xs text-natural-text-light italic">No booking data available</p>
-                </div>
-              )}
-           </div>
-           <div className="mt-4 grid grid-cols-1 gap-2">
-              {categoryData.map((d, i) => (
-                <div key={i} className="flex items-center justify-between">
-                   <div className="flex items-center gap-2">
-                    <div className="w-2.5 h-2.5 rounded-full" style={{backgroundColor: COLORS[i % COLORS.length]}} />
-                    <span className="text-[0.65rem] font-bold text-natural-text-main uppercase tracking-tight">{d.name}</span>
-                   </div>
-                   <span className="text-[0.65rem] font-bold text-natural-text-light">{d.value}</span>
-                </div>
-              ))}
            </div>
         </div>
       </div>
