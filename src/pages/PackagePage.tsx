@@ -24,9 +24,11 @@ export interface CateringPackage {
   name: string;
   pax: string;
   price: string;
+  additional_pax_price?: string;
   tag?: string;
   inclusions: string[];
   status: string;
+  image_url?: string;
 }
 
 export function PackagePage() {
@@ -38,11 +40,15 @@ export function PackagePage() {
   const [editingPackage, setEditingPackage] =
     useState<Partial<CateringPackage> | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [openInclusionSections, setOpenInclusionSections] = useState<string[]>([]);
-  const [dynamicInclusionCategories, setDynamicInclusionCategories] = useState<Record<string, string[]>>({});
-  const [addingItemToCategory, setAddingItemToCategory] = useState<string | null>(
-    null,
+  const [openInclusionSections, setOpenInclusionSections] = useState<string[]>(
+    [],
   );
+  const [dynamicInclusionCategories, setDynamicInclusionCategories] = useState<
+    Record<string, string[]>
+  >({});
+  const [addingItemToCategory, setAddingItemToCategory] = useState<
+    string | null
+  >(null);
   const [newItemName, setNewItemName] = useState("");
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -64,12 +70,20 @@ export function PackagePage() {
 
     const channel = supabase
       .channel("packages-channel-sync")
-      .on("postgres_changes", { event: "*", schema: "public", table: "packages" }, () => {
-        fetchData();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "inclusions" }, () => {
-        fetchInclusions();
-      })
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "packages" },
+        () => {
+          fetchData();
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "inclusions" },
+        () => {
+          fetchInclusions();
+        },
+      )
       .subscribe();
 
     return () => {
@@ -80,9 +94,9 @@ export function PackagePage() {
   // Feature: Main database read function.
   const fetchData = async () => {
     const pkgResponse = await supabase
-        .from("packages")
-        .select("*")
-        .order("created_at", { ascending: false });
+      .from("packages")
+      .select("*")
+      .order("created_at", { ascending: false });
 
     if (pkgResponse.error)
       console.error("Error fetching packages:", pkgResponse.error);
@@ -95,7 +109,7 @@ export function PackagePage() {
       console.error("Error fetching inclusions:", error);
       return;
     }
-    
+
     const grouped: Record<string, string[]> = {};
     if (data) {
       data.forEach((row: any) => {
@@ -117,16 +131,18 @@ export function PackagePage() {
         pkg.name.toLowerCase().includes(query) ||
         (pkg.tag || "").toLowerCase().includes(query);
 
-      const matchesStatus = showArchived ? pkg.status === "Archived" : pkg.status !== "Archived";
+      const matchesStatus = showArchived
+        ? pkg.status === "Archived"
+        : pkg.status !== "Archived";
       return matchesSearch && matchesStatus;
     });
   }, [packages, searchQuery, showArchived]);
 
   // Feature: Prepares the package modal for editing an existing database row
   const handleEditClick = (pkg: CateringPackage) => {
-    setEditingPackage({ 
+    setEditingPackage({
       ...pkg,
-      status: pkg.status === "Active" ? "Available" : (pkg.status || "Available")
+      status: pkg.status === "Active" ? "Available" : pkg.status || "Available",
     });
     setFormError(null);
     setIsModalOpen(true);
@@ -148,9 +164,11 @@ export function PackagePage() {
       name: "",
       pax: "",
       price: "",
+      additional_pax_price: "",
       inclusions: [],
       status: "Available",
       tag: "",
+      image_url: "",
     });
     setIsModalOpen(true);
   };
@@ -198,10 +216,12 @@ export function PackagePage() {
       [category]: [...(prev[category] || []), trimmedName],
     }));
 
-    const { error } = await supabase.from("inclusions").insert([{
-      category,
-      items: trimmedName
-    }]);
+    const { error } = await supabase.from("inclusions").insert([
+      {
+        category,
+        items: trimmedName,
+      },
+    ]);
 
     if (error) {
       console.error("Error adding inclusion item:", error);
@@ -243,10 +263,12 @@ export function PackagePage() {
     setIsAddingCategory(false);
 
     // Insert a placeholder name alongside the category to officially establish it in the database
-    const { error } = await supabase.from("inclusions").insert([{
-      category: trimmedCategoryName,
-      items: "-"
-    }]);
+    const { error } = await supabase.from("inclusions").insert([
+      {
+        category: trimmedCategoryName,
+        items: "-",
+      },
+    ]);
 
     if (error) {
       console.error("Error adding inclusion category:", error);
@@ -277,7 +299,9 @@ export function PackagePage() {
     if (editingPackage?.name) {
       const nameRegex = /^[a-zA-Z\sñÑ\-']+$/;
       if (!nameRegex.test(editingPackage.name)) {
-        setFormError("Package name cannot contain numbers or special characters.");
+        setFormError(
+          "Package name cannot contain numbers or special characters.",
+        );
         return;
       }
     }
@@ -288,7 +312,7 @@ export function PackagePage() {
         setFormError("Please enter a valid guest count.");
         return;
       }
-      const hasInvalid = nums.some(n => {
+      const hasInvalid = nums.some((n) => {
         const num = parseInt(n, 10);
         return num < 10 || num > 500;
       });
@@ -324,7 +348,7 @@ export function PackagePage() {
       if (confirmAction.itemType === "category") {
         const category = confirmAction.itemName;
         const itemsInCategory = dynamicInclusionCategories[category] || [];
-        
+
         await supabase.from("inclusions").delete().eq("category", category);
 
         setDynamicInclusionCategories((prev) => {
@@ -335,23 +359,39 @@ export function PackagePage() {
 
         if (editingPackage && editingPackage.inclusions) {
           const newInclusions = editingPackage.inclusions.filter(
-            (inc) => !itemsInCategory.includes(inc)
+            (inc) => !itemsInCategory.includes(inc),
           );
           setEditingPackage({ ...editingPackage, inclusions: newInclusions });
         }
 
         // Remove these deleted items from all existing packages in the DB to reflect on client side
-        const affectedPackages = packages.filter((pkg) => pkg.inclusions && pkg.inclusions.some((inc) => itemsInCategory.includes(inc)));
+        const affectedPackages = packages.filter(
+          (pkg) =>
+            pkg.inclusions &&
+            pkg.inclusions.some((inc) => itemsInCategory.includes(inc)),
+        );
         for (const pkg of affectedPackages) {
-          const updatedInclusions = pkg.inclusions.filter((inc) => !itemsInCategory.includes(inc));
-          await supabase.from("packages").update({ inclusions: updatedInclusions }).eq("id", pkg.id);
+          const updatedInclusions = pkg.inclusions.filter(
+            (inc) => !itemsInCategory.includes(inc),
+          );
+          await supabase
+            .from("packages")
+            .update({ inclusions: updatedInclusions })
+            .eq("id", pkg.id);
           packagesWereUpdated = true;
         }
-      } else if (confirmAction.itemType === "item" && confirmAction.parentCategory) {
+      } else if (
+        confirmAction.itemType === "item" &&
+        confirmAction.parentCategory
+      ) {
         const category = confirmAction.parentCategory;
         const item = confirmAction.itemName;
-        
-        await supabase.from("inclusions").delete().eq("category", category).eq("items", item);
+
+        await supabase
+          .from("inclusions")
+          .delete()
+          .eq("category", category)
+          .eq("items", item);
 
         setDynamicInclusionCategories((prev) => ({
           ...prev,
@@ -363,14 +403,21 @@ export function PackagePage() {
         }
 
         // Remove the deleted item from all existing packages in the DB to reflect on client side
-        const affectedPackages = packages.filter((pkg) => pkg.inclusions && pkg.inclusions.includes(item));
+        const affectedPackages = packages.filter(
+          (pkg) => pkg.inclusions && pkg.inclusions.includes(item),
+        );
         for (const pkg of affectedPackages) {
-          const updatedInclusions = pkg.inclusions.filter((inc) => inc !== item);
-          await supabase.from("packages").update({ inclusions: updatedInclusions }).eq("id", pkg.id);
+          const updatedInclusions = pkg.inclusions.filter(
+            (inc) => inc !== item,
+          );
+          await supabase
+            .from("packages")
+            .update({ inclusions: updatedInclusions })
+            .eq("id", pkg.id);
           packagesWereUpdated = true;
         }
       }
-      
+
       if (packagesWereUpdated) {
         await fetchData();
       }
@@ -386,10 +433,16 @@ export function PackagePage() {
           {
             name: editingPackage?.name,
             pax: editingPackage?.pax,
-            price: editingPackage?.price ? String(editingPackage.price).replace(/,/g, "") : null,
+            price: editingPackage?.price
+              ? String(editingPackage.price).replace(/,/g, "")
+              : null,
+            additional_pax_price: editingPackage?.additional_pax_price
+              ? String(editingPackage.additional_pax_price).replace(/,/g, "")
+              : null,
             tag: editingPackage?.tag,
             inclusions: editingPackage?.inclusions || [],
             status: editingPackage?.status || "Available",
+            image_url: editingPackage?.image_url || null,
           },
         ]);
         if (error) {
@@ -404,10 +457,16 @@ export function PackagePage() {
           .update({
             name: editingPackage?.name,
             pax: editingPackage?.pax,
-            price: editingPackage?.price ? String(editingPackage.price).replace(/,/g, "") : null,
+            price: editingPackage?.price
+              ? String(editingPackage.price).replace(/,/g, "")
+              : null,
+            additional_pax_price: editingPackage?.additional_pax_price
+              ? String(editingPackage.additional_pax_price).replace(/,/g, "")
+              : null,
             tag: editingPackage?.tag,
             inclusions: editingPackage?.inclusions || [],
             status: editingPackage?.status || "Available",
+            image_url: editingPackage?.image_url || null,
           })
           .eq("id", confirmAction.itemId);
         if (error) {
@@ -496,110 +555,127 @@ export function PackagePage() {
         </div>
       </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {displayedPackages.map((pkg) => (
-            <div
-              key={pkg.id}
-              className={cn(
-                "glass-card group transition-all duration-300 flex flex-col overflow-hidden",
-                pkg.status === "Archived"
-                  ? "bg-natural-bg/40 opacity-60 grayscale-[0.5]"
-                  : "hover:border-natural-accent/30",
-              )}
-            >
-              <div className="p-6 border-b border-natural-border/50">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={cn(
-                        "p-2.5 bg-natural-bg rounded-xl border border-natural-border transition-colors",
-                        pkg.status !== "Archived" &&
-                          "group-hover:bg-natural-accent/5",
-                      )}
-                    >
-                      <Package className="w-5 h-5 text-natural-accent" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        {pkg.tag && pkg.tag !== "None" && (
-                          <span className="flex items-center gap-1 text-[9px] font-bold bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded uppercase tracking-tighter">
-                            <Sparkles className="w-2.5 h-2.5 fill-amber-600" />{" "}
-                            {pkg.tag}
-                          </span>
-                        )}
-                        <span
-                          className={cn(
-                            "flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-tighter border",
-                            pkg.status === "Not Available"
-                              ? "bg-orange-50 text-orange-600 border-orange-100"
-                              : "bg-green-50 text-green-600 border-green-100"
-                          )}
-                        >
-                          {pkg.status === "Not Available" ? "Not Available" : "Available"}
-                        </span>
-                      </div>
-                      <h3 className="text-lg font-bold text-natural-text-main tracking-tight leading-tight">
-                        {pkg.name}
-                      </h3>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                {pkg.status !== "Archived" ? (
-                  <>
-                    <button
-                      onClick={() => handleEditClick(pkg)}
-                      className="p-1.5 text-natural-text-light hover:text-natural-accent hover:bg-white hover:shadow-xs rounded-lg transition-all"
-                      title="Edit Package"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
-                  <button
-                    onClick={() => handleArchiveClick(pkg)}
-                    className="p-1.5 text-natural-text-light hover:text-red-500 hover:bg-white hover:shadow-xs rounded-lg transition-all"
-                    title="Archive Package"
-                  >
-                    <Archive className="w-4 h-4" />
-                  </button>
-                  </>
-                    ) : (
-                  <span className="text-[0.6rem] font-bold text-natural-text-light/40 uppercase tracking-widest bg-natural-bg/50 px-2 py-1 rounded ml-1">
-                        Archived
-                      </span>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {displayedPackages.map((pkg) => (
+          <div
+            key={pkg.id}
+            className={cn(
+              "glass-card group transition-all duration-300 flex flex-col overflow-hidden",
+              pkg.status === "Archived"
+                ? "bg-natural-bg/40 opacity-60 grayscale-[0.5]"
+                : "hover:border-natural-accent/30",
+            )}
+          >
+            <div className="p-6 border-b border-natural-border/50">
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={cn(
+                      "p-2.5 bg-natural-bg rounded-xl border border-natural-border transition-colors",
+                      pkg.status !== "Archived" &&
+                        "group-hover:bg-natural-accent/5",
                     )}
+                  >
+                    <Package className="w-5 h-5 text-natural-accent" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      {pkg.tag && pkg.tag !== "None" && (
+                        <span className="flex items-center gap-1 text-[9px] font-bold bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded uppercase tracking-tighter">
+                          <Sparkles className="w-2.5 h-2.5 fill-amber-600" />{" "}
+                          {pkg.tag}
+                        </span>
+                      )}
+                      <span
+                        className={cn(
+                          "flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-tighter border",
+                          pkg.status === "Not Available"
+                            ? "bg-orange-50 text-orange-600 border-orange-100"
+                            : "bg-green-50 text-green-600 border-green-100",
+                        )}
+                      >
+                        {pkg.status === "Not Available"
+                          ? "Not Available"
+                          : "Available"}
+                      </span>
+                    </div>
+                    <h3 className="text-lg font-bold text-natural-text-main tracking-tight leading-tight">
+                      {pkg.name}
+                    </h3>
                   </div>
                 </div>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {pkg.status !== "Archived" ? (
+                    <>
+                      <button
+                        onClick={() => handleEditClick(pkg)}
+                        className="p-1.5 text-natural-text-light hover:text-natural-accent hover:bg-white hover:shadow-xs rounded-lg transition-all"
+                        title="Edit Package"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleArchiveClick(pkg)}
+                        className="p-1.5 text-natural-text-light hover:text-red-500 hover:bg-white hover:shadow-xs rounded-lg transition-all"
+                        title="Archive Package"
+                      >
+                        <Archive className="w-4 h-4" />
+                      </button>
+                    </>
+                  ) : (
+                    <span className="text-[0.6rem] font-bold text-natural-text-light/40 uppercase tracking-widest bg-natural-bg/50 px-2 py-1 rounded ml-1">
+                      Archived
+                    </span>
+                  )}
+                </div>
+              </div>
 
-                <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col justify-center">
                   <div className="flex items-center gap-2">
-                    <Users className="w-4 h-4 text-natural-text-light" />
+                    <Users className="w-4 h-4 text-natural-text-light shrink-0" />
                     <span className="text-xs font-semibold text-natural-text-main">
                       {pkg.pax} Guests
                     </span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <UtensilsCrossed className="w-4 h-4 text-natural-text-light" />
-                    <span className="text-xs font-bold text-natural-accent font-serif italic text-lg leading-none">
-                      {pkg.price}
+                  {pkg.additional_pax_price && (
+                    <span className="text-[9px] text-natural-text-light font-bold mt-1 uppercase tracking-wider ml-6">
+                      +₱{pkg.additional_pax_price} / extra
                     </span>
-                  </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <UtensilsCrossed className="w-4 h-4 text-natural-text-light shrink-0" />
+                  <span className="text-xs font-bold text-natural-accent font-serif italic text-lg leading-none">
+                    {pkg.price}
+                  </span>
                 </div>
               </div>
+            </div>
 
-              <div className="p-6 flex-1 bg-natural-bg/5 space-y-4">
-                <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest">
-                  Inclusions
-                </p>
-                {pkg.inclusions && pkg.inclusions.length > 0 ? (
-                  <div className="space-y-4">
-                    {Object.entries(dynamicInclusionCategories).map(([cat, items]) => {
-                      const selectedInThisCategory = pkg.inclusions.filter((inc) => items.includes(inc));
+            <div className="p-6 flex-1 bg-natural-bg/5 space-y-4">
+              <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest">
+                Inclusions
+              </p>
+              {pkg.inclusions && pkg.inclusions.length > 0 ? (
+                <div className="space-y-4">
+                  {Object.entries(dynamicInclusionCategories).map(
+                    ([cat, items]) => {
+                      const selectedInThisCategory = pkg.inclusions.filter(
+                        (inc) => items.includes(inc),
+                      );
                       if (selectedInThisCategory.length === 0) return null;
                       return (
                         <div key={cat} className="space-y-1.5">
-                          <p className="text-[0.65rem] font-bold text-natural-text-main/70 uppercase tracking-widest border-b border-natural-border/50 pb-1 mb-2">{cat}</p>
+                          <p className="text-[0.65rem] font-bold text-natural-text-main/70 uppercase tracking-widest border-b border-natural-border/50 pb-1 mb-2">
+                            {cat}
+                          </p>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
                             {selectedInThisCategory.map((inc, i) => (
-                              <div key={`${inc}-${i}`} className="flex items-start gap-2">
+                              <div
+                                key={`${inc}-${i}`}
+                                className="flex items-start gap-2"
+                              >
                                 <Check className="w-3.5 h-3.5 text-natural-accent shrink-0 mt-0.5" />
                                 <span className="text-[0.7rem] font-medium text-natural-text-main/80 leading-tight">
                                   {inc}
@@ -609,43 +685,53 @@ export function PackagePage() {
                           </div>
                         </div>
                       );
-                    })}
-                    {(() => {
-                      const allCategorizedItems = Object.values(dynamicInclusionCategories).flat();
-                      const uncategorized = pkg.inclusions.filter((inc) => !allCategorizedItems.includes(inc));
-                      if (uncategorized.length === 0) return null;
-                      return (
-                        <div className="space-y-1.5">
-                          <p className="text-[0.65rem] font-bold text-natural-text-main/70 uppercase tracking-widest border-b border-natural-border/50 pb-1 mb-2">Other</p>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
-                            {uncategorized.map((inc, i) => (
-                              <div key={`uncat-${inc}-${i}`} className="flex items-start gap-2">
-                                <Check className="w-3.5 h-3.5 text-natural-accent shrink-0 mt-0.5" />
-                                <span className="text-[0.7rem] font-medium text-natural-text-main/80 leading-tight">
-                                  {inc}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
+                    },
+                  )}
+                  {(() => {
+                    const allCategorizedItems = Object.values(
+                      dynamicInclusionCategories,
+                    ).flat();
+                    const uncategorized = pkg.inclusions.filter(
+                      (inc) => !allCategorizedItems.includes(inc),
+                    );
+                    if (uncategorized.length === 0) return null;
+                    return (
+                      <div className="space-y-1.5">
+                        <p className="text-[0.65rem] font-bold text-natural-text-main/70 uppercase tracking-widest border-b border-natural-border/50 pb-1 mb-2">
+                          Other
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+                          {uncategorized.map((inc, i) => (
+                            <div
+                              key={`uncat-${inc}-${i}`}
+                              className="flex items-start gap-2"
+                            >
+                              <Check className="w-3.5 h-3.5 text-natural-accent shrink-0 mt-0.5" />
+                              <span className="text-[0.7rem] font-medium text-natural-text-main/80 leading-tight">
+                                {inc}
+                              </span>
+                            </div>
+                          ))}
                         </div>
-                      );
-                    })()}
-                  </div>
-                ) : (
-                  <p className="text-[0.75rem] font-medium text-natural-text-light/80">
-                    No inclusions specified.
-                  </p>
-                )}
-              </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              ) : (
+                <p className="text-[0.75rem] font-medium text-natural-text-light/80">
+                  No inclusions specified.
+                </p>
+              )}
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
+      </div>
 
       {/* Package Modal */}
       {isModalOpen && editingPackage && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl overflow-hidden animate-in zoom-in duration-200 border border-natural-border">
-            <div className="p-6 border-b border-natural-border flex items-center justify-between">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in duration-200 border border-natural-border">
+            <div className="p-6 border-b border-natural-border flex items-center justify-between shrink-0">
               <h3 className="text-lg font-serif font-bold text-natural-text-main">
                 {editingPackage.id ? "Edit Package" : "Create New Package"}
               </h3>
@@ -657,7 +743,7 @@ export function PackagePage() {
               </button>
             </div>
 
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 overflow-y-auto flex-1">
               {formError && (
                 <div className="p-3 bg-red-50 border border-red-200 rounded-xl">
                   <p className="text-xs font-bold text-red-600">{formError}</p>
@@ -724,19 +810,56 @@ export function PackagePage() {
                             type="text"
                             value={editingPackage.price || ""}
                             onChange={(e) => {
-                              let raw = e.target.value.replace(/,/g, '');
-                              raw = raw.replace(/[^0-9.]/g, '');
-                              const parts = raw.split('.');
+                              let raw = e.target.value.replace(/,/g, "");
+                              raw = raw.replace(/[^0-9.]/g, "");
+                              const parts = raw.split(".");
                               if (parts[0]) {
-                                parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+                                parts[0] = parts[0].replace(
+                                  /\B(?=(\d{3})+(?!\d))/g,
+                                  ",",
+                                );
                               }
-                              const formatted = parts.slice(0, 2).join('.');
+                              const formatted = parts.slice(0, 2).join(".");
                               setEditingPackage({
                                 ...editingPackage,
                                 price: formatted,
                               });
                             }}
                             placeholder="99,000"
+                            className="w-full pl-8 pr-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Additional Pax Price with ₱ prefix */}
+                      <div className="grid grid-cols-3 gap-3 items-center">
+                        <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest col-span-1">
+                          Add. Pax Price
+                        </label>
+                        <div className="col-span-2 w-full relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-natural-text-light">
+                            ₱
+                          </span>
+                          <input
+                            type="text"
+                            value={editingPackage.additional_pax_price || ""}
+                            onChange={(e) => {
+                              let raw = e.target.value.replace(/,/g, "");
+                              raw = raw.replace(/[^0-9.]/g, "");
+                              const parts = raw.split(".");
+                              if (parts[0]) {
+                                parts[0] = parts[0].replace(
+                                  /\B(?=(\d{3})+(?!\d))/g,
+                                  ",",
+                                );
+                              }
+                              const formatted = parts.slice(0, 2).join(".");
+                              setEditingPackage({
+                                ...editingPackage,
+                                additional_pax_price: formatted,
+                              });
+                            }}
+                            placeholder="e.g. 500"
                             className="w-full pl-8 pr-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20"
                           />
                         </div>
@@ -788,6 +911,24 @@ export function PackagePage() {
                           <option value="None">None</option>
                         </select>
                       </div>
+
+                      <div className="grid grid-cols-3 gap-3 items-center">
+                        <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest col-span-1">
+                          Image URL
+                        </label>
+                        <input
+                          type="text"
+                          value={editingPackage.image_url || ""}
+                          onChange={(e) =>
+                            setEditingPackage({
+                              ...editingPackage,
+                              image_url: e.target.value,
+                            })
+                          }
+                          placeholder="e.g. https://example.com/image.jpg"
+                          className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 col-span-2"
+                        />
+                      </div>
                     </div>
                   </div>
 
@@ -823,7 +964,9 @@ export function PackagePage() {
                               </div>
                               <button
                                 type="button"
-                                onClick={(e) => confirmDeleteCategory(e, category)}
+                                onClick={(e) =>
+                                  confirmDeleteCategory(e, category)
+                                }
                                 className="p-1 text-natural-text-light hover:text-red-500 hover:bg-red-50 rounded opacity-0 group-hover:opacity-100 transition-opacity"
                                 title="Delete Category"
                               >
@@ -842,7 +985,9 @@ export function PackagePage() {
                                         <input
                                           type="checkbox"
                                           checked={
-                                            editingPackage.inclusions?.includes(item) || false
+                                            editingPackage.inclusions?.includes(
+                                              item,
+                                            ) || false
                                           }
                                           onChange={(e) =>
                                             handleInclusionChange(
@@ -856,7 +1001,9 @@ export function PackagePage() {
                                       </label>
                                       <button
                                         type="button"
-                                        onClick={() => confirmDeleteItem(category, item)}
+                                        onClick={() =>
+                                          confirmDeleteItem(category, item)
+                                        }
                                         className="p-1 text-natural-text-light hover:text-red-500 hover:bg-red-50 rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
                                         title="Delete Item"
                                       >
@@ -969,14 +1116,38 @@ export function PackagePage() {
                     </p>
 
                     <div className="border border-natural-border/50 rounded-xl overflow-hidden bg-white">
+                      {editingPackage.image_url ? (
+                        <div className="w-full h-36 bg-natural-bg border-b border-natural-border/50">
+                          <img
+                            src={editingPackage.image_url}
+                            alt="Preview"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      ) : (
+                        <div className="w-full h-12 bg-natural-bg border-b border-natural-border/50" />
+                      )}
+
                       <div className="p-4 bg-natural-bg/5 border-b border-natural-border/50">
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest">
-                              {editingPackage.tag && editingPackage.tag !== "None" ? editingPackage.tag : "Tag: —"}
+                              {editingPackage.tag &&
+                              editingPackage.tag !== "None"
+                                ? editingPackage.tag
+                                : "Tag: —"}
                             </p>
                             <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest mt-1">
-                              Status: <span className={editingPackage.status === "Not Available" ? "text-orange-600" : "text-green-600"}>{editingPackage.status || "Available"}</span>
+                              Status:{" "}
+                              <span
+                                className={
+                                  editingPackage.status === "Not Available"
+                                    ? "text-orange-600"
+                                    : "text-green-600"
+                                }
+                              >
+                                {editingPackage.status || "Available"}
+                              </span>
                             </p>
                           </div>
 
@@ -999,6 +1170,11 @@ export function PackagePage() {
                         <p className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest mt-1">
                           Guests: {editingPackage.pax || "—"}
                         </p>
+                        {editingPackage.additional_pax_price && (
+                          <p className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest mt-1">
+                            +₱{editingPackage.additional_pax_price} / extra pax
+                          </p>
+                        )}
 
                         <div className="mt-4 border border-natural-border/50 rounded-lg overflow-hidden">
                           <div className="p-3 bg-natural-bg/10 border-b border-natural-border/50">
@@ -1011,35 +1187,59 @@ export function PackagePage() {
                             {editingPackage.inclusions &&
                             editingPackage.inclusions.length > 0 ? (
                               <div className="space-y-4 max-h-64 overflow-y-auto pr-2 scrollbar-thin">
-                                {Object.entries(dynamicInclusionCategories).map(([cat, items]) => {
-                                  const selectedInThisCategory = editingPackage.inclusions!.filter((inc) => items.includes(inc));
-                                  if (selectedInThisCategory.length === 0) return null;
-                                  return (
-                                    <div key={cat} className="space-y-1.5">
-                                      <p className="text-[0.6rem] font-bold text-natural-text-main uppercase tracking-widest border-b border-natural-border/50 pb-1 mb-2">{cat}</p>
-                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
-                                        {selectedInThisCategory.map((inc, i) => (
-                                          <div key={`${inc}-${i}`} className="flex items-start gap-2">
-                                            <Check className="w-3.5 h-3.5 text-natural-accent shrink-0 mt-0.5" />
-                                            <span className="text-[0.7rem] font-medium text-natural-text-main/80 leading-tight">
-                                              {inc}
-                                            </span>
-                                          </div>
-                                        ))}
+                                {Object.entries(dynamicInclusionCategories).map(
+                                  ([cat, items]) => {
+                                    const selectedInThisCategory =
+                                      editingPackage.inclusions!.filter((inc) =>
+                                        items.includes(inc),
+                                      );
+                                    if (selectedInThisCategory.length === 0)
+                                      return null;
+                                    return (
+                                      <div key={cat} className="space-y-1.5">
+                                        <p className="text-[0.6rem] font-bold text-natural-text-main uppercase tracking-widest border-b border-natural-border/50 pb-1 mb-2">
+                                          {cat}
+                                        </p>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+                                          {selectedInThisCategory.map(
+                                            (inc, i) => (
+                                              <div
+                                                key={`${inc}-${i}`}
+                                                className="flex items-start gap-2"
+                                              >
+                                                <Check className="w-3.5 h-3.5 text-natural-accent shrink-0 mt-0.5" />
+                                                <span className="text-[0.7rem] font-medium text-natural-text-main/80 leading-tight">
+                                                  {inc}
+                                                </span>
+                                              </div>
+                                            ),
+                                          )}
+                                        </div>
                                       </div>
-                                    </div>
-                                  );
-                                })}
+                                    );
+                                  },
+                                )}
                                 {(() => {
-                                  const allCategorizedItems = Object.values(dynamicInclusionCategories).flat();
-                                  const uncategorized = editingPackage.inclusions!.filter((inc) => !allCategorizedItems.includes(inc));
+                                  const allCategorizedItems = Object.values(
+                                    dynamicInclusionCategories,
+                                  ).flat();
+                                  const uncategorized =
+                                    editingPackage.inclusions!.filter(
+                                      (inc) =>
+                                        !allCategorizedItems.includes(inc),
+                                    );
                                   if (uncategorized.length === 0) return null;
                                   return (
                                     <div className="space-y-1.5">
-                                      <p className="text-[0.6rem] font-bold text-natural-text-main uppercase tracking-widest border-b border-natural-border/50 pb-1 mb-2">Other</p>
+                                      <p className="text-[0.6rem] font-bold text-natural-text-main uppercase tracking-widest border-b border-natural-border/50 pb-1 mb-2">
+                                        Other
+                                      </p>
                                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
                                         {uncategorized.map((inc, i) => (
-                                          <div key={`uncat-${inc}-${i}`} className="flex items-start gap-2">
+                                          <div
+                                            key={`uncat-${inc}-${i}`}
+                                            className="flex items-start gap-2"
+                                          >
                                             <Check className="w-3.5 h-3.5 text-natural-accent shrink-0 mt-0.5" />
                                             <span className="text-[0.7rem] font-medium text-natural-text-main/80 leading-tight">
                                               {inc}
@@ -1080,7 +1280,7 @@ export function PackagePage() {
               </div>
             </div>
 
-            <div className="p-6 bg-natural-bg/30 border-t border-natural-border flex items-center justify-end gap-3">
+            <div className="p-6 bg-natural-bg/30 border-t border-natural-border flex items-center justify-end gap-3 shrink-0">
               <button
                 onClick={() => setIsModalOpen(false)}
                 className="px-4 py-2 text-xs font-bold text-natural-text-light uppercase tracking-widest hover:text-natural-text-main transition-colors"
@@ -1107,9 +1307,9 @@ export function PackagePage() {
       {/* Confirmation Modal */}
       {confirmAction && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200 border border-natural-border relative">
-            
-            {(confirmAction.type === "create" || confirmAction.type === "edit") && (
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[90vh] overflow-y-auto animate-in zoom-in-95 duration-200 border border-natural-border relative">
+            {(confirmAction.type === "create" ||
+              confirmAction.type === "edit") && (
               <button
                 onClick={() => {
                   const actionType = confirmAction.itemType;

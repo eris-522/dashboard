@@ -26,6 +26,7 @@ export interface MenuItem {
   category: string;
   sub_category?: string;
   status: string;
+  image_url?: string;
 }
 
 const categories = [
@@ -51,6 +52,7 @@ export function MenuPage() {
     category: "Main Course",
     sub_category: "",
     status: "Available",
+    image_url: "",
   });
 
   const [confirmAction, setConfirmAction] = useState<{
@@ -67,9 +69,13 @@ export function MenuPage() {
 
     const channel = supabase
       .channel("admin-menu-items")
-      .on("postgres_changes", { event: "*", schema: "public", table: "menu_items" }, () => {
-        fetchMenuItems();
-      })
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "menu_items" },
+        () => {
+          fetchMenuItems();
+        },
+      )
       .subscribe();
 
     return () => {
@@ -115,7 +121,13 @@ export function MenuPage() {
   // Prepares the UI form for adding a completely new menu item
   const handleAddClick = () => {
     setEditingItem(null);
-    setFormData({ name: "", category: "Main Course", sub_category: "", status: "Available" });
+    setFormData({
+      name: "",
+      category: "Main Course",
+      sub_category: "",
+      status: "Available",
+      image_url: "",
+    });
     setFormError(null);
     setIsModalOpen(true);
   };
@@ -123,11 +135,13 @@ export function MenuPage() {
   // Populates the UI form with the data of an existing item so it can be edited
   const handleEditClick = (item: MenuItem) => {
     setEditingItem(item);
-    setFormData({ 
-      name: item.name, 
+    setFormData({
+      name: item.name,
       category: item.category,
       sub_category: item.sub_category || "",
-      status: item.status === "Active" ? "Available" : (item.status || "Available"),
+      status:
+        item.status === "Active" ? "Available" : item.status || "Available",
+      image_url: item.image_url || "",
     });
     setFormError(null);
     setIsModalOpen(true);
@@ -153,7 +167,9 @@ export function MenuPage() {
 
     const candidate = normalizeDishName(formData.name);
     const duplicate = menuItems.some(
-      (item) => item.id !== editingItem?.id && normalizeDishName(item.name) === candidate
+      (item) =>
+        item.id !== editingItem?.id &&
+        normalizeDishName(item.name) === candidate,
     );
     if (duplicate) {
       setFormError("A dish with this name already exists in the catalog.");
@@ -185,8 +201,13 @@ export function MenuPage() {
         {
           name: formData.name,
           category: formData.category,
-          sub_category: ["Main Course", "Appetizers"].includes(formData.category) ? formData.sub_category : null,
+          sub_category: ["Main Course", "Appetizers"].includes(
+            formData.category,
+          )
+            ? formData.sub_category
+            : null,
           status: formData.status || "Available",
+          image_url: formData.image_url || null,
         },
       ]);
       if (error) {
@@ -201,8 +222,13 @@ export function MenuPage() {
         .update({
           name: formData.name,
           category: formData.category,
-          sub_category: ["Main Course", "Appetizers"].includes(formData.category) ? formData.sub_category : null,
+          sub_category: ["Main Course", "Appetizers"].includes(
+            formData.category,
+          )
+            ? formData.sub_category
+            : null,
           status: formData.status,
+          image_url: formData.image_url || null,
         })
         .eq("id", confirmAction.itemId);
       if (error) {
@@ -227,16 +253,28 @@ export function MenuPage() {
 
     // Refreshes the UI data from the database and resets the form states
     await fetchMenuItems();
-    
+
     if (addAnother) {
       setConfirmAction(null);
-      setFormData({ name: "", category: formData.category, sub_category: formData.sub_category, status: "Available" }); // Keep same category selected for bulk adding
+      setFormData({
+        name: "",
+        category: formData.category,
+        sub_category: formData.sub_category,
+        status: "Available",
+        image_url: "",
+      }); // Keep same category selected for bulk adding
       setFormError(null);
       setIsModalOpen(true);
     } else {
       setConfirmAction(null);
       setEditingItem(null);
-      setFormData({ name: "", category: "Main Course", sub_category: "", status: "Available" });
+      setFormData({
+        name: "",
+        category: "Main Course",
+        sub_category: "",
+        status: "Available",
+        image_url: "",
+      });
     }
   };
 
@@ -275,9 +313,17 @@ export function MenuPage() {
       </div>
 
       <div className="flex items-start justify-between mb-4">
-        <div className="p-3 bg-natural-bg border border-natural-border rounded-xl">
-          <Utensils className="w-6 h-6 text-natural-accent opacity-70" />
-        </div>
+        {item.image_url ? (
+          <img
+            src={item.image_url}
+            alt={item.name}
+            className="w-12 h-12 rounded-xl object-cover border border-natural-border"
+          />
+        ) : (
+          <div className="p-3 bg-natural-bg border border-natural-border rounded-xl">
+            <Utensils className="w-6 h-6 text-natural-accent opacity-70" />
+          </div>
+        )}
       </div>
 
       <div className="mb-2">
@@ -303,7 +349,7 @@ export function MenuPage() {
                 : "text-green-600 bg-green-50 border-green-100",
           )}
         >
-          {item.status === "Active" ? "Available" : (item.status || "Available")}
+          {item.status === "Active" ? "Available" : item.status || "Available"}
         </span>
       </div>
     </div>
@@ -331,22 +377,24 @@ export function MenuPage() {
       </div>
 
       <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none w-full">
-        {categories.filter((c) => c !== "Archived").map((cat) => (
-          <button
-            key={cat}
-            onClick={() => {
-              setActiveCategory(cat);
-            }}
-            className={cn(
-              "px-4 py-1.5 rounded-full text-[0.7rem] font-bold uppercase tracking-widest transition-all whitespace-nowrap border",
-              activeCategory === cat
-                ? "bg-natural-accent text-white border-natural-accent shadow-sm"
-                : "bg-white text-natural-text-light border-natural-border hover:bg-natural-bg",
-            )}
-          >
-            {cat}
-          </button>
-        ))}
+        {categories
+          .filter((c) => c !== "Archived")
+          .map((cat) => (
+            <button
+              key={cat}
+              onClick={() => {
+                setActiveCategory(cat);
+              }}
+              className={cn(
+                "px-4 py-1.5 rounded-full text-[0.7rem] font-bold uppercase tracking-widest transition-all whitespace-nowrap border",
+                activeCategory === cat
+                  ? "bg-natural-accent text-white border-natural-accent shadow-sm"
+                  : "bg-white text-natural-text-light border-natural-border hover:bg-natural-bg",
+              )}
+            >
+              {cat}
+            </button>
+          ))}
         <div className="flex-1 min-w-4"></div>
         <button
           onClick={() => setActiveCategory("Archived")}
@@ -382,7 +430,9 @@ export function MenuPage() {
           </div>
         </div>
 
-      {["Desserts", "Beverages", "Pasta", "Archived"].includes(activeCategory) ? (
+        {["Desserts", "Beverages", "Pasta", "Archived"].includes(
+          activeCategory,
+        ) ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-0 divide-x divide-y divide-natural-border bg-white border-t border-natural-border">
             {filteredItems.map(renderDishCard)}
             {filteredItems.length === 0 && (
@@ -397,69 +447,185 @@ export function MenuPage() {
         ) : (
           <div className="flex flex-col divide-y divide-natural-border">
             {(() => {
-              let sectionsConfig: { title: string, match: (i: MenuItem) => boolean }[] = [];
+              let sectionsConfig: {
+                title: string;
+                match: (i: MenuItem) => boolean;
+              }[] = [];
               if (activeCategory === "Main Course") {
                 sectionsConfig = [
-                  { title: "Beef", match: (i: MenuItem) => i.sub_category === "Beef" },
-                  { title: "Pork", match: (i: MenuItem) => i.sub_category === "Pork" },
-                  { title: "Chicken", match: (i: MenuItem) => i.sub_category === "Chicken" },
-                  { title: "Fish & Shrimp", match: (i: MenuItem) => i.sub_category === "Fish & Shrimp" },
-                  { title: "Rice", match: (i: MenuItem) => i.sub_category === "Rice" },
-                  { title: "Other Dishes", match: (i: MenuItem) => !["Beef", "Pork", "Chicken", "Fish & Shrimp", "Rice"].includes(i.sub_category || "") }
+                  {
+                    title: "Beef",
+                    match: (i: MenuItem) => i.sub_category === "Beef",
+                  },
+                  {
+                    title: "Pork",
+                    match: (i: MenuItem) => i.sub_category === "Pork",
+                  },
+                  {
+                    title: "Chicken",
+                    match: (i: MenuItem) => i.sub_category === "Chicken",
+                  },
+                  {
+                    title: "Fish & Shrimp",
+                    match: (i: MenuItem) => i.sub_category === "Fish & Shrimp",
+                  },
+                  {
+                    title: "Rice",
+                    match: (i: MenuItem) => i.sub_category === "Rice",
+                  },
+                  {
+                    title: "Other Dishes",
+                    match: (i: MenuItem) =>
+                      ![
+                        "Beef",
+                        "Pork",
+                        "Chicken",
+                        "Fish & Shrimp",
+                        "Rice",
+                      ].includes(i.sub_category || ""),
+                  },
                 ];
               } else if (activeCategory === "Appetizers") {
                 sectionsConfig = [
-                  { title: "Appetizer", match: (i: MenuItem) => i.sub_category === "Appetizer" },
-                  { title: "Vegetables", match: (i: MenuItem) => i.sub_category === "Vegetables" },
-                  { title: "Soup", match: (i: MenuItem) => i.sub_category === "Soup" },
-                  { title: "Other Dishes", match: (i: MenuItem) => !["Appetizer", "Vegetables", "Soup"].includes(i.sub_category || "") }
+                  {
+                    title: "Appetizer",
+                    match: (i: MenuItem) => i.sub_category === "Appetizer",
+                  },
+                  {
+                    title: "Vegetables",
+                    match: (i: MenuItem) => i.sub_category === "Vegetables",
+                  },
+                  {
+                    title: "Soup",
+                    match: (i: MenuItem) => i.sub_category === "Soup",
+                  },
+                  {
+                    title: "Other Dishes",
+                    match: (i: MenuItem) =>
+                      !["Appetizer", "Vegetables", "Soup"].includes(
+                        i.sub_category || "",
+                      ),
+                  },
                 ];
               } else {
                 sectionsConfig = [
-                  { title: "Beef", match: (i: MenuItem) => i.sub_category === "Beef" && i.category === "Main Course" },
-                  { title: "Pork", match: (i: MenuItem) => i.sub_category === "Pork" && i.category === "Main Course" },
-                  { title: "Chicken", match: (i: MenuItem) => i.sub_category === "Chicken" && i.category === "Main Course" },
-                  { title: "Fish & Shrimp", match: (i: MenuItem) => i.sub_category === "Fish & Shrimp" && i.category === "Main Course" },
-                  { title: "Rice", match: (i: MenuItem) => i.sub_category === "Rice" && i.category === "Main Course" },
-                  { title: "Appetizer", match: (i: MenuItem) => i.sub_category === "Appetizer" && i.category === "Appetizers" },
-                  { title: "Vegetables", match: (i: MenuItem) => i.sub_category === "Vegetables" && i.category === "Appetizers" },
-                  { title: "Soup", match: (i: MenuItem) => i.sub_category === "Soup" && i.category === "Appetizers" },
-                  { title: "Pasta", match: (i: MenuItem) => i.category === "Pasta" },
-                  { title: "Desserts", match: (i: MenuItem) => i.category === "Desserts" },
-                  { title: "Beverages", match: (i: MenuItem) => i.category === "Beverages" },
-                  { title: "Other Dishes", match: (i: MenuItem) => 
-                      (!["Beef", "Pork", "Chicken", "Fish & Shrimp", "Rice"].includes(i.sub_category || "") && i.category === "Main Course") || 
-                      (!["Appetizer", "Vegetables", "Soup"].includes(i.sub_category || "") && i.category === "Appetizers") ||
-                      (!["Main Course", "Appetizers", "Desserts", "Beverages", "Pasta"].includes(i.category))
-                  }
+                  {
+                    title: "Beef",
+                    match: (i: MenuItem) =>
+                      i.sub_category === "Beef" && i.category === "Main Course",
+                  },
+                  {
+                    title: "Pork",
+                    match: (i: MenuItem) =>
+                      i.sub_category === "Pork" && i.category === "Main Course",
+                  },
+                  {
+                    title: "Chicken",
+                    match: (i: MenuItem) =>
+                      i.sub_category === "Chicken" &&
+                      i.category === "Main Course",
+                  },
+                  {
+                    title: "Fish & Shrimp",
+                    match: (i: MenuItem) =>
+                      i.sub_category === "Fish & Shrimp" &&
+                      i.category === "Main Course",
+                  },
+                  {
+                    title: "Rice",
+                    match: (i: MenuItem) =>
+                      i.sub_category === "Rice" && i.category === "Main Course",
+                  },
+                  {
+                    title: "Appetizer",
+                    match: (i: MenuItem) =>
+                      i.sub_category === "Appetizer" &&
+                      i.category === "Appetizers",
+                  },
+                  {
+                    title: "Vegetables",
+                    match: (i: MenuItem) =>
+                      i.sub_category === "Vegetables" &&
+                      i.category === "Appetizers",
+                  },
+                  {
+                    title: "Soup",
+                    match: (i: MenuItem) =>
+                      i.sub_category === "Soup" && i.category === "Appetizers",
+                  },
+                  {
+                    title: "Pasta",
+                    match: (i: MenuItem) => i.category === "Pasta",
+                  },
+                  {
+                    title: "Desserts",
+                    match: (i: MenuItem) => i.category === "Desserts",
+                  },
+                  {
+                    title: "Beverages",
+                    match: (i: MenuItem) => i.category === "Beverages",
+                  },
+                  {
+                    title: "Other Dishes",
+                    match: (i: MenuItem) =>
+                      (![
+                        "Beef",
+                        "Pork",
+                        "Chicken",
+                        "Fish & Shrimp",
+                        "Rice",
+                      ].includes(i.sub_category || "") &&
+                        i.category === "Main Course") ||
+                      (!["Appetizer", "Vegetables", "Soup"].includes(
+                        i.sub_category || "",
+                      ) &&
+                        i.category === "Appetizers") ||
+                      ![
+                        "Main Course",
+                        "Appetizers",
+                        "Desserts",
+                        "Beverages",
+                        "Pasta",
+                      ].includes(i.category),
+                  },
                 ];
               }
 
               return sectionsConfig.map(({ title, match }) => {
                 const sectionItems = filteredItems.filter(match);
-                if (sectionItems.length === 0 && title === "Other Dishes") return null;
-                
+                if (sectionItems.length === 0 && title === "Other Dishes")
+                  return null;
+
                 const isExpanded = expandedSections.includes(title);
-                
+
                 return (
                   <div key={title} className="flex flex-col bg-white">
                     <button
                       onClick={() => {
-                        setExpandedSections(prev => 
-                          prev.includes(title) ? prev.filter(t => t !== title) : [...prev, title]
-                        )
+                        setExpandedSections((prev) =>
+                          prev.includes(title)
+                            ? prev.filter((t) => t !== title)
+                            : [...prev, title],
+                        );
                       }}
                       className="flex items-center justify-between p-4 bg-natural-bg/5 hover:bg-natural-bg/10 transition-colors w-full text-left"
                     >
                       <div className="flex items-center gap-2">
-                        <h3 className="font-serif font-bold text-natural-text-main text-lg">{title}</h3>
+                        <h3 className="font-serif font-bold text-natural-text-main text-lg">
+                          {title}
+                        </h3>
                         <span className="px-2 py-0.5 rounded-full bg-natural-bg border border-natural-border text-[10px] font-bold text-natural-text-light">
                           {sectionItems.length}
                         </span>
                       </div>
-                      <ChevronDown className={cn("w-5 h-5 text-natural-text-light transition-transform", isExpanded && "rotate-180")} />
+                      <ChevronDown
+                        className={cn(
+                          "w-5 h-5 text-natural-text-light transition-transform",
+                          isExpanded && "rotate-180",
+                        )}
+                      />
                     </button>
-                    
+
                     {isExpanded && (
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-0 divide-x divide-y divide-natural-border border-t border-natural-border">
                         {sectionItems.map(renderDishCard)}
@@ -491,8 +657,8 @@ export function MenuPage() {
 
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in duration-200 border border-natural-border">
-            <div className="p-6 border-b border-natural-border flex items-center justify-between">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in duration-200 border border-natural-border">
+            <div className="p-6 border-b border-natural-border flex items-center justify-between shrink-0">
               <h3 className="text-lg font-serif font-bold text-natural-text-main">
                 {editingItem ? "Edit Dish" : "Add New Dish"}
               </h3>
@@ -504,7 +670,7 @@ export function MenuPage() {
               </button>
             </div>
 
-            <div className="p-6 space-y-6">
+            <div className="p-6 space-y-6 overflow-y-auto flex-1">
               {formError && (
                 <div className="p-3 bg-red-50 border border-red-200 rounded-xl">
                   <p className="text-xs font-bold text-red-600">{formError}</p>
@@ -535,10 +701,10 @@ export function MenuPage() {
                   value={formData.category}
                   onChange={(e) => {
                     const newCategory = e.target.value;
-                    setFormData({ 
-                      ...formData, 
+                    setFormData({
+                      ...formData,
                       category: newCategory,
-                      sub_category: ""
+                      sub_category: "",
                     });
                   }}
                   className="w-full px-4 py-2.5 bg-natural-bg border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 transition-all font-medium"
@@ -565,7 +731,9 @@ export function MenuPage() {
                     }
                     className="w-full px-4 py-2.5 bg-natural-bg border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 transition-all font-medium"
                   >
-                    <option value="" disabled>Select a sub category</option>
+                    <option value="" disabled>
+                      Select a sub category
+                    </option>
                     {formData.category === "Main Course" && (
                       <>
                         <option value="Beef">Beef</option>
@@ -603,9 +771,29 @@ export function MenuPage() {
                   </select>
                 </div>
               )}
+              
+              <div className="space-y-2">
+                <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                  Image URL
+                </label>
+                <input
+                  type="text"
+                  value={formData.image_url}
+                  onChange={(e) =>
+                    setFormData({ ...formData, image_url: e.target.value })
+                  }
+                  placeholder="e.g. https://example.com/image.jpg"
+                  className="w-full px-4 py-2.5 bg-natural-bg border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 transition-all font-medium"
+                />
+                {formData.image_url && (
+                  <div className="mt-2 w-full h-32 rounded-xl overflow-hidden border border-natural-border">
+                    <img src={formData.image_url} alt="Dish Preview" className="w-full h-full object-cover" />
+                  </div>
+                )}
+              </div>
             </div>
 
-            <div className="p-6 bg-natural-bg/30 border-t border-natural-border flex items-center justify-end gap-3">
+            <div className="p-6 bg-natural-bg/30 border-t border-natural-border flex items-center justify-end gap-3 shrink-0">
               <button
                 onClick={() => setIsModalOpen(false)}
                 className="px-4 py-2.5 text-[0.65rem] font-bold text-natural-text-light uppercase tracking-[0.2em] hover:text-natural-text-main transition-colors mr-auto"
@@ -614,7 +802,11 @@ export function MenuPage() {
               </button>
               <button
                 onClick={handleConfirmSave}
-                disabled={!formData.name || (["Main Course", "Appetizers"].includes(formData.category) && !formData.sub_category)}
+                disabled={
+                  !formData.name ||
+                  (["Main Course", "Appetizers"].includes(formData.category) &&
+                    !formData.sub_category)
+                }
                 className="bg-natural-accent text-white px-6 py-2.5 rounded-xl text-[0.65rem] font-bold uppercase tracking-[0.2em] hover:bg-natural-accent/90 transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {editingItem ? "Save Changes" : "Add Dish"}
@@ -626,8 +818,9 @@ export function MenuPage() {
 
       {confirmAction && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200 border border-natural-border relative">
-            {(confirmAction.type === "create" || confirmAction.type === "edit") && (
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[90vh] overflow-y-auto animate-in zoom-in-95 duration-200 border border-natural-border relative">
+            {(confirmAction.type === "create" ||
+              confirmAction.type === "edit") && (
               <button
                 onClick={() => {
                   setConfirmAction(null);
@@ -729,7 +922,7 @@ export function MenuPage() {
                       "w-full py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] text-white transition-all shadow-md active:scale-[0.98]",
                       confirmAction.type === "edit"
                         ? "bg-natural-accent hover:bg-natural-accent/90"
-                        : "bg-red-600 hover:bg-red-700"
+                        : "bg-red-600 hover:bg-red-700",
                     )}
                   >
                     Confirm {confirmAction.type}
@@ -737,7 +930,9 @@ export function MenuPage() {
                 )}
                 <button
                   onClick={() => {
-                    const wasCreateOrEdit = confirmAction.type === "create" || confirmAction.type === "edit";
+                    const wasCreateOrEdit =
+                      confirmAction.type === "create" ||
+                      confirmAction.type === "edit";
                     setConfirmAction(null);
                     setFormError(null);
                     if (wasCreateOrEdit) setIsModalOpen(true);

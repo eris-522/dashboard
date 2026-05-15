@@ -60,9 +60,9 @@ async function main() {
     const authId = created?.user?.id;
     if (!authId) throw new Error('Auth user id missing after creation');
 
-    // Upsert profile row.
+    // Upsert admin row into the separate admins database.
     const { error: profileErr } = await client
-      .from('profiles')
+      .from('admins')
       .upsert({
         id: authId,
         email: adminEmail,
@@ -74,11 +74,11 @@ async function main() {
 
     if (profileErr) throw profileErr;
 
-    console.log('Upserted profiles row.');
+    console.log('Upserted admins row.');
   } else {
     const authId = existingUsers[0].id;
     const { error: profileErr } = await client
-      .from('profiles')
+      .from('admins')
       .upsert({
         id: authId,
         email: adminEmail,
@@ -89,7 +89,7 @@ async function main() {
 
     if (profileErr) throw profileErr;
 
-    console.log('Admin auth user already exists; ensured profiles row.');
+    console.log('Admin auth user already exists; ensured admins row.');
   }
 }
 

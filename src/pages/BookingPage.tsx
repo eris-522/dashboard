@@ -26,7 +26,13 @@ import { EventCalendar } from "../components/EventCalendar";
 import { supabase } from "../utils/supabase";
 import { useUser } from "../context/UserContext";
 
-type SortField = "customerName" | "date" | "budget" | "status" | "created_at" | null;
+type SortField =
+  | "customerName"
+  | "date"
+  | "budget"
+  | "status"
+  | "created_at"
+  | null;
 type SortOrder = "asc" | "desc" | null;
 
 interface SortConfig {
@@ -80,6 +86,7 @@ export function BookingPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordError, setPasswordError] = useState<string | boolean>(false);
   const [cancelReason, setCancelReason] = useState("");
+  const [cancelReasonError, setCancelReasonError] = useState<string | boolean>(false);
   const [confirmAction, setConfirmAction] = useState<{
     type: "confirm" | "cancel" | "archive" | "create";
     bookingId?: string;
@@ -93,6 +100,7 @@ export function BookingPage() {
     date: "",
     time: "",
     guest_count: 50,
+    additional_pax: 0,
     venueName: "",
     venueAddress: "",
     selected_menu_items: [] as string[],
@@ -103,6 +111,7 @@ export function BookingPage() {
     setConfirmPassword("");
     setPasswordError(false);
     setCancelReason("");
+    setCancelReasonError(false);
   }, [confirmAction]);
 
   useEffect(() => {
@@ -110,9 +119,13 @@ export function BookingPage() {
     fetchAllData();
 
     const intervalId = setInterval(() => {
-      supabase.from("menu_items").select("*").neq("status", "Archived").then(({ data }) => {
-        if (data) setMenuItems(data);
-      });
+      supabase
+        .from("menu_items")
+        .select("*")
+        .neq("status", "Archived")
+        .then(({ data }) => {
+          if (data) setMenuItems(data);
+        });
     }, 10000);
 
     // Subscribe to real-time changes on the bookings table
@@ -130,10 +143,14 @@ export function BookingPage() {
         "postgres_changes",
         { event: "*", schema: "public", table: "menu_items" },
         () => {
-          supabase.from("menu_items").select("*").neq("status", "Archived").then(({ data }) => {
-            if (data) setMenuItems(data);
-          });
-        }
+          supabase
+            .from("menu_items")
+            .select("*")
+            .neq("status", "Archived")
+            .then(({ data }) => {
+              if (data) setMenuItems(data);
+            });
+        },
       )
       .subscribe();
 
@@ -177,16 +194,20 @@ export function BookingPage() {
         supabase.from("add_ons").select("*").neq("status", "Archived"),
       ]);
 
-      if (pRes.error) console.error("Error fetching profiles:", pRes.error.message);
+      if (pRes.error)
+        console.error("Error fetching profiles:", pRes.error.message);
       else if (pRes.data) setCustomers(pRes.data);
 
-      if (pkgRes.error) console.error("Error fetching packages:", pkgRes.error.message);
+      if (pkgRes.error)
+        console.error("Error fetching packages:", pkgRes.error.message);
       else if (pkgRes.data) setPackages(pkgRes.data);
 
-      if (menuRes.error) console.error("Error fetching menu items:", menuRes.error.message);
+      if (menuRes.error)
+        console.error("Error fetching menu items:", menuRes.error.message);
       else if (menuRes.data) setMenuItems(menuRes.data);
 
-      if (srvRes.error) console.error("Error fetching add-ons:", srvRes.error.message);
+      if (srvRes.error)
+        console.error("Error fetching add-ons:", srvRes.error.message);
       else if (srvRes.data) setAdditionalServices(srvRes.data);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "Unknown error";
@@ -209,30 +230,34 @@ export function BookingPage() {
 
   const calculateBudget = (booking: any) => {
     let basePrice = 0;
-    const pkgPriceString =
-      booking.packages?.price ||
-      packages.find((p) => p.id === booking.package_id)?.price;
+    let additionalPaxTotal = 0;
 
-    if (pkgPriceString) {
-      basePrice =
-        parseFloat(String(pkgPriceString).replace(/[^\d.]/g, "")) *
-        (booking.guest_count || 0);
+    const pkg = booking.packages || packages.find((p) => p.id === booking.package_id);
+
+    if (pkg && pkg.price) {
+      basePrice = parseFloat(String(pkg.price).replace(/[^\d.-]/g, "")) || 0;
+    }
+
+    if (pkg && pkg.additional_pax_price && booking.additional_pax) {
+      const addPrice = parseFloat(String(pkg.additional_pax_price).replace(/[^\d.-]/g, "")) || 0;
+      additionalPaxTotal = addPrice * booking.additional_pax;
     }
 
     const servicesPrice = (booking.selected_add_ons || []).reduce(
       (acc: number, name: string) => {
         const service = additionalServices.find((s) => s.name === name);
-        return acc + (service ? parseFloat(String(service.price)) : 0);
+        return acc + (service ? parseFloat(String(service.price).replace(/[^\d.-]/g, "")) || 0 : 0);
       },
       0,
     );
 
-    return basePrice + servicesPrice;
+    return basePrice + additionalPaxTotal + servicesPrice;
   };
 
   const filteredBookings = useMemo(() => {
     return bookings.filter((booking) => {
-      const customerName = booking.profiles?.name || booking.profiles?.full_name || "Unknown User";
+      const customerName =
+        booking.profiles?.name || booking.profiles?.full_name || "Unknown User";
       const query = searchQuery.toLowerCase();
       const matchesSearch =
         customerName.toLowerCase().includes(query) ||
@@ -245,7 +270,6 @@ export function BookingPage() {
           ? currentStatus !== "Archived" && currentStatus !== "Cancelled"
           : currentStatus === statusFilter;
 
-
       return matchesSearch && matchesStatus;
     });
   }, [searchQuery, statusFilter, bookings]);
@@ -256,9 +280,17 @@ export function BookingPage() {
     return [...filteredBookings].sort((a, b) => {
       const { field, order } = sortConfig;
       let valA: any =
-        field === "customerName" ? (a.profiles?.name || a.profiles?.full_name) : field ? a[field] : "";
+        field === "customerName"
+          ? a.profiles?.name || a.profiles?.full_name
+          : field
+            ? a[field]
+            : "";
       let valB: any =
-        field === "customerName" ? (b.profiles?.name || b.profiles?.full_name) : field ? b[field] : "";
+        field === "customerName"
+          ? b.profiles?.name || b.profiles?.full_name
+          : field
+            ? b[field]
+            : "";
 
       if (field === "budget") {
         valA = calculateBudget(a);
@@ -306,6 +338,7 @@ export function BookingPage() {
       date: "",
       time: "",
       guest_count: 50,
+      additional_pax: 0,
       venueName: "",
       venueAddress: "",
       selected_menu_items: [],
@@ -316,6 +349,11 @@ export function BookingPage() {
   const handleConfirmAction = async () => {
     if (!confirmAction) return;
     const { type, bookingId } = confirmAction;
+
+    if (type === "cancel" && !cancelReason.trim()) {
+      setCancelReasonError("Please provide a reason for cancellation.");
+      return;
+    }
 
     if (["confirm", "cancel", "archive"].includes(type)) {
       if (!confirmPassword) {
@@ -345,36 +383,56 @@ export function BookingPage() {
         .from("bookings")
         .update({ status: "Confirmed" })
         .eq("id", bookingId);
-      window.dispatchEvent(new CustomEvent("markAdminNotifRead", { detail: { id: bookingId, status: "Confirmed" } }));
+      window.dispatchEvent(
+        new CustomEvent("markAdminNotifRead", {
+          detail: { id: bookingId, status: "Confirmed" },
+        }),
+      );
     } else if (type === "cancel" && bookingId) {
       await supabase
         .from("bookings")
-        .update({ status: "Cancelled", cancellation_reason: cancelReason || "Cancelled by Administrator", cancelled_by: "Admin" })
+        .update({
+          status: "Cancelled",
+          cancellation_reason: cancelReason.trim(),
+          cancelled_by: "Admin",
+        })
         .eq("id", bookingId);
-      window.dispatchEvent(new CustomEvent("markAdminNotifRead", { detail: { id: bookingId, status: "Cancelled" } }));
+      window.dispatchEvent(
+        new CustomEvent("markAdminNotifRead", {
+          detail: { id: bookingId, status: "Cancelled" },
+        }),
+      );
     } else if (type === "archive" && bookingId) {
       await supabase
         .from("bookings")
         .update({ status: "Archived" })
         .eq("id", bookingId);
     } else if (type === "create") {
-      const { data } = await supabase.from("bookings").insert([
-        {
-          user_id: newBooking.user_id,
-          package_id: newBooking.package_id,
-          event_type: newBooking.event_type,
-          event_date: newBooking.date,
-          event_time: newBooking.time,
-          event_location: `${newBooking.venueName} - ${newBooking.venueAddress}`,
-          guest_count: newBooking.guest_count,
-          selected_menu_items: newBooking.selected_menu_items,
-          selected_add_ons: newBooking.selected_add_ons,
-          status: "Confirmed",
-        },
-      ]).select();
-      
+      const { data } = await supabase
+        .from("bookings")
+        .insert([
+          {
+            user_id: newBooking.user_id,
+            package_id: newBooking.package_id,
+            event_type: newBooking.event_type,
+            event_date: newBooking.date,
+            event_time: newBooking.time,
+            event_location: `${newBooking.venueName} - ${newBooking.venueAddress}`,
+            guest_count: newBooking.guest_count,
+            additional_pax: newBooking.additional_pax,
+            selected_menu_items: newBooking.selected_menu_items,
+            selected_add_ons: newBooking.selected_add_ons,
+            status: "Confirmed",
+          },
+        ])
+        .select();
+
       if (data && data.length > 0) {
-        window.dispatchEvent(new CustomEvent("markAdminNotifRead", { detail: { id: data[0].id, status: "Confirmed" } }));
+        window.dispatchEvent(
+          new CustomEvent("markAdminNotifRead", {
+            detail: { id: data[0].id, status: "Confirmed" },
+          }),
+        );
       }
     }
 
@@ -413,7 +471,9 @@ export function BookingPage() {
         {[
           {
             label: "Total Bookings",
-            value: bookings.filter((b) => (b.status || "Pending") !== "Archived").length.toString(),
+            value: bookings
+              .filter((b) => (b.status || "Pending") !== "Archived")
+              .length.toString(),
             sub: "Active",
           },
           {
@@ -432,7 +492,15 @@ export function BookingPage() {
           },
           {
             label: "Est. Revenue",
-            value: `₱${(bookings.reduce((acc, b) => acc + calculateBudget(b), 0) / 1000).toFixed(0)}k`,
+            value: `₱${(
+              bookings
+                .filter(
+                  (b) =>
+                    (b.status || "Pending") !== "Archived" &&
+                    (b.status || "Pending") !== "Cancelled"
+                )
+                .reduce((acc, b) => acc + calculateBudget(b), 0) / 1000
+            ).toFixed(0)}k`,
             sub: "Projected",
           },
         ].map((s, i) => (
@@ -617,7 +685,9 @@ export function BookingPage() {
                     <td className="px-6 py-5 border-b border-natural-border/50">
                       <div>
                         <p className="text-sm font-bold text-natural-text-main tracking-tight leading-tight">
-                          {booking.profiles?.name || booking.profiles?.full_name || "Unknown User"}
+                          {booking.profiles?.name ||
+                            booking.profiles?.full_name ||
+                            "Unknown User"}
                         </p>
                         <div className="flex flex-col gap-0.5 mt-1">
                           <p className="text-[10px] text-natural-text-light flex items-center gap-1">
@@ -625,8 +695,10 @@ export function BookingPage() {
                             {booking.profiles?.email || "N/A"}
                           </p>
                           <p className="text-[10px] text-natural-text-light flex items-center gap-1">
-                          <Phone className="w-2.5 h-2.5" />{" "}
-                          {booking.profiles?.phone_number || booking.profiles?.phone || "N/A"}
+                            <Phone className="w-2.5 h-2.5" />{" "}
+                            {booking.profiles?.phone_number ||
+                              booking.profiles?.phone ||
+                              "N/A"}
                           </p>
                         </div>
                       </div>
@@ -652,17 +724,32 @@ export function BookingPage() {
                           {formatEventDate(booking.event_date)}
                         </p>
                         <p className="text-[10px] text-natural-text-light flex items-center gap-2">
-                          <Clock className="w-3 h-3" /> {formatEventTime(booking.event_time)}
+                          <Clock className="w-3 h-3" />{" "}
+                          {formatEventTime(booking.event_time)}
                         </p>
                       </div>
                     </td>
                     <td className="px-6 py-5 border-b border-natural-border/50">
                       <div className="flex flex-col gap-1">
                         <p className="text-xs text-natural-text-main font-medium">
-                          {booking.created_at ? new Date(booking.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : "N/A"}
+                          {booking.created_at
+                            ? new Date(booking.created_at).toLocaleDateString(
+                                undefined,
+                                {
+                                  year: "numeric",
+                                  month: "short",
+                                  day: "numeric",
+                                },
+                              )
+                            : "N/A"}
                         </p>
                         <p className="text-[10px] text-natural-text-light">
-                          {booking.created_at ? new Date(booking.created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : ""}
+                          {booking.created_at
+                            ? new Date(booking.created_at).toLocaleTimeString(
+                                undefined,
+                                { hour: "2-digit", minute: "2-digit" },
+                              )
+                            : ""}
                         </p>
                       </div>
                     </td>
@@ -672,6 +759,8 @@ export function BookingPage() {
                       </p>
                       <p className="text-[9px] text-natural-text-light uppercase font-bold">
                         {booking.guest_count} Pax
+                        {booking.additional_pax > 0 &&
+                          ` (+${booking.additional_pax})`}
                       </p>
                     </td>
                     <td className="px-6 py-5 border-b border-natural-border/50">
@@ -704,7 +793,10 @@ export function BookingPage() {
                                     setConfirmAction({
                                       type: "confirm",
                                       bookingId: booking.id,
-                                      bookingName: booking.profiles?.name || booking.profiles?.full_name || "Unknown User",
+                                      bookingName:
+                                        booking.profiles?.name ||
+                                        booking.profiles?.full_name ||
+                                        "Unknown User",
                                     })
                                   }
                                   className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-all"
@@ -717,7 +809,10 @@ export function BookingPage() {
                                     setConfirmAction({
                                       type: "cancel",
                                       bookingId: booking.id,
-                                      bookingName: booking.profiles?.name || booking.profiles?.full_name || "Unknown User",
+                                      bookingName:
+                                        booking.profiles?.name ||
+                                        booking.profiles?.full_name ||
+                                        "Unknown User",
                                     })
                                   }
                                   className="p-1.5 text-orange-600 hover:bg-orange-50 rounded-lg transition-all"
@@ -739,7 +834,10 @@ export function BookingPage() {
                                 setConfirmAction({
                                   type: "archive",
                                   bookingId: booking.id,
-                                  bookingName: booking.profiles?.name || booking.profiles?.full_name || "Unknown User",
+                                  bookingName:
+                                    booking.profiles?.name ||
+                                    booking.profiles?.full_name ||
+                                    "Unknown User",
                                 })
                               }
                               className="p-1.5 text-natural-text-light hover:text-natural-text-main hover:bg-natural-bg/50 rounded-lg transition-all"
@@ -769,7 +867,8 @@ export function BookingPage() {
               <EventCalendar
                 bookings={filteredBookings.map((b) => ({
                   id: b.id,
-                  customerName: b.profiles?.name || b.profiles?.full_name || "Unknown User",
+                  customerName:
+                    b.profiles?.name || b.profiles?.full_name || "Unknown User",
                   email: b.profiles?.email || "",
                   phone: b.profiles?.phone_number || b.profiles?.phone || "",
                   eventType: b.event_type || "",
@@ -777,6 +876,7 @@ export function BookingPage() {
                   date: b.event_date || "",
                   time: formatEventTime(b.event_time),
                   guestCount: b.guest_count || 0,
+                  additionalPax: b.additional_pax || 0,
                   venueName: (b.event_location || "").split(" - ")[0] || "",
                   venueAddress: (b.event_location || "").split(" - ")[1] || "",
                   menu: b.selected_menu_items || [],
@@ -794,7 +894,7 @@ export function BookingPage() {
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
-            <div className="p-6 border-b border-natural-border flex items-center justify-between bg-natural-bg/20">
+            <div className="p-6 border-b border-natural-border flex items-center justify-between bg-natural-bg/20 shrink-0">
               <div>
                 <h3 className="text-xl font-serif font-bold text-natural-text-main">
                   Create New Booking
@@ -874,7 +974,7 @@ export function BookingPage() {
                 <h4 className="text-[0.7rem] font-bold text-natural-accent uppercase tracking-[0.2em] border-b border-natural-accent/20 pb-2">
                   Event & Package Details
                 </h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                   <div className="space-y-1">
                     <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
                       Event Type
@@ -925,6 +1025,22 @@ export function BookingPage() {
                         setNewBooking({
                           ...newBooking,
                           guest_count: Number(e.target.value),
+                        })
+                      }
+                      className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-natural-accent/20 transition-all"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                      Additional Pax
+                    </label>
+                    <input
+                      type="number"
+                      value={newBooking.additional_pax || 0}
+                      onChange={(e) =>
+                        setNewBooking({
+                          ...newBooking,
+                          additional_pax: Number(e.target.value),
                         })
                       }
                       className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-natural-accent/20 transition-all"
@@ -1005,41 +1121,52 @@ export function BookingPage() {
                     {menuItems.map((item) => {
                       const isUnavailable = item.status === "Not Available";
                       return (
-                      <label
-                        key={item.id}
-                        className={cn("flex items-center gap-2 p-2 rounded-lg transition-colors group", isUnavailable ? "opacity-50 cursor-not-allowed" : "hover:bg-natural-bg/50 cursor-pointer")}
-                      >
-                        <input
-                          type="checkbox"
-                          disabled={isUnavailable}
-                          className="w-3.5 h-3.5 rounded border-natural-border text-natural-accent focus:ring-natural-accent/20"
-                          checked={newBooking.selected_menu_items.includes(item.name)}
-                          onChange={(e) => {
-                            if (isUnavailable) return;
-                            const current = newBooking.selected_menu_items;
-                            const updated = e.target.checked
-                              ? [...current, item.name]
-                              : current.filter((n) => n !== item.name);
-                            setNewBooking({
-                              ...newBooking,
-                              selected_menu_items: updated,
-                            });
-                          }}
-                        />
-                        <div className="flex flex-1 justify-between items-center">
-                          <span className="text-xs font-medium text-natural-text-main group-hover:text-natural-accent transition-colors">
-                            {item.name}{" "}
-                            <span className="text-[9px] text-gray-400">
-                              ({item.category}{item.sub_category ? ` - ${item.sub_category}` : ""})
-                            </span>
-                          </span>
-                          {isUnavailable && (
-                            <span className="text-[9px] font-bold text-orange-600 bg-orange-50 border border-orange-100 px-1.5 py-0.5 rounded uppercase tracking-widest">
-                              Not Available
-                            </span>
+                        <label
+                          key={item.id}
+                          className={cn(
+                            "flex items-center gap-2 p-2 rounded-lg transition-colors group",
+                            isUnavailable
+                              ? "opacity-50 cursor-not-allowed"
+                              : "hover:bg-natural-bg/50 cursor-pointer",
                           )}
-                        </div>
-                      </label>
+                        >
+                          <input
+                            type="checkbox"
+                            disabled={isUnavailable}
+                            className="w-3.5 h-3.5 rounded border-natural-border text-natural-accent focus:ring-natural-accent/20"
+                            checked={newBooking.selected_menu_items.includes(
+                              item.name,
+                            )}
+                            onChange={(e) => {
+                              if (isUnavailable) return;
+                              const current = newBooking.selected_menu_items;
+                              const updated = e.target.checked
+                                ? [...current, item.name]
+                                : current.filter((n) => n !== item.name);
+                              setNewBooking({
+                                ...newBooking,
+                                selected_menu_items: updated,
+                              });
+                            }}
+                          />
+                          <div className="flex flex-1 justify-between items-center">
+                            <span className="text-xs font-medium text-natural-text-main group-hover:text-natural-accent transition-colors">
+                              {item.name}{" "}
+                              <span className="text-[9px] text-gray-400">
+                                ({item.category}
+                                {item.sub_category
+                                  ? ` - ${item.sub_category}`
+                                  : ""}
+                                )
+                              </span>
+                            </span>
+                            {isUnavailable && (
+                              <span className="text-[9px] font-bold text-orange-600 bg-orange-50 border border-orange-100 px-1.5 py-0.5 rounded uppercase tracking-widest">
+                                Not Available
+                              </span>
+                            )}
+                          </div>
+                        </label>
                       );
                     })}
                   </div>
@@ -1094,7 +1221,7 @@ export function BookingPage() {
               </div>
             </div>
 
-            <div className="p-6 bg-natural-bg/30 border-t border-natural-border flex items-center justify-end gap-4">
+            <div className="p-6 bg-natural-bg/30 border-t border-natural-border flex items-center justify-end gap-4 shrink-0">
               <button
                 onClick={() => setIsModalOpen(false)}
                 className="px-6 py-2.5 text-xs font-bold text-natural-text-light uppercase tracking-widest hover:text-natural-text-main transition-colors"
@@ -1119,8 +1246,8 @@ export function BookingPage() {
 
       {selectedBooking && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="p-6 border-b border-natural-border flex items-center justify-between">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-natural-border flex items-center justify-between shrink-0">
               <h3 className="text-xl font-serif font-bold text-natural-text-main">
                 Booking Overview
               </h3>
@@ -1132,18 +1259,32 @@ export function BookingPage() {
               </button>
             </div>
 
-            <div className="p-8 space-y-6">
+            <div className="p-8 space-y-6 overflow-y-auto flex-1">
               <div className="flex items-start justify-between">
                 <div>
                   <h4 className="text-2xl font-serif font-bold text-natural-text-main">
-                    {selectedBooking.profiles?.name || selectedBooking.profiles?.full_name || "Unknown User"}
+                    {selectedBooking.profiles?.name ||
+                      selectedBooking.profiles?.full_name ||
+                      "Unknown User"}
                   </h4>
                   <p className="text-sm font-medium text-natural-text-light">
                     {selectedBooking.event_type} •{" "}
                     {selectedBooking.packages?.name} Package
                     <br />
                     <span className="text-[10px] uppercase tracking-widest mt-1 block opacity-70">
-                      Applied On: {selectedBooking.created_at ? new Date(selectedBooking.created_at).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : "N/A"}
+                      Applied On:{" "}
+                      {selectedBooking.created_at
+                        ? new Date(selectedBooking.created_at).toLocaleString(
+                            undefined,
+                            {
+                              year: "numeric",
+                              month: "short",
+                              day: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            },
+                          )
+                        : "N/A"}
                     </span>
                   </p>
                 </div>
@@ -1162,9 +1303,36 @@ export function BookingPage() {
                   >
                     {selectedBooking.status || "Pending"}
                   </span>
-                  {((selectedBooking.status || "Pending") === "Confirmed" || (selectedBooking.status || "Pending") === "Cancelled") && (
+                  {((selectedBooking.status || "Pending") === "Confirmed" ||
+                    (selectedBooking.status || "Pending") === "Cancelled") && (
                     <span className="text-[9px] font-bold text-natural-text-light uppercase tracking-widest">
-                      {selectedBooking.status === "Confirmed" ? "Confirmed on" : "Cancelled on"}: {selectedBooking.updated_at ? new Date(selectedBooking.updated_at).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : (selectedBooking.created_at ? new Date(selectedBooking.created_at).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : "N/A")}
+                      {selectedBooking.status === "Confirmed"
+                        ? "Confirmed on"
+                        : "Cancelled on"}
+                      :{" "}
+                      {selectedBooking.updated_at
+                        ? new Date(selectedBooking.updated_at).toLocaleString(
+                            undefined,
+                            {
+                              year: "numeric",
+                              month: "short",
+                              day: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            },
+                          )
+                        : selectedBooking.created_at
+                          ? new Date(selectedBooking.created_at).toLocaleString(
+                              undefined,
+                              {
+                                year: "numeric",
+                                month: "short",
+                                day: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              },
+                            )
+                          : "N/A"}
                     </span>
                   )}
                 </div>
@@ -1172,8 +1340,17 @@ export function BookingPage() {
 
               {(selectedBooking.status || "Pending") === "Cancelled" && (
                 <div className="mt-4 p-4 bg-red-50 border border-red-100 rounded-xl">
-                  <p className="text-[10px] font-bold text-red-800 uppercase tracking-widest mb-1">Reason for Cancellation</p>
-                  <p className="text-sm text-red-900 italic">"{selectedBooking.cancellation_reason && selectedBooking.cancellation_reason.trim() !== "" ? selectedBooking.cancellation_reason : "No reason provided"}"</p>
+                  <p className="text-[10px] font-bold text-red-800 uppercase tracking-widest mb-1">
+                    Reason for Cancellation
+                  </p>
+                  <p className="text-sm text-red-900 italic">
+                    "
+                    {selectedBooking.cancellation_reason &&
+                    selectedBooking.cancellation_reason.trim() !== ""
+                      ? selectedBooking.cancellation_reason
+                      : "No reason provided"}
+                    "
+                  </p>
                 </div>
               )}
 
@@ -1208,17 +1385,49 @@ export function BookingPage() {
                 </div>
                 <div className="space-y-4">
                   <div className="flex items-start gap-3">
-                    <CreditCard className="w-4 h-4 text-natural-accent" />
-                    <div>
-                      <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest mb-0.5">
-                        Total Budget
+                    <CreditCard className="w-4 h-4 text-natural-accent shrink-0 mt-0.5" />
+                    <div className="w-full pr-4">
+                      <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest mb-3">
+                        Budget Breakdown
                       </p>
-                      <p className="text-lg font-bold text-natural-text-main font-serif italic">
-                        ₱{calculateBudget(selectedBooking).toLocaleString()}
-                      </p>
-                      <p className="text-[10px] text-natural-text-light font-bold">
-                        FOR {selectedBooking.guest_count} GUESTS
-                      </p>
+                      {(() => {
+                        const pkg = selectedBooking.packages || packages.find((p) => p.id === selectedBooking.package_id);
+                        const basePrice = pkg && pkg.price ? parseFloat(String(pkg.price).replace(/[^\d.-]/g, "")) || 0 : 0;
+                        const addPrice = pkg && pkg.additional_pax_price ? parseFloat(String(pkg.additional_pax_price).replace(/[^\d.-]/g, "")) || 0 : 0;
+                        const additionalPaxTotal = selectedBooking.additional_pax ? addPrice * selectedBooking.additional_pax : 0;
+                        const servicesPrice = (selectedBooking.selected_add_ons || []).reduce((acc: number, name: string) => {
+                          const service = additionalServices.find((s) => s.name === name);
+                          return acc + (service ? parseFloat(String(service.price).replace(/[^\d.-]/g, "")) || 0 : 0);
+                        }, 0);
+                        const totalBudget = basePrice + additionalPaxTotal + servicesPrice;
+
+                        return (
+                          <div className="space-y-2">
+                            <div className="flex justify-between text-[0.7rem] text-natural-text-main font-medium">
+                              <span>Base Package ({selectedBooking.guest_count} Pax)</span>
+                              <span>₱{basePrice.toLocaleString()}</span>
+                            </div>
+                            {selectedBooking.additional_pax > 0 && (
+                              <div className="flex justify-between text-[0.7rem] text-natural-text-main font-medium">
+                                <span>Extra Pax ({selectedBooking.additional_pax} @ ₱{addPrice.toLocaleString()})</span>
+                                <span>₱{additionalPaxTotal.toLocaleString()}</span>
+                              </div>
+                            )}
+                            {servicesPrice > 0 && (
+                              <div className="flex justify-between text-[0.7rem] text-natural-text-main font-medium">
+                                <span>Add-on Services</span>
+                                <span>₱{servicesPrice.toLocaleString()}</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between items-center pt-3 mt-3 border-t border-natural-border/50">
+                              <span className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">Total Estimated</span>
+                              <span className="text-lg font-bold text-natural-accent font-serif italic leading-none">
+                                ₱{totalBudget.toLocaleString()}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
@@ -1228,7 +1437,9 @@ export function BookingPage() {
                         Contact
                       </p>
                       <p className="text-sm font-semibold text-natural-text-main">
-                        {selectedBooking.profiles?.phone_number || selectedBooking.profiles?.phone || "N/A"}
+                        {selectedBooking.profiles?.phone_number ||
+                          selectedBooking.profiles?.phone ||
+                          "N/A"}
                       </p>
                       <p className="text-xs text-natural-text-light mt-0.5">
                         {selectedBooking.profiles?.email}
@@ -1249,45 +1460,57 @@ export function BookingPage() {
                       const groupedMenu: Record<string, string[]> = {};
                       const uncategorized: string[] = [];
 
-                      selectedBooking.selected_menu_items.forEach((m: string) => {
-                        const itemDef = menuItems.find(mi => mi.name === m);
-                        if (itemDef && itemDef.category) {
-                          const cat = itemDef.category;
-                          if (!groupedMenu[cat]) groupedMenu[cat] = [];
-                          groupedMenu[cat].push(m);
-                        } else {
-                          uncategorized.push(m);
-                        }
-                      });
+                      selectedBooking.selected_menu_items.forEach(
+                        (m: string) => {
+                          const itemDef = menuItems.find((mi) => mi.name === m);
+                          if (itemDef && itemDef.category) {
+                            const cat = itemDef.category;
+                            if (!groupedMenu[cat]) groupedMenu[cat] = [];
+                            groupedMenu[cat].push(m);
+                          } else {
+                            uncategorized.push(m);
+                          }
+                        },
+                      );
 
                       const renderGroups: React.ReactNode[] = [];
                       Object.entries(groupedMenu).forEach(([cat, items]) => {
                         renderGroups.push(
                           <div key={cat} className="space-y-1.5">
-                            <p className="text-[0.6rem] font-bold text-natural-text-light uppercase tracking-widest border-b border-natural-border/50 pb-1">{cat}</p>
+                            <p className="text-[0.6rem] font-bold text-natural-text-light uppercase tracking-widest border-b border-natural-border/50 pb-1">
+                              {cat}
+                            </p>
                             <div className="flex flex-wrap gap-2">
                               {items.map((m) => (
-                                <span key={m} className="px-2 py-1 bg-natural-bg border border-natural-border rounded text-[9px] font-bold text-natural-text-main uppercase tracking-tighter">
+                                <span
+                                  key={m}
+                                  className="px-2 py-1 bg-natural-bg border border-natural-border rounded text-[9px] font-bold text-natural-text-main uppercase tracking-tighter"
+                                >
                                   {m}
                                 </span>
                               ))}
                             </div>
-                          </div>
+                          </div>,
                         );
                       });
 
                       if (uncategorized.length > 0) {
                         renderGroups.push(
                           <div key="Other" className="space-y-1.5">
-                            <p className="text-[0.6rem] font-bold text-natural-text-light uppercase tracking-widest border-b border-natural-border/50 pb-1">Other</p>
+                            <p className="text-[0.6rem] font-bold text-natural-text-light uppercase tracking-widest border-b border-natural-border/50 pb-1">
+                              Other
+                            </p>
                             <div className="flex flex-wrap gap-2">
                               {uncategorized.map((m) => (
-                                <span key={m} className="px-2 py-1 bg-natural-bg border border-natural-border rounded text-[9px] font-bold text-natural-text-main uppercase tracking-tighter">
+                                <span
+                                  key={m}
+                                  className="px-2 py-1 bg-natural-bg border border-natural-border rounded text-[9px] font-bold text-natural-text-main uppercase tracking-tighter"
+                                >
                                   {m}
                                 </span>
                               ))}
                             </div>
-                          </div>
+                          </div>,
                         );
                       }
 
@@ -1321,7 +1544,7 @@ export function BookingPage() {
                 )}
             </div>
 
-            <div className="p-6 bg-natural-bg/30 border-t border-natural-border flex gap-3">
+            <div className="p-6 bg-natural-bg/30 border-t border-natural-border flex gap-3 shrink-0">
               {(selectedBooking.status || "Pending") === "Pending" && (
                 <>
                   <button
@@ -1329,7 +1552,10 @@ export function BookingPage() {
                       setConfirmAction({
                         type: "confirm",
                         bookingId: selectedBooking.id,
-                        bookingName: selectedBooking.profiles?.name || selectedBooking.profiles?.full_name || "Unknown User",
+                        bookingName:
+                          selectedBooking.profiles?.name ||
+                          selectedBooking.profiles?.full_name ||
+                          "Unknown User",
                       })
                     }
                     className="flex-1 bg-green-600 text-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-green-700 transition-all shadow-sm"
@@ -1341,7 +1567,10 @@ export function BookingPage() {
                       setConfirmAction({
                         type: "cancel",
                         bookingId: selectedBooking.id,
-                        bookingName: selectedBooking.profiles?.name || selectedBooking.profiles?.full_name || "Unknown User",
+                        bookingName:
+                          selectedBooking.profiles?.name ||
+                          selectedBooking.profiles?.full_name ||
+                          "Unknown User",
                       })
                     }
                     className="flex-1 border border-orange-200 text-orange-600 bg-orange-50/50 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-orange-50 transition-all"
@@ -1365,7 +1594,7 @@ export function BookingPage() {
 
       {confirmAction && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-60 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[90vh] overflow-y-auto animate-in zoom-in-95 duration-200">
             <div className="p-6 text-center">
               <div
                 className={cn(
@@ -1408,14 +1637,27 @@ export function BookingPage() {
                   {confirmAction.type === "cancel" && (
                     <div className="space-y-2">
                       <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest pl-1">
-                        Reason for Cancellation
+                        Reason for Cancellation <span className="text-red-500">*</span>
                       </label>
                       <textarea
                         value={cancelReason}
-                        onChange={(e) => setCancelReason(e.target.value)}
+                        onChange={(e) => {
+                          setCancelReason(e.target.value);
+                          setCancelReasonError(false);
+                        }}
                         placeholder="Enter the reason for cancelling..."
-                        className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm transition-all focus:outline-none focus:bg-white focus:ring-2 focus:ring-natural-accent/10 resize-none min-h-[80px]"
+                        className={cn(
+                          "w-full px-4 py-2.5 bg-natural-bg/50 border rounded-xl text-sm transition-all focus:outline-none focus:bg-white focus:ring-2 resize-none min-h-[80px]",
+                          cancelReasonError
+                            ? "border-red-300 focus:ring-red-100"
+                            : "border-natural-border focus:ring-natural-accent/10"
+                        )}
                       />
+                      {cancelReasonError && (
+                        <p className="text-[10px] font-bold text-red-500 uppercase tracking-tighter pl-1">
+                          {typeof cancelReasonError === "string" ? cancelReasonError : "Reason is required."}
+                        </p>
+                      )}
                     </div>
                   )}
                   <div className="space-y-2">
@@ -1439,7 +1681,9 @@ export function BookingPage() {
                     />
                     {passwordError && (
                       <p className="text-[10px] font-bold text-red-500 uppercase tracking-tighter pl-1">
-                        {typeof passwordError === "string" ? passwordError : "Password is required to proceed."}
+                        {typeof passwordError === "string"
+                          ? passwordError
+                          : "Password is required to proceed."}
                       </p>
                     )}
                   </div>

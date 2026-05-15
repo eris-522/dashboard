@@ -73,6 +73,28 @@ export function UserProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refreshUsers();
 
+    // Check for an existing session to auto-login the admin, and kick out unauthorized customers
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session?.user) {
+        const { data: adminProfile } = await supabase
+          .from('admins')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+
+        if (adminProfile) {
+          const user = toUser(adminProfile);
+          if (user.status === 'Active' || user.status === 'Inactive') {
+            setCurrentUser(user);
+          } else {
+            await supabase.auth.signOut();
+          }
+        } else {
+          await supabase.auth.signOut(); // Kick out if they are a customer (not in admins table)
+        }
+      }
+    });
+
     // Fallback polling: Refresh users silently every 10 seconds 
     // in case real-time WebSockets fail or drop.
     const intervalId = setInterval(() => refreshUsers(true), 10000);
@@ -143,14 +165,15 @@ export function UserProvider({ children }: { children: ReactNode }) {
       });
 
       if (!authError && authData?.user) {
-        const { data: profile } = await supabase
-          .from('profiles')
+        // System now strictly pulls from the new 'admins' table to prevent customer access
+        const { data: adminProfile } = await supabase
+          .from('admins')
           .select('*')
           .eq('id', authData.user.id)
           .single();
 
-        if (profile) {
-          const user = toUser(profile);
+        if (adminProfile) {
+          const user = toUser(adminProfile);
           if (user.status === 'Active' || user.status === 'Inactive') {
             setCurrentUser(user);
             return true;

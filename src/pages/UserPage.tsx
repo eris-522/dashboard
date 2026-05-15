@@ -140,8 +140,8 @@ export function UserPage() {
 
   const filteredUsers = useMemo(() => {
     return users.filter((user) => {
-      // Hide the currently logged-in user, the fallback admin ("0"), and any 'Admin' accounts
-      if (String(user.id) === String(currentUser?.id) || String(user.id) === "0" || user.role === "Admin") return false;
+      // Hide the currently logged-in user, the fallback admin ("0"), and any legacy 'Admin'/'Owner' accounts left in profiles
+      if (String(user.id) === String(currentUser?.id) || String(user.id) === "0" || user.role === "Admin" || user.role === "Owner") return false;
 
       const query = searchQuery.toLowerCase();
       const matchesSearch =
@@ -282,7 +282,6 @@ export function UserPage() {
             >
               <option>All Roles</option>
               <option>Customer</option>
-              <option>Owner</option>
             </select>
             <select
               value={statusFilter}
@@ -532,7 +531,6 @@ export function UserPage() {
                     className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white transition-all shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option>Customer</option>
-                    <option>Owner</option>
                   </select>
                 </div>
                 <div className="space-y-1.5">

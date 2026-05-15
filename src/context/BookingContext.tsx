@@ -1,4 +1,10 @@
-import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  ReactNode,
+  useEffect,
+} from "react";
 import { supabase } from "../utils/supabase";
 
 export interface MenuSelection {
@@ -18,6 +24,7 @@ export interface Booking {
   date: string;
   time: string;
   guestCount: number;
+  additionalPax?: number;
   venueName: string;
   venueAddress: string;
   menu: MenuSelection;
@@ -59,7 +66,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refreshBookings();
 
-    // Fallback polling: Refresh bookings silently every 10 seconds 
+    // Fallback polling: Refresh bookings silently every 10 seconds
     // in case real-time WebSockets fail or drop.
     const intervalId = setInterval(() => refreshBookings(true), 10000);
 
@@ -110,21 +117,30 @@ export function BookingProvider({ children }: { children: ReactNode }) {
         // Transform database rows to Booking interface
         const transformedBookings = (bData || []).map((booking: any) => ({
           id: booking.id,
-          customerName: booking.profiles?.name || booking.profiles?.full_name || "Unknown User",
+          customerName:
+            booking.profiles?.name ||
+            booking.profiles?.full_name ||
+            "Unknown User",
           email: booking.profiles?.email || "",
-          phone: booking.profiles?.phone_number || booking.profiles?.phone || "",
+          phone:
+            booking.profiles?.phone_number || booking.profiles?.phone || "",
           eventType: booking.event_type || "",
           package: booking.packages?.name || "",
           date: booking.event_date || "",
           time: booking.event_time || "",
           guestCount: booking.guest_count || 0,
+          additionalPax: booking.additional_pax || 0,
           venueName: booking.event_location?.split(" - ")[0] || "",
           venueAddress: booking.event_location?.split(" - ")[1] || "",
           menu: booking.selected_menu_items || [],
           additionalServices: booking.selected_add_ons || [],
           budget: 0, // Will be calculated by components if needed
           status: booking.status || "Pending",
-          cancellation_reason: booking.cancellation_reason || booking.cancel_reason || booking.reason || "",
+          cancellation_reason:
+            booking.cancellation_reason ||
+            booking.cancel_reason ||
+            booking.reason ||
+            "",
           created_at: booking.created_at,
           updated_at: booking.updated_at,
         }));
@@ -174,7 +190,15 @@ export function BookingProvider({ children }: { children: ReactNode }) {
 
   return (
     <BookingContext.Provider
-      value={{ bookings, isLoading, error, addBooking, updateBookingStatus, removeBooking, refreshBookings }}
+      value={{
+        bookings,
+        isLoading,
+        error,
+        addBooking,
+        updateBookingStatus,
+        removeBooking,
+        refreshBookings,
+      }}
     >
       {children}
     </BookingContext.Provider>
