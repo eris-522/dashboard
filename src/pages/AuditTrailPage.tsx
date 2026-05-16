@@ -7,7 +7,6 @@ import {
   Clock,
   Shield,
   Database,
-  ExternalLink,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { format } from "date-fns";
@@ -236,10 +235,6 @@ export function AuditTrailPage() {
                               .join("")}
                       </div>
                     </div>
-                    <button className="flex items-center gap-1.5 text-[10px] font-bold text-natural-accent uppercase tracking-widest hover:underline">
-                      <ExternalLink className="w-3 h-3" />
-                      Verify
-                    </button>
                   </div>
                 </div>
               );
