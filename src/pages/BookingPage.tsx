@@ -86,7 +86,9 @@ export function BookingPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordError, setPasswordError] = useState<string | boolean>(false);
   const [cancelReason, setCancelReason] = useState("");
-  const [cancelReasonError, setCancelReasonError] = useState<string | boolean>(false);
+  const [cancelReasonError, setCancelReasonError] = useState<string | boolean>(
+    false,
+  );
   const [confirmAction, setConfirmAction] = useState<{
     type: "confirm" | "cancel" | "archive" | "create";
     bookingId?: string;
@@ -232,21 +234,29 @@ export function BookingPage() {
     let basePrice = 0;
     let additionalPaxTotal = 0;
 
-    const pkg = booking.packages || packages.find((p) => p.id === booking.package_id);
+    const pkg =
+      booking.packages || packages.find((p) => p.id === booking.package_id);
 
     if (pkg && pkg.price) {
       basePrice = parseFloat(String(pkg.price).replace(/[^\d.-]/g, "")) || 0;
     }
 
     if (pkg && pkg.additional_pax_price && booking.additional_pax) {
-      const addPrice = parseFloat(String(pkg.additional_pax_price).replace(/[^\d.-]/g, "")) || 0;
+      const addPrice =
+        parseFloat(String(pkg.additional_pax_price).replace(/[^\d.-]/g, "")) ||
+        0;
       additionalPaxTotal = addPrice * booking.additional_pax;
     }
 
     const servicesPrice = (booking.selected_add_ons || []).reduce(
       (acc: number, name: string) => {
         const service = additionalServices.find((s) => s.name === name);
-        return acc + (service ? parseFloat(String(service.price).replace(/[^\d.-]/g, "")) || 0 : 0);
+        return (
+          acc +
+          (service
+            ? parseFloat(String(service.price).replace(/[^\d.-]/g, "")) || 0
+            : 0)
+        );
       },
       0,
     );
@@ -474,7 +484,7 @@ export function BookingPage() {
             value: bookings
               .filter((b) => (b.status || "Pending") !== "Archived")
               .length.toString(),
-            sub: "Active",
+            sub: "Overall",
           },
           {
             label: "Confirmed",
@@ -497,7 +507,7 @@ export function BookingPage() {
                 .filter(
                   (b) =>
                     (b.status || "Pending") !== "Archived" &&
-                    (b.status || "Pending") !== "Cancelled"
+                    (b.status || "Pending") !== "Cancelled",
                 )
                 .reduce((acc, b) => acc + calculateBudget(b), 0) / 1000
             ).toFixed(0)}k`,
@@ -1391,26 +1401,65 @@ export function BookingPage() {
                         Budget Breakdown
                       </p>
                       {(() => {
-                        const pkg = selectedBooking.packages || packages.find((p) => p.id === selectedBooking.package_id);
-                        const basePrice = pkg && pkg.price ? parseFloat(String(pkg.price).replace(/[^\d.-]/g, "")) || 0 : 0;
-                        const addPrice = pkg && pkg.additional_pax_price ? parseFloat(String(pkg.additional_pax_price).replace(/[^\d.-]/g, "")) || 0 : 0;
-                        const additionalPaxTotal = selectedBooking.additional_pax ? addPrice * selectedBooking.additional_pax : 0;
-                        const servicesPrice = (selectedBooking.selected_add_ons || []).reduce((acc: number, name: string) => {
-                          const service = additionalServices.find((s) => s.name === name);
-                          return acc + (service ? parseFloat(String(service.price).replace(/[^\d.-]/g, "")) || 0 : 0);
+                        const pkg =
+                          selectedBooking.packages ||
+                          packages.find(
+                            (p) => p.id === selectedBooking.package_id,
+                          );
+                        const basePrice =
+                          pkg && pkg.price
+                            ? parseFloat(
+                                String(pkg.price).replace(/[^\d.-]/g, ""),
+                              ) || 0
+                            : 0;
+                        const addPrice =
+                          pkg && pkg.additional_pax_price
+                            ? parseFloat(
+                                String(pkg.additional_pax_price).replace(
+                                  /[^\d.-]/g,
+                                  "",
+                                ),
+                              ) || 0
+                            : 0;
+                        const additionalPaxTotal =
+                          selectedBooking.additional_pax
+                            ? addPrice * selectedBooking.additional_pax
+                            : 0;
+                        const servicesPrice = (
+                          selectedBooking.selected_add_ons || []
+                        ).reduce((acc: number, name: string) => {
+                          const service = additionalServices.find(
+                            (s) => s.name === name,
+                          );
+                          return (
+                            acc +
+                            (service
+                              ? parseFloat(
+                                  String(service.price).replace(/[^\d.-]/g, ""),
+                                ) || 0
+                              : 0)
+                          );
                         }, 0);
-                        const totalBudget = basePrice + additionalPaxTotal + servicesPrice;
+                        const totalBudget =
+                          basePrice + additionalPaxTotal + servicesPrice;
 
                         return (
                           <div className="space-y-2">
                             <div className="flex justify-between text-[0.7rem] text-natural-text-main font-medium">
-                              <span>Base Package ({selectedBooking.guest_count} Pax)</span>
+                              <span>
+                                Base Package ({selectedBooking.guest_count} Pax)
+                              </span>
                               <span>₱{basePrice.toLocaleString()}</span>
                             </div>
                             {selectedBooking.additional_pax > 0 && (
                               <div className="flex justify-between text-[0.7rem] text-natural-text-main font-medium">
-                                <span>Extra Pax ({selectedBooking.additional_pax} @ ₱{addPrice.toLocaleString()})</span>
-                                <span>₱{additionalPaxTotal.toLocaleString()}</span>
+                                <span>
+                                  Extra Pax ({selectedBooking.additional_pax} @
+                                  ₱{addPrice.toLocaleString()})
+                                </span>
+                                <span>
+                                  ₱{additionalPaxTotal.toLocaleString()}
+                                </span>
                               </div>
                             )}
                             {servicesPrice > 0 && (
@@ -1420,7 +1469,9 @@ export function BookingPage() {
                               </div>
                             )}
                             <div className="flex justify-between items-center pt-3 mt-3 border-t border-natural-border/50">
-                              <span className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">Total Estimated</span>
+                              <span className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                                Total Estimated
+                              </span>
                               <span className="text-lg font-bold text-natural-accent font-serif italic leading-none">
                                 ₱{totalBudget.toLocaleString()}
                               </span>
@@ -1448,6 +1499,20 @@ export function BookingPage() {
                   </div>
                 </div>
               </div>
+
+              {selectedBooking.food_allergies && (
+                <div className="p-4 bg-orange-50/80 border border-orange-200/60 rounded-xl flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-orange-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-[10px] font-bold text-orange-800 uppercase tracking-widest mb-1">
+                      Food Allergies & Dietary Restrictions
+                    </p>
+                    <p className="text-sm text-orange-900 font-medium leading-relaxed">
+                      {selectedBooking.food_allergies}
+                    </p>
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-4">
                 <h5 className="text-[0.65rem] font-bold text-natural-accent uppercase tracking-widest">
@@ -1637,7 +1702,8 @@ export function BookingPage() {
                   {confirmAction.type === "cancel" && (
                     <div className="space-y-2">
                       <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest pl-1">
-                        Reason for Cancellation <span className="text-red-500">*</span>
+                        Reason for Cancellation{" "}
+                        <span className="text-red-500">*</span>
                       </label>
                       <textarea
                         value={cancelReason}
@@ -1650,12 +1716,14 @@ export function BookingPage() {
                           "w-full px-4 py-2.5 bg-natural-bg/50 border rounded-xl text-sm transition-all focus:outline-none focus:bg-white focus:ring-2 resize-none min-h-[80px]",
                           cancelReasonError
                             ? "border-red-300 focus:ring-red-100"
-                            : "border-natural-border focus:ring-natural-accent/10"
+                            : "border-natural-border focus:ring-natural-accent/10",
                         )}
                       />
                       {cancelReasonError && (
                         <p className="text-[10px] font-bold text-red-500 uppercase tracking-tighter pl-1">
-                          {typeof cancelReasonError === "string" ? cancelReasonError : "Reason is required."}
+                          {typeof cancelReasonError === "string"
+                            ? cancelReasonError
+                            : "Reason is required."}
                         </p>
                       )}
                     </div>

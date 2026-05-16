@@ -29,6 +29,7 @@ export interface CateringPackage {
   inclusions: string[];
   status: string;
   image_url?: string;
+  category_limits?: Record<string, number>;
 }
 
 export function PackagePage() {
@@ -143,6 +144,7 @@ export function PackagePage() {
     setEditingPackage({
       ...pkg,
       status: pkg.status === "Active" ? "Available" : pkg.status || "Available",
+      category_limits: pkg.category_limits || {},
     });
     setFormError(null);
     setIsModalOpen(true);
@@ -169,6 +171,7 @@ export function PackagePage() {
       status: "Available",
       tag: "",
       image_url: "",
+      category_limits: {},
     });
     setIsModalOpen(true);
   };
@@ -443,6 +446,7 @@ export function PackagePage() {
             inclusions: editingPackage?.inclusions || [],
             status: editingPackage?.status || "Available",
             image_url: editingPackage?.image_url || null,
+            category_limits: editingPackage?.category_limits || {},
           },
         ]);
         if (error) {
@@ -467,6 +471,7 @@ export function PackagePage() {
             inclusions: editingPackage?.inclusions || [],
             status: editingPackage?.status || "Available",
             image_url: editingPackage?.image_url || null,
+            category_limits: editingPackage?.category_limits || {},
           })
           .eq("id", confirmAction.itemId);
         if (error) {
@@ -928,6 +933,50 @@ export function PackagePage() {
                           placeholder="e.g. https://example.com/image.jpg"
                           className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 col-span-2"
                         />
+                      </div>
+
+                      {/* Category Limits */}
+                      <div className="pt-3 border-t border-natural-border/50">
+                        <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest block mb-3">
+                          Menu Dish Limits (Customer Booking)
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
+                          {[
+                            "Appetizer",
+                            "Soup",
+                            "Main Course",
+                            "Pasta",
+                            "Vegetable",
+                            "Rice",
+                            "Dessert",
+                            "Drinks",
+                          ].map((cat) => (
+                            <div
+                              key={cat}
+                              className="flex items-center justify-between gap-2 bg-white border border-natural-border p-1.5 rounded-lg shadow-xs"
+                            >
+                              <span className="text-[0.65rem] font-bold text-natural-text-main">
+                                {cat}
+                              </span>
+                              <input
+                                type="number"
+                                min="0"
+                                value={editingPackage.category_limits?.[cat] || 0}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value, 10);
+                                  setEditingPackage((prev) => ({
+                                    ...prev!,
+                                    category_limits: {
+                                      ...(prev?.category_limits || {}),
+                                      [cat]: isNaN(val) ? 0 : val,
+                                    },
+                                  }));
+                                }}
+                                className="w-12 px-1 py-1 text-center bg-natural-bg/50 border border-natural-border rounded text-xs focus:outline-none focus:ring-1 focus:ring-natural-accent/20"
+                              />
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   </div>

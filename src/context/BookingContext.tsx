@@ -29,6 +29,7 @@ export interface Booking {
   venueAddress: string;
   menu: MenuSelection;
   additionalServices: string[];
+  foodAllergies?: string;
   budget: number;
   status:
     | "Confirmed"
@@ -134,7 +135,25 @@ export function BookingProvider({ children }: { children: ReactNode }) {
           venueAddress: booking.event_location?.split(" - ")[1] || "",
           menu: booking.selected_menu_items || [],
           additionalServices: booking.selected_add_ons || [],
-          budget: 0, // Will be calculated by components if needed
+          foodAllergies: booking.food_allergies || "",
+          budget: (() => {
+            const basePrice =
+              parseFloat(
+                String(booking.packages?.price || "0").replace(
+                  /[^0-9.-]+/g,
+                  "",
+                ),
+              ) || 0;
+            const addPrice =
+              parseFloat(
+                String(booking.packages?.additional_pax_price || "0").replace(
+                  /[^0-9.-]+/g,
+                  "",
+                ),
+              ) || 0;
+            const extraPax = booking.additional_pax || 0;
+            return basePrice + addPrice * extraPax;
+          })(),
           status: booking.status || "Pending",
           cancellation_reason:
             booking.cancellation_reason ||
