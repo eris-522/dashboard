@@ -22,6 +22,7 @@ import {
 import { cn } from "../lib/utils";
 import { supabase } from "../utils/supabase";
 import { useUser } from "../context/UserContext";
+import { logAuditAction } from "../utils/auditLogger";
 
 type SortField = "name" | "role" | "created_at" | "status";
 type SortOrder = "asc" | "desc" | null;
@@ -56,7 +57,9 @@ export function UserPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [formData, setFormData] = useState<Partial<User>>({});
-  const [visibleEmails, setVisibleEmails] = useState<Record<string, boolean>>({});
+  const [visibleEmails, setVisibleEmails] = useState<Record<string, boolean>>(
+    {},
+  );
   const [confirmAction, setConfirmAction] = useState<{
     type: "edit" | "archive";
     userId?: string;
@@ -83,12 +86,12 @@ export function UserPage() {
       .map((row) => {
         const idRaw = row?.id ?? row?.user_id ?? row?.userId ?? null;
 
-        const id = typeof idRaw === "string" ? idRaw : idRaw ? String(idRaw) : "";
+        const id =
+          typeof idRaw === "string" ? idRaw : idRaw ? String(idRaw) : "";
 
         if (!id) return null;
 
-        const nameStr =
-          typeof row?.name === "string" ? row.name.trim() : "";
+        const nameStr = typeof row?.name === "string" ? row.name.trim() : "";
 
         const fullNameStrs = [
           row?.full_name,
@@ -96,9 +99,7 @@ export function UserPage() {
           row?.fullname,
         ].filter((v) => typeof v === "string") as string[];
 
-        const fullNameStr = fullNameStrs.length
-          ? fullNameStrs[0].trim()
-          : "";
+        const fullNameStr = fullNameStrs.length ? fullNameStrs[0].trim() : "";
 
         const displayName = nameStr || fullNameStr;
 
@@ -141,7 +142,13 @@ export function UserPage() {
   const filteredUsers = useMemo(() => {
     return users.filter((user) => {
       // Hide the currently logged-in user, the fallback admin ("0"), and any legacy 'Admin'/'Owner' accounts left in profiles
-      if (String(user.id) === String(currentUser?.id) || String(user.id) === "0" || user.role === "Admin" || user.role === "Owner") return false;
+      if (
+        String(user.id) === String(currentUser?.id) ||
+        String(user.id) === "0" ||
+        user.role === "Admin" ||
+        user.role === "Owner"
+      )
+        return false;
 
       const query = searchQuery.toLowerCase();
       const matchesSearch =
@@ -220,8 +227,16 @@ export function UserPage() {
           status: formData.status,
         })
         .eq("id", confirmAction.userId);
-      if (updateError)
+      if (updateError) {
         console.error("Error updating profile:", updateError.message);
+      } else {
+        await logAuditAction({
+          action: "Updated User Profile",
+          target: trimmedName || confirmAction.userName,
+          type: "Update",
+          details: `Modified user role or status`,
+        });
+      }
     } else if (confirmAction.type === "archive" && confirmAction.userId) {
       const { error: archiveError } = await supabase
         .from("profiles")
@@ -229,8 +244,16 @@ export function UserPage() {
           status: "Archived",
         })
         .eq("id", confirmAction.userId);
-      if (archiveError)
+      if (archiveError) {
         console.error("Error archiving profile:", archiveError.message);
+      } else {
+        await logAuditAction({
+          action: "Archived User Account",
+          target: confirmAction.userName,
+          type: "Delete",
+          details: `Archived user account and restricted access`,
+        });
+      }
     }
 
     await fetchUsers();
@@ -371,7 +394,8 @@ export function UserPage() {
                             "Unnamed User"}
                         </p>
                         <p className="text-[0.7rem] text-natural-text-light font-medium flex items-center gap-1">
-                          <Mail className="w-3 h-3" /> {censorEmail(user.email, !!visibleEmails[user.id])}
+                          <Mail className="w-3 h-3" />{" "}
+                          {censorEmail(user.email, !!visibleEmails[user.id])}
                         </p>
                       </div>
                     </div>
@@ -384,7 +408,8 @@ export function UserPage() {
                   <td className="px-6 py-4 border-b border-natural-border/50">
                     <div className="space-y-1">
                       <p className="text-[0.65rem] text-natural-text-light font-medium flex items-center gap-1.5 opacity-70">
-                        <Phone className="w-3.5 h-3.5" /> {user.phone_number || user.phone || "No phone"}
+                        <Phone className="w-3.5 h-3.5" />{" "}
+                        {user.phone_number || user.phone || "No phone"}
                       </p>
                     </div>
                   </td>
@@ -417,7 +442,9 @@ export function UserPage() {
                       <button
                         onClick={() => toggleEmailVisibility(user.id)}
                         className="p-1.5 text-natural-text-light hover:text-natural-text-main hover:bg-white hover:shadow-xs rounded-lg transition-all"
-                        title={visibleEmails[user.id] ? "Hide Email" : "Show Email"}
+                        title={
+                          visibleEmails[user.id] ? "Hide Email" : "Show Email"
+                        }
                       >
                         {visibleEmails[user.id] ? (
                           <EyeOff className="w-4 h-4" />
@@ -527,7 +554,9 @@ export function UserPage() {
                     onChange={(e) =>
                       setFormData({ ...formData, role: e.target.value })
                     }
-                disabled={String(editingUser?.id) === String(currentUser?.id)}
+                    disabled={
+                      String(editingUser?.id) === String(currentUser?.id)
+                    }
                     className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white transition-all shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option>Customer</option>
@@ -619,17 +648,17 @@ export function UserPage() {
               </p>
 
               <div className="flex flex-col gap-3">
-              <button
-                onClick={handleExecuteAction}
-                className={cn(
-                  "w-full py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] text-white transition-all shadow-md active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-inherit",
-                  confirmAction.type === "edit"
-                    ? "bg-natural-accent hover:bg-natural-accent/90"
-                    : "bg-red-600 hover:bg-red-700",
-                )}
-              >
-                Confirm {confirmAction.type}
-              </button>
+                <button
+                  onClick={handleExecuteAction}
+                  className={cn(
+                    "w-full py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] text-white transition-all shadow-md active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-inherit",
+                    confirmAction.type === "edit"
+                      ? "bg-natural-accent hover:bg-natural-accent/90"
+                      : "bg-red-600 hover:bg-red-700",
+                  )}
+                >
+                  Confirm {confirmAction.type}
+                </button>
 
                 <button
                   onClick={() => setConfirmAction(null)}

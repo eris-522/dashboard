@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { supabase } from "../utils/supabase";
+import { logAuditAction } from "../utils/auditLogger";
 
 // Defines the structure of a menu item based on the Supabase table
 export interface MenuItem {
@@ -215,6 +216,12 @@ export function MenuPage() {
         setFormError("Failed to add dish.");
         return;
       }
+      await logAuditAction({
+        action: "Added Menu Item",
+        target: formData.name,
+        type: "Create",
+        details: `New dish added to ${formData.category} category`,
+      });
     } else if (confirmAction.type === "edit" && confirmAction.itemId) {
       // Updates an existing row in the menu_items table using its unique ID
       const { error } = await supabase
@@ -236,6 +243,12 @@ export function MenuPage() {
         setFormError("Failed to update dish.");
         return;
       }
+      await logAuditAction({
+        action: "Updated Menu Item",
+        target: formData.name,
+        type: "Update",
+        details: `Modified dish details`,
+      });
     } else if (confirmAction.type === "archive" && confirmAction.itemId) {
       // Changes the status of an item to 'Archived' so it no longer appears in active views
       const { error } = await supabase
@@ -249,6 +262,12 @@ export function MenuPage() {
         setFormError("Failed to archive dish.");
         return;
       }
+      await logAuditAction({
+        action: "Archived Menu Item",
+        target: confirmAction.itemName,
+        type: "Delete",
+        details: `Moved dish to archives`,
+      });
     }
 
     // Refreshes the UI data from the database and resets the form states
@@ -771,7 +790,7 @@ export function MenuPage() {
                   </select>
                 </div>
               )}
-              
+
               <div className="space-y-2">
                 <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
                   Image URL
@@ -787,7 +806,11 @@ export function MenuPage() {
                 />
                 {formData.image_url && (
                   <div className="mt-2 w-full h-32 rounded-xl overflow-hidden border border-natural-border">
-                    <img src={formData.image_url} alt="Dish Preview" className="w-full h-full object-cover" />
+                    <img
+                      src={formData.image_url}
+                      alt="Dish Preview"
+                      className="w-full h-full object-cover"
+                    />
                   </div>
                 )}
               </div>

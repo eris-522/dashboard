@@ -25,6 +25,7 @@ import { cn } from "../lib/utils";
 import { EventCalendar } from "../components/EventCalendar";
 import { supabase } from "../utils/supabase";
 import { useUser } from "../context/UserContext";
+import { logAuditAction } from "../utils/auditLogger";
 
 type SortField =
   | "customerName"
@@ -398,6 +399,12 @@ export function BookingPage() {
           detail: { id: bookingId, status: "Confirmed" },
         }),
       );
+      await logAuditAction({
+        action: "Confirmed Booking",
+        target: confirmAction.bookingName,
+        type: "Update",
+        details: `Approved booking request for ${confirmAction.bookingName}`,
+      });
     } else if (type === "cancel" && bookingId) {
       await supabase
         .from("bookings")
@@ -412,11 +419,23 @@ export function BookingPage() {
           detail: { id: bookingId, status: "Cancelled" },
         }),
       );
+      await logAuditAction({
+        action: "Cancelled Booking",
+        target: confirmAction.bookingName,
+        type: "Update",
+        details: `Cancelled booking for ${confirmAction.bookingName}. Reason: ${cancelReason.trim()}`,
+      });
     } else if (type === "archive" && bookingId) {
       await supabase
         .from("bookings")
         .update({ status: "Archived" })
         .eq("id", bookingId);
+      await logAuditAction({
+        action: "Archived Booking",
+        target: confirmAction.bookingName,
+        type: "Delete",
+        details: `Moved booking for ${confirmAction.bookingName} to archives`,
+      });
     } else if (type === "create") {
       const { data } = await supabase
         .from("bookings")
@@ -444,6 +463,12 @@ export function BookingPage() {
           }),
         );
       }
+      await logAuditAction({
+        action: "Created Booking",
+        target: confirmAction.bookingName,
+        type: "Create",
+        details: `Manually created and confirmed a booking for ${confirmAction.bookingName}`,
+      });
     }
 
     await fetchAllData();

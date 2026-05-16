@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { supabase } from "../utils/supabase"; // Database connection
+import { logAuditAction } from "../utils/auditLogger";
 
 // Feature: Defines the structure for Packages based on the Supabase table
 export interface CateringPackage {
@@ -232,6 +233,13 @@ export function PackagePage() {
       return;
     }
 
+    await logAuditAction({
+      action: "Added Inclusion Item",
+      target: trimmedName,
+      type: "Create",
+      details: `Added new inclusion item to ${category}`,
+    });
+
     // Automatically check the new item
     handleInclusionChange(trimmedName, true);
     setNewItemName("");
@@ -276,6 +284,13 @@ export function PackagePage() {
     if (error) {
       console.error("Error adding inclusion category:", error);
       setFormError(`Failed to save category to database: ${error.message}`);
+    } else {
+      await logAuditAction({
+        action: "Added Inclusion Category",
+        target: trimmedCategoryName,
+        type: "Create",
+        details: `Created new inclusion category`,
+      });
     }
   };
 
@@ -383,6 +398,13 @@ export function PackagePage() {
             .eq("id", pkg.id);
           packagesWereUpdated = true;
         }
+
+        await logAuditAction({
+          action: "Deleted Inclusion Category",
+          target: category,
+          type: "Delete",
+          details: `Permanently removed category and its items`,
+        });
       } else if (
         confirmAction.itemType === "item" &&
         confirmAction.parentCategory
@@ -419,6 +441,13 @@ export function PackagePage() {
             .eq("id", pkg.id);
           packagesWereUpdated = true;
         }
+
+        await logAuditAction({
+          action: "Deleted Inclusion Item",
+          target: item,
+          type: "Delete",
+          details: `Removed item from ${category}`,
+        });
       }
 
       if (packagesWereUpdated) {
@@ -453,6 +482,13 @@ export function PackagePage() {
           console.error("Error creating package:", error);
           setFormError(error.message);
           return;
+        } else {
+          await logAuditAction({
+            action: "Created Package",
+            target: editingPackage?.name || "New Package",
+            type: "Create",
+            details: `Created new catering package`,
+          });
         }
       } else if (confirmAction.type === "edit" && confirmAction.itemId) {
         // Updates existing package
@@ -478,6 +514,13 @@ export function PackagePage() {
           console.error("Error updating package:", error);
           setFormError(error.message);
           return;
+        } else {
+          await logAuditAction({
+            action: "Updated Package",
+            target: editingPackage?.name || "Package",
+            type: "Update",
+            details: `Modified package configuration`,
+          });
         }
       } else if (confirmAction.type === "archive" && confirmAction.itemId) {
         // Archives package
@@ -489,6 +532,13 @@ export function PackagePage() {
           console.error("Error archiving package:", error);
           setFormError(error.message);
           return;
+        } else {
+          await logAuditAction({
+            action: "Archived Package",
+            target: confirmAction.itemName,
+            type: "Update",
+            details: `Moved package to archives`,
+          });
         }
       }
     }
@@ -961,7 +1011,9 @@ export function PackagePage() {
                               <input
                                 type="number"
                                 min="0"
-                                value={editingPackage.category_limits?.[cat] || 0}
+                                value={
+                                  editingPackage.category_limits?.[cat] || 0
+                                }
                                 onChange={(e) => {
                                   const val = parseInt(e.target.value, 10);
                                   setEditingPackage((prev) => ({
