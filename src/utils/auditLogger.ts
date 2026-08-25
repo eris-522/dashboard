@@ -37,6 +37,12 @@ export const logAuditAction = async (data: AuditLogData) => {
 
     if (error) {
       console.error("Audit log insert error:", error.message);
+    } else {
+      window.dispatchEvent(
+        new CustomEvent("auditLogged", {
+          detail: { ...data, user_name: userName, created_at: new Date().toISOString() },
+        })
+      );
     }
   } catch (error) {
     console.error("Failed to log audit action:", error);

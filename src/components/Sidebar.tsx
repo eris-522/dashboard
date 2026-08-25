@@ -32,7 +32,7 @@ export interface SidebarProps {
 
 export function Sidebar({ active, setActive }: SidebarProps) {
   return (
-    <aside className="w-56 h-screen bg-natural-sidebar text-[#f8f7f2] flex flex-col fixed left-0 top-0 z-50">
+    <aside className="w-56 h-screen bg-natural-sidebar text-[#f8f7f2] flex flex-col fixed left-0 top-0 z-50 border-r border-natural-border/30 transition-colors duration-200">
       <div className="p-6 pt-8">
         <h1 className="text-xl font-serif font-bold text-natural-accent leading-tight">
           ROXAN POLICARPIO
@@ -52,9 +52,9 @@ export function Sidebar({ active, setActive }: SidebarProps) {
                   id={`nav-${item.id}`}
                   onClick={() => setActive(item.id)}
                   className={cn(
-                    "w-full flex items-center gap-3 px-6 py-2.5 transition-all duration-200 text-[0.85rem] font-normal text-left",
+                    "w-full flex items-center gap-3 px-6 py-2.5 transition-all duration-200 text-[0.85rem] font-normal text-left cursor-pointer",
                     isActive 
-                      ? "bg-white/5 border-l-4 border-natural-accent opacity-100" 
+                      ? "bg-white/5 border-l-4 border-natural-accent opacity-100 font-semibold" 
                       : "opacity-80 hover:opacity-100 hover:bg-white/5 border-l-4 border-transparent"
                   )}
                 >

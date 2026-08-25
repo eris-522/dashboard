@@ -1,10 +1,7 @@
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Montserrat:wght@300;400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Montserrat:wght@300;400;600;700&display=swap');
 @import "tailwindcss";
 
-@theme {
-  --font-sans: "Montserrat", ui-sans-serif, system-ui, sans-serif;
-  --font-serif: "Playfair Display", ui-serif, Georgia, serif;
-
+:root {
   --color-natural-bg: #f8f7f2;
   --color-natural-sidebar: #3d4035;
   --color-natural-accent: #a68a56;
@@ -12,20 +9,167 @@
   --color-natural-text-light: #8a8b82;
   --color-natural-card: #ffffff;
   --color-natural-border: #e8e7e0;
+  --color-natural-hover: #f0eee6;
+  color-scheme: light;
+}
+
+/* Light Theme Accent Overrides */
+[data-accent="emerald"] {
+  --color-natural-accent: #2e7d32;
+}
+[data-accent="amber"] {
+  --color-natural-accent: #b45309;
+}
+[data-accent="rose"] {
+  --color-natural-accent: #9e2a2b;
+}
+[data-accent="indigo"] {
+  --color-natural-accent: #3949ab;
+}
+
+/* Dark Theme */
+.dark {
+  --color-natural-bg: #131411;
+  --color-natural-sidebar: #191a16;
+  --color-natural-accent: #c4a96e;
+  --color-natural-text-main: #f3f3ee;
+  --color-natural-text-light: #9e9f96;
+  --color-natural-card: #1c1d18;
+  --color-natural-border: #2e3028;
+  --color-natural-hover: #262820;
+  color-scheme: dark;
+}
+
+/* Dark Theme Accent Overrides */
+.dark[data-accent="emerald"],
+.dark [data-accent="emerald"] {
+  --color-natural-accent: #4caf50;
+}
+.dark[data-accent="amber"],
+.dark [data-accent="amber"] {
+  --color-natural-accent: #f59e0b;
+}
+.dark[data-accent="rose"],
+.dark [data-accent="rose"] {
+  --color-natural-accent: #f472b6;
+}
+.dark[data-accent="indigo"],
+.dark [data-accent="indigo"] {
+  --color-natural-accent: #818cf8;
+}
+
+@theme {
+  --font-sans: "Montserrat", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Playfair Display", ui-serif, Georgia, serif;
+
+  --color-natural-bg: var(--color-natural-bg);
+  --color-natural-sidebar: var(--color-natural-sidebar);
+  --color-natural-accent: var(--color-natural-accent);
+  --color-natural-text-main: var(--color-natural-text-main);
+  --color-natural-text-light: var(--color-natural-text-light);
+  --color-natural-card: var(--color-natural-card);
+  --color-natural-border: var(--color-natural-border);
 }
 
 @layer base {
+  * {
+    border-color: var(--color-natural-border);
+  }
+
   body {
-    @apply bg-natural-bg text-natural-text-main font-sans antialiased;
+    background-color: var(--color-natural-bg);
+    color: var(--color-natural-text-main);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    transition: background-color 0.25s ease, color 0.25s ease;
   }
   
   h1, h2, h3, h4, .font-serif {
-    @apply font-serif;
+    font-family: var(--font-serif);
   }
 }
 
 .glass-card {
-  @apply bg-natural-card border border-natural-border rounded-xl shadow-[0_4px_12px_rgba(0,0,0,0.03)];
+  background-color: var(--color-natural-card);
+  border: 1px solid var(--color-natural-border);
+  border-radius: 0.75rem;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
+  transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
 }
 
+.dark .glass-card {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+}
 
+/* Dark mode compatibility helper rules for components utilizing static white classes */
+.dark .bg-white {
+  background-color: var(--color-natural-card) !important;
+}
+
+.dark .bg-white\/50 {
+  background-color: rgba(28, 29, 24, 0.6) !important;
+}
+
+.dark .bg-white\/80 {
+  background-color: rgba(28, 29, 24, 0.85) !important;
+}
+
+.dark .bg-white\/90 {
+  background-color: rgba(28, 29, 24, 0.95) !important;
+}
+
+.dark .focus\:bg-white:focus {
+  background-color: var(--color-natural-card) !important;
+}
+
+.dark .hover\:bg-white:hover {
+  background-color: var(--color-natural-hover) !important;
+}
+
+.dark .hover\:bg-natural-bg\/50:hover {
+  background-color: rgba(255, 255, 255, 0.04) !important;
+}
+
+.dark .hover\:bg-natural-bg\/80:hover {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+.dark .hover\:bg-natural-bg:hover {
+  background-color: var(--color-natural-hover) !important;
+}
+
+/* Form inputs and interactive controls in dark mode */
+.dark input:not([type="checkbox"]):not([type="radio"]),
+.dark select,
+.dark textarea {
+  color: var(--color-natural-text-main);
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #71726a;
+}
+
+.dark select option {
+  background-color: #1c1d18;
+  color: #f3f3ee;
+}
+
+/* Dark mode scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-natural-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-natural-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-natural-text-light);
+}

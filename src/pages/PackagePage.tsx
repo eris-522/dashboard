@@ -14,9 +14,11 @@ import {
   Trash2,
   ChevronDown,
   ArrowLeft,
+  Boxes,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { supabase } from "../utils/supabase"; // Database connection
+import { useInventory } from "../context/InventoryContext";
 import { logAuditAction } from "../utils/auditLogger";
 
 // Feature: Defines the structure for Packages based on the Supabase table
@@ -34,6 +36,7 @@ export interface CateringPackage {
 }
 
 export function PackagePage() {
+  const { calculatePackageEquipment } = useInventory();
   // Feature: State management for database arrays and UI toggles
   const [packages, setPackages] = useState<CateringPackage[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -777,6 +780,17 @@ export function PackagePage() {
                   No inclusions specified.
                 </p>
               )}
+            </div>
+
+            {/* Inventory Equipment Link Footer */}
+            <div className="px-6 py-2.5 bg-amber-50/50 border-t border-natural-border/40 flex items-center justify-between text-[10px]">
+              <div className="flex items-center gap-1.5 text-amber-900 font-bold">
+                <Boxes className="w-3.5 h-3.5 text-amber-700" />
+                <span>Inventory Link:</span>
+              </div>
+              <span className="font-semibold text-natural-text-main/80">
+                {calculatePackageEquipment(pkg.name, Number(pkg.pax) || 50, pkg.inclusions).length} supplies connected
+              </span>
             </div>
           </div>
         ))}

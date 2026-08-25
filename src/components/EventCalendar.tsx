@@ -6,7 +6,7 @@ import { cn } from '../lib/utils';
 
 interface EventCalendarProps {
   bookings?: {
-    id: number;
+    id: number | string;
     customerName: string;
     eventType: string;
     date: string;

@@ -20,11 +20,14 @@ import {
   AlertCircle,
   Archive,
   XCircle,
+  Boxes,
+  Warehouse,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { EventCalendar } from "../components/EventCalendar";
 import { supabase } from "../utils/supabase";
 import { useUser } from "../context/UserContext";
+import { useInventory } from "../context/InventoryContext";
 import { logAuditAction } from "../utils/auditLogger";
 
 type SortField =
@@ -66,6 +69,13 @@ const formatEventTime = (timeStr?: string) => {
 
 export function BookingPage() {
   const { currentUser } = useUser();
+  const {
+    deductBookingInventory,
+    restoreBookingInventory,
+    calculatePackageEquipment,
+    checkInventoryAvailability,
+    isBookingDeducted,
+  } = useInventory();
   const [bookings, setBookings] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [packages, setPackages] = useState<any[]>([]);
@@ -190,11 +200,11 @@ export function BookingPage() {
         setFetchError(null);
       }
 
-      const [pRes, pkgRes, menuRes, srvRes] = await Promise.all([
+      const [pRes, pkgRes, menuRes, incRes] = await Promise.all([
         supabase.from("profiles").select("*").neq("status", "Archived"),
         supabase.from("packages").select("*").neq("status", "Archived"),
         supabase.from("menu_items").select("*").neq("status", "Archived"),
-        supabase.from("add_ons").select("*").neq("status", "Archived"),
+        supabase.from("inclusions").select("*"),
       ]);
 
       if (pRes.error)
@@ -209,9 +219,19 @@ export function BookingPage() {
         console.error("Error fetching menu items:", menuRes.error.message);
       else if (menuRes.data) setMenuItems(menuRes.data);
 
-      if (srvRes.error)
-        console.error("Error fetching add-ons:", srvRes.error.message);
-      else if (srvRes.data) setAdditionalServices(srvRes.data);
+      if (incRes.error) {
+        console.error("Error fetching inclusions:", incRes.error.message);
+      } else if (incRes.data) {
+        const validServices = incRes.data
+          .filter((row: any) => row.items && row.items !== "-" && row.items.trim() !== "")
+          .map((row: any) => ({
+            id: row.id,
+            name: row.items,
+            category: row.category,
+            price: 0,
+          }));
+        setAdditionalServices(validServices);
+      }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "Unknown error";
       setFetchError(errorMsg);
@@ -390,10 +410,25 @@ export function BookingPage() {
     }
 
     if (type === "confirm" && bookingId) {
-      await supabase
+      const targetBooking = bookings.find((b) => b.id === bookingId);
+      const pkgName = targetBooking?.packages?.name || (packages.find(p => p.id === targetBooking?.package_id)?.name) || targetBooking?.package || packages[0]?.name || "Event Package";
+      const totalPax = (Number(targetBooking?.guest_count) || 50) + (Number(targetBooking?.additional_pax) || 0);
+
+      const { error: updateErr } = await supabase
         .from("bookings")
         .update({ status: "Confirmed" })
         .eq("id", bookingId);
+
+      if (updateErr) {
+        console.error("Error confirming booking:", updateErr.message);
+        setFetchError(`Failed to confirm booking: ${updateErr.message}`);
+        setConfirmAction(null);
+        return;
+      }
+
+      // Automatically deduct package equipment supplies from inventory
+      await deductBookingInventory(bookingId, confirmAction.bookingName, pkgName, totalPax, targetBooking?.packages?.inclusions || targetBooking?.inclusions);
+
       window.dispatchEvent(
         new CustomEvent("markAdminNotifRead", {
           detail: { id: bookingId, status: "Confirmed" },
@@ -403,10 +438,10 @@ export function BookingPage() {
         action: "Confirmed Booking",
         target: confirmAction.bookingName,
         type: "Update",
-        details: `Approved booking request for ${confirmAction.bookingName}`,
+        details: `Approved booking for ${confirmAction.bookingName} and deducted ${totalPax} Pax equipment from inventory (${pkgName})`,
       });
     } else if (type === "cancel" && bookingId) {
-      await supabase
+      const { error: cancelErr } = await supabase
         .from("bookings")
         .update({
           status: "Cancelled",
@@ -414,6 +449,17 @@ export function BookingPage() {
           cancelled_by: "Admin",
         })
         .eq("id", bookingId);
+
+      if (cancelErr) {
+        console.error("Error cancelling booking:", cancelErr.message);
+        setFetchError(`Failed to cancel booking: ${cancelErr.message}`);
+        setConfirmAction(null);
+        return;
+      }
+
+      // Automatically restore package equipment back to inventory
+      await restoreBookingInventory(bookingId, confirmAction.bookingName);
+
       window.dispatchEvent(
         new CustomEvent("markAdminNotifRead", {
           detail: { id: bookingId, status: "Cancelled" },
@@ -423,13 +469,24 @@ export function BookingPage() {
         action: "Cancelled Booking",
         target: confirmAction.bookingName,
         type: "Update",
-        details: `Cancelled booking for ${confirmAction.bookingName}. Reason: ${cancelReason.trim()}`,
+        details: `Cancelled booking for ${confirmAction.bookingName} and restored reserved inventory supplies. Reason: ${cancelReason.trim()}`,
       });
     } else if (type === "archive" && bookingId) {
-      await supabase
+      const { error: archiveErr } = await supabase
         .from("bookings")
         .update({ status: "Archived" })
         .eq("id", bookingId);
+
+      if (archiveErr) {
+        console.error("Error archiving booking:", archiveErr.message);
+        setFetchError(`Failed to archive booking: ${archiveErr.message}`);
+        setConfirmAction(null);
+        return;
+      }
+
+      // If it was confirmed and deducted, restore inventory
+      await restoreBookingInventory(bookingId, confirmAction.bookingName);
+
       await logAuditAction({
         action: "Archived Booking",
         target: confirmAction.bookingName,
@@ -437,26 +494,39 @@ export function BookingPage() {
         details: `Moved booking for ${confirmAction.bookingName} to archives`,
       });
     } else if (type === "create") {
-      const { data } = await supabase
+      const locationString = `${newBooking.event_type || "Event"} - ${newBooking.venueName || "Venue"}, ${newBooking.venueAddress || "Address"}`;
+      const { data, error: insertErr } = await supabase
         .from("bookings")
         .insert([
           {
             user_id: newBooking.user_id,
             package_id: newBooking.package_id,
-            event_type: newBooking.event_type,
             event_date: newBooking.date,
-            event_time: newBooking.time,
-            event_location: `${newBooking.venueName} - ${newBooking.venueAddress}`,
-            guest_count: newBooking.guest_count,
-            additional_pax: newBooking.additional_pax,
-            selected_menu_items: newBooking.selected_menu_items,
-            selected_add_ons: newBooking.selected_add_ons,
+            event_time: newBooking.time || "08:00:00",
+            event_location: locationString,
+            guest_count: Number(newBooking.guest_count) || 50,
+            additional_pax: Number(newBooking.additional_pax) || 0,
+            selected_menu_items: newBooking.selected_menu_items || [],
+            food_allergies: "",
             status: "Confirmed",
           },
         ])
         .select();
 
+      if (insertErr) {
+        console.error("Error creating booking:", insertErr.message);
+        setFetchError(`Failed to create booking: ${insertErr.message}`);
+        setConfirmAction(null);
+        return;
+      }
+
       if (data && data.length > 0) {
+        const selectedPkg = packages.find((p) => p.id === newBooking.package_id);
+        const pkgName = selectedPkg?.name || packages[0]?.name || "Event Package";
+        const totalPax = Number(newBooking.guest_count || 50) + Number(newBooking.additional_pax || 0);
+        // Auto-deduct inventory
+        await deductBookingInventory(data[0].id, confirmAction.bookingName, pkgName, totalPax, selectedPkg?.inclusions);
+
         window.dispatchEvent(
           new CustomEvent("markAdminNotifRead", {
             detail: { id: data[0].id, status: "Confirmed" },
@@ -467,8 +537,9 @@ export function BookingPage() {
         action: "Created Booking",
         target: confirmAction.bookingName,
         type: "Create",
-        details: `Manually created and confirmed a booking for ${confirmAction.bookingName}`,
+        details: `Manually created and confirmed a booking for ${confirmAction.bookingName}, automatically allocating warehouse inventory`,
       });
+      resetNewBooking();
     }
 
     await fetchAllData();
@@ -1632,6 +1703,62 @@ export function BookingPage() {
                     </div>
                   </div>
                 )}
+
+              {/* Allocated Inventory & Equipment Section */}
+              <div className="space-y-3 pt-4 border-t border-natural-border/50">
+                <div className="flex items-center justify-between">
+                  <h5 className="text-[0.65rem] font-bold text-natural-accent uppercase tracking-widest flex items-center gap-1.5">
+                    <Boxes className="w-3.5 h-3.5" />
+                    Allocated Event Equipment & Supplies
+                  </h5>
+                  <span
+                    className={cn(
+                      "text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border",
+                      isBookingDeducted(selectedBooking.id) || (selectedBooking.status || "Pending") === "Confirmed"
+                        ? "bg-green-50 text-green-700 border-green-200"
+                        : "bg-orange-50 text-orange-700 border-orange-200",
+                    )}
+                  >
+                    {isBookingDeducted(selectedBooking.id) || (selectedBooking.status || "Pending") === "Confirmed"
+                      ? "✓ Stock Deducted & Allocated"
+                      : "Pending Confirmation"}
+                  </span>
+                </div>
+                {(() => {
+                  const pkgName =
+                    selectedBooking.packages?.name ||
+                    packages.find((p) => p.id === selectedBooking.package_id)?.name ||
+                    selectedBooking.package ||
+                    packages[0]?.name ||
+                    "Event Package";
+                  const totalPax =
+                    (Number(selectedBooking.guest_count) || 50) +
+                    (Number(selectedBooking.additional_pax) || 0);
+                  const equipList = calculatePackageEquipment(
+                    pkgName,
+                    totalPax,
+                    selectedBooking.packages?.inclusions || selectedBooking.inclusions,
+                  );
+
+                  return (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto pr-1">
+                      {equipList.map((eq, i) => (
+                        <div
+                          key={i}
+                          className="p-2 bg-natural-bg/40 border border-natural-border rounded-lg flex justify-between items-center text-[10px]"
+                        >
+                          <span className="font-medium text-natural-text-main truncate mr-1">
+                            {eq.itemName}
+                          </span>
+                          <span className="font-bold text-natural-accent shrink-0">
+                            {eq.quantity} {eq.unit}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
 
             <div className="p-6 bg-natural-bg/30 border-t border-natural-border flex gap-3 shrink-0">
@@ -1714,11 +1841,46 @@ export function BookingPage() {
               <h3 className="text-lg font-serif font-bold text-natural-text-main mb-2 capitalize">
                 {confirmAction.type} Booking?
               </h3>
-              <p className="text-sm text-natural-text-light mb-6">
+              <p className="text-sm text-natural-text-light mb-4">
                 {confirmAction.type === "create"
                   ? `Are you sure you want to create a new booking for ${confirmAction.bookingName}?`
                   : `Are you sure you want to ${confirmAction.type} the booking for ${confirmAction.bookingName}?`}
               </p>
+
+              {confirmAction.type === "confirm" && (() => {
+                const targetBooking = bookings.find((b) => b.id === confirmAction.bookingId);
+                const pkgName =
+                  targetBooking?.packages?.name ||
+                  packages.find((p) => p.id === targetBooking?.package_id)?.name ||
+                  targetBooking?.package ||
+                  packages[0]?.name ||
+                  "Event Package";
+                const totalPax =
+                  (Number(targetBooking?.guest_count) || 50) +
+                  (Number(targetBooking?.additional_pax) || 0);
+                const check = checkInventoryAvailability(pkgName, totalPax, targetBooking?.packages?.inclusions || targetBooking?.inclusions);
+
+                return (
+                  <div className="mb-5 p-3.5 bg-amber-50/80 border border-amber-200/90 rounded-xl text-left space-y-2">
+                    <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
+                      <Boxes className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>Automatic Stock Deduction</span>
+                    </div>
+                    <p className="text-[11px] text-amber-950/80 leading-relaxed">
+                      Confirming will deduct equipment for <span className="font-bold">{totalPax} Guests</span> ({pkgName}) from warehouse inventory.
+                    </p>
+                    {!check.isAvailable && (
+                      <div className="p-2 bg-red-50 border border-red-200 rounded-lg text-[10px] text-red-700 font-semibold leading-tight">
+                        ⚠️ Low stock warning:{" "}
+                        {check.requirements
+                          .filter((r) => !r.isAvailable)
+                          .map((r) => `${r.itemName} (Deficit: ${r.deficit} ${r.unit})`)
+                          .join(", ")}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {["confirm", "cancel", "archive"].includes(
                 confirmAction.type,

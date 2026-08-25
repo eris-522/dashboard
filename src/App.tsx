@@ -15,7 +15,7 @@ import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { AuditTrailPage } from "./pages/AuditTrailPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { NotificationCenter } from "./components/NotificationCenter";
-import { Bell, Mail, LogOut, Users } from "lucide-react";
+import { Bell, Mail, LogOut, Users, Sun, Moon } from "lucide-react";
 import { cn } from "./lib/utils";
 import { InventoryProvider } from "./context/InventoryContext";
 import { BookingProvider, useBooking } from "./context/BookingContext";
@@ -23,6 +23,7 @@ import { UserProvider, useUser } from "./context/UserContext";
 import { MenuProvider } from "./context/MenuContext";
 import { ServicesProvider } from "./context/ServicesContext";
 import { PackageProvider } from "./context/PackageContext";
+import { ThemeProvider, useTheme } from "./context/ThemeContext";
 import { LoginPage } from "./pages/LoginPage";
 
 /**
@@ -63,6 +64,7 @@ function AppContent() {
   const [isNotificationOpen, setIsNotificationOpen] = React.useState(false);
   const { currentUser, logout } = useUser();
   const { bookings } = useBooking();
+  const { resolvedTheme, toggleTheme } = useTheme();
 
   const notificationRef = React.useRef<HTMLDivElement>(null);
 
@@ -124,154 +126,168 @@ function AppContent() {
 
   return (
     <div className="flex bg-natural-bg min-h-screen">
-                <Sidebar active={activeTab} setActive={setActiveTab} />
+      <Sidebar active={activeTab} setActive={setActiveTab} />
 
-                <main className="flex-1 ml-56 p-8">
-                  {/* Top Header */}
-                  <header className="flex items-center justify-between mb-8">
-                    <div>
-                      <h2 className="text-2xl font-serif font-bold text-natural-text-main">
-                        {activeTab === "dashboard"
-                          ? "Executive Dashboard"
-                          : activeTab === "user"
-                            ? "Account Management"
-                            : activeTab === "booking"
-                              ? "Event Logistics"
-                              : activeTab === "menu"
-                                ? "Culinary Workspace"
-                                : activeTab === "packages"
-                                  ? "Package Bundles"
-                                  : activeTab === "inventory"
-                                    ? "Inventory Control"
-                                    : activeTab === "analytics"
-                                      ? "Insights & Performance"
-                                      : activeTab === "audit-trail"
-                                        ? "Administrative Log"
-                                        : activeTab === "setting"
-                                          ? "Account Preferences"
-                                          : "Catering Workspace"}
-                      </h2>
-                      <p className="text-natural-text-light text-[0.8rem] font-medium uppercase tracking-wider">
-                        {activeTab === "dashboard"
-                          ? "Business Intelligence & Logistics"
-                          : activeTab === "user"
-                            ? "User Roles & Access Control"
-                            : activeTab === "booking"
-                              ? "Scheduled Catering & Operations"
-                              : activeTab === "menu"
-                                ? "Menu Development & Inventory Link"
-                                : activeTab === "packages"
-                                  ? "Tiered Event Solutions"
-                                  : activeTab === "inventory"
-                                    ? "Asset Management & Fulfillment"
-                                    : activeTab === "analytics"
-                                      ? "Data-Driven Growth Strategies"
-                                      : activeTab === "audit-trail"
-                                        ? "Chronological System Activity Trail"
-                                        : activeTab === "setting"
-                                          ? "Workflow & Environment Configuration"
-                                          : "Management Console"}
-                      </p>
-                    </div>
+      <main className="flex-1 ml-56 p-8">
+        {/* Top Header */}
+        <header className="flex items-center justify-between mb-8">
+          <div>
+            <h2 className="text-2xl font-serif font-bold text-natural-text-main">
+              {activeTab === "dashboard"
+                ? "Executive Dashboard"
+                : activeTab === "user"
+                  ? "Account Management"
+                  : activeTab === "booking"
+                    ? "Event Logistics"
+                    : activeTab === "menu"
+                      ? "Culinary Workspace"
+                      : activeTab === "packages"
+                        ? "Package Bundles"
+                        : activeTab === "inventory"
+                          ? "Inventory Control"
+                          : activeTab === "analytics"
+                            ? "Insights & Performance"
+                            : activeTab === "audit-trail"
+                              ? "Administrative Log"
+                              : activeTab === "setting"
+                                ? "Account Preferences"
+                                : "Catering Workspace"}
+            </h2>
+            <p className="text-natural-text-light text-[0.8rem] font-medium uppercase tracking-wider">
+              {activeTab === "dashboard"
+                ? "Business Intelligence & Logistics"
+                : activeTab === "user"
+                  ? "User Roles & Access Control"
+                  : activeTab === "booking"
+                    ? "Scheduled Catering & Operations"
+                    : activeTab === "menu"
+                      ? "Menu Development & Inventory Link"
+                      : activeTab === "packages"
+                        ? "Tiered Event Solutions"
+                        : activeTab === "inventory"
+                          ? "Asset Management & Fulfillment"
+                          : activeTab === "analytics"
+                            ? "Data-Driven Growth Strategies"
+                            : activeTab === "audit-trail"
+                              ? "Chronological System Activity Trail"
+                              : activeTab === "setting"
+                                ? "Workflow & Environment Configuration"
+                                : "Management Console"}
+            </p>
+          </div>
 
-                    <div className="flex items-center gap-6">
-                      <div className="flex items-center gap-2 relative" ref={notificationRef}>
-                        <button
-                          onClick={() =>
-                            setIsNotificationOpen(!isNotificationOpen)
-                          }
-                          className={cn(
-                            "p-2 bg-white border border-natural-border rounded-lg relative hover:bg-natural-bg transition-colors shadow-xs",
-                            isNotificationOpen &&
-                              "ring-2 ring-natural-accent/20 bg-natural-bg",
-                          )}
-                        >
-                          <Bell className="w-4 h-4 text-natural-text-main" />
-                          {pendingCount > 0 && (
-                            <span className="absolute -top-1.5 -right-1.5 flex items-center justify-center min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[9px] font-bold rounded-full border border-white shadow-sm">
-                              {pendingCount > 99 ? '99+' : pendingCount}
-                            </span>
-                          )}
-                        </button>
+          <div className="flex items-center gap-6">
+            {/* Theme Toggle Button */}
+            <button
+              onClick={toggleTheme}
+              title={`Switch to ${resolvedTheme === "dark" ? "Light" : "Dark"} Mode (Appearance Settings)`}
+              className="p-2 bg-white border border-natural-border rounded-lg relative hover:bg-natural-bg transition-all shadow-xs cursor-pointer text-natural-text-main hover:scale-105 active:scale-95"
+            >
+              {resolvedTheme === "dark" ? (
+                <Sun className="w-4 h-4 text-amber-400 animate-in spin-in-180 duration-300" />
+              ) : (
+                <Moon className="w-4 h-4 text-natural-text-main animate-in spin-in-180 duration-300" />
+              )}
+            </button>
 
-                        <NotificationCenter 
-                          isOpen={isNotificationOpen} 
-                          onClose={() => setIsNotificationOpen(false)} 
-                          onManageBooking={() => setActiveTab("booking")}
-                          onViewAllLogs={() => setActiveTab("audit-trail")}
-                          dismissedIds={dismissedIds}
-                          onDismiss={(id) => setDismissedIds((prev) => [...prev, id])}
-                        />
-                      </div>
+            {/* Notification Bell */}
+            <div className="flex items-center gap-2 relative" ref={notificationRef}>
+              <button
+                onClick={() =>
+                  setIsNotificationOpen(!isNotificationOpen)
+                }
+                className={cn(
+                  "p-2 bg-white border border-natural-border rounded-lg relative hover:bg-natural-bg transition-colors shadow-xs cursor-pointer",
+                  isNotificationOpen &&
+                    "ring-2 ring-natural-accent/20 bg-natural-bg",
+                )}
+              >
+                <Bell className="w-4 h-4 text-natural-text-main" />
+                {pendingCount > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 flex items-center justify-center min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[9px] font-bold rounded-full border border-white shadow-sm">
+                    {pendingCount > 99 ? '99+' : pendingCount}
+                  </span>
+                )}
+              </button>
 
-                      <div className="h-8 w-px bg-natural-border" />
+              <NotificationCenter 
+                isOpen={isNotificationOpen} 
+                onClose={() => setIsNotificationOpen(false)} 
+                onManageBooking={() => setActiveTab("booking")}
+                onViewAllLogs={() => setActiveTab("audit-trail")}
+                dismissedIds={dismissedIds}
+                onDismiss={(id) => setDismissedIds((prev) => [...prev, id])}
+              />
+            </div>
 
-                      <div className="flex items-center gap-3">
-                        <div className="text-right">
-                          <p className="text-xs font-bold text-natural-text-main uppercase tracking-tight">
-                            {currentUser.name}
-                          </p>
-                          <p className="text-[9px] font-bold text-natural-text-light uppercase tracking-widest opacity-70">
-                            {currentUser.role} Account
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => setActiveTab("setting")}
-                          title="Go to Settings"
-                          className="w-9 h-9 rounded-lg bg-natural-accent/10 border border-natural-accent/20 flex items-center justify-center text-natural-accent font-bold text-xs select-none uppercase hover:bg-natural-accent/20 transition-colors cursor-pointer"
-                        >
-                          {currentUser.name
-                            .split(" ")
-                            .map((n) => n[0])
-                            .join("")}
-                        </button>
-                        <button
-                          onClick={() => logout()}
-                          className="p-2 ml-1 text-natural-text-light hover:text-red-500 hover:bg-white rounded-lg transition-all"
-                          title="Sign Out"
-                        >
-                          <LogOut className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </header>
+            <div className="h-8 w-px bg-natural-border" />
 
-                  {/* Content Area */}
-                  <div className="max-w-7xl">
-                    {activeTab === "dashboard" ? (
-                      <Dashboard onNavigate={setActiveTab} />
-                    ) : activeTab === "user" ? (
-                      <UserPage />
-                    ) : activeTab === "booking" ? (
-                      <BookingPage />
-                    ) : activeTab === "menu" ? (
-                      <MenuPage />
-                    ) : activeTab === "packages" ? (
-                      <PackagePage />
-                    ) : activeTab === "inventory" ? (
-                      <InventoryPage />
-                    ) : activeTab === "analytics" ? (
-                      <AnalyticsPage />
-                    ) : activeTab === "audit-trail" ? (
-                      <AuditTrailPage />
-                    ) : activeTab === "setting" ? (
-                      <SettingsPage />
-                    ) : (
-                      <div className="p-20 text-center glass-card">
-                        <p className="text-natural-text-light font-serif italic">
-                          This section ({activeTab}) is under construction.
-                        </p>
-                      </div>
-                    )}
-                  </div>
+            <div className="flex items-center gap-3">
+              <div className="text-right">
+                <p className="text-xs font-bold text-natural-text-main uppercase tracking-tight">
+                  {currentUser.name}
+                </p>
+                <p className="text-[9px] font-bold text-natural-text-light uppercase tracking-widest opacity-70">
+                  {currentUser.role} Account
+                </p>
+              </div>
+              <button
+                onClick={() => setActiveTab("setting")}
+                title="Go to Settings"
+                className="w-9 h-9 rounded-lg bg-natural-accent/10 border border-natural-accent/20 flex items-center justify-center text-natural-accent font-bold text-xs select-none uppercase hover:bg-natural-accent/20 transition-colors cursor-pointer"
+              >
+                {currentUser.name
+                  .split(" ")
+                  .map((n) => n[0])
+                  .join("")}
+              </button>
+              <button
+                onClick={() => logout()}
+                className="p-2 ml-1 text-natural-text-light hover:text-red-500 hover:bg-white rounded-lg transition-all cursor-pointer"
+                title="Sign Out"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </header>
 
-                  {/* Footer */}
-                  <footer className="mt-12 py-6 border-t border-natural-border text-center">
-                    <p className="text-[10px] text-natural-text-light font-bold uppercase tracking-widest">
-                      © 2019 Roxan Policarpio Events & Catering
-                    </p>
-                  </footer>
-                </main>
+        {/* Content Area */}
+        <div className="max-w-7xl">
+          {activeTab === "dashboard" ? (
+            <Dashboard onNavigate={setActiveTab} />
+          ) : activeTab === "user" ? (
+            <UserPage />
+          ) : activeTab === "booking" ? (
+            <BookingPage />
+          ) : activeTab === "menu" ? (
+            <MenuPage />
+          ) : activeTab === "packages" ? (
+            <PackagePage />
+          ) : activeTab === "inventory" ? (
+            <InventoryPage />
+          ) : activeTab === "analytics" ? (
+            <AnalyticsPage />
+          ) : activeTab === "audit-trail" ? (
+            <AuditTrailPage />
+          ) : activeTab === "setting" ? (
+            <SettingsPage />
+          ) : (
+            <div className="p-20 text-center glass-card">
+              <p className="text-natural-text-light font-serif italic">
+                This section ({activeTab}) is under construction.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <footer className="mt-12 py-6 border-t border-natural-border text-center">
+          <p className="text-[10px] text-natural-text-light font-bold uppercase tracking-widest">
+            © 2019 Roxan Policarpio Events & Catering
+          </p>
+        </footer>
+      </main>
     </div>
   );
 }
@@ -304,8 +320,10 @@ function MainApp() {
 
 export default function App() {
   return (
-    <UserProvider>
-      <MainApp />
-    </UserProvider>
+    <ThemeProvider>
+      <UserProvider>
+        <MainApp />
+      </UserProvider>
+    </ThemeProvider>
   );
 }
