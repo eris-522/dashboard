@@ -118,10 +118,12 @@ export function PackagePage() {
     const grouped: Record<string, string[]> = {};
     if (data) {
       data.forEach((row: any) => {
-        if (!grouped[row.category]) grouped[row.category] = [];
-        if (row.items && row.items.trim() !== "" && row.items !== "-") {
-          if (!grouped[row.category].includes(row.items)) {
-            grouped[row.category].push(row.items);
+        if (row.category && !row.category.startsWith("__CMS_")) {
+          if (!grouped[row.category]) grouped[row.category] = [];
+          if (row.items && row.items.trim() !== "" && row.items !== "-") {
+            if (!grouped[row.category].includes(row.items)) {
+              grouped[row.category].push(row.items);
+            }
           }
         }
       });

@@ -23,7 +23,6 @@ import {
   ChevronDown,
   Boxes,
   Award,
-  CalendarCheck,
   Package,
   Layers,
   Sparkles,
@@ -75,12 +74,8 @@ export function AnalyticsPage() {
     });
   }, [bookings, timeRange]);
 
-  const nonArchivedBookings = useMemo(() => {
-    return filteredBookings.filter((b) => b.status !== "Archived");
-  }, [filteredBookings]);
-
   const confirmedBookings = useMemo(() => {
-    return filteredBookings.filter((b) => b.status === "Confirmed");
+    return filteredBookings.filter((b) => b.status === "Confirmed" || b.status === "Completed");
   }, [filteredBookings]);
 
   const totalRevenue = useMemo(() => {
@@ -97,12 +92,6 @@ export function AnalyticsPage() {
       return sum + pax;
     }, 0);
   }, [confirmedBookings]);
-
-  const conversionRate = useMemo(() => {
-    return nonArchivedBookings.length > 0
-      ? (confirmedBookings.length / nonArchivedBookings.length) * 100
-      : 0;
-  }, [confirmedBookings, nonArchivedBookings]);
 
   // Monthly Revenue & Event Volume Data
   const months = [
@@ -219,7 +208,6 @@ export function AnalyticsPage() {
     csv += `Total Confirmed Events,${confirmedBookings.length}\n`;
     csv += `Total Guests Served,${totalPaxServed.toLocaleString()} Pax\n`;
     csv += `Average Event Value,PHP ${Math.round(avgEventValue).toLocaleString()}\n`;
-    csv += `Booking Conversion Rate,${conversionRate.toFixed(1)}%\n`;
     csv += `Inventory Units Allocated,${totalAllocatedEquipment} Units\n\n`;
 
     csv += `--- MONTHLY PERFORMANCE BREAKDOWN ---\n`;
@@ -297,7 +285,7 @@ export function AnalyticsPage() {
       </div>
 
       {/* KPI Insight Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         <div className="glass-card p-5 bg-white border-l-4 border-natural-accent">
           <div className="flex items-center justify-between text-natural-text-light mb-2">
             <span className="text-[0.65rem] font-bold uppercase tracking-widest">Total Revenue</span>
@@ -334,19 +322,6 @@ export function AnalyticsPage() {
           </h4>
           <span className="text-[10px] font-bold text-blue-700 block mt-1">
             Catered attendees
-          </span>
-        </div>
-
-        <div className="glass-card p-5 bg-white">
-          <div className="flex items-center justify-between text-natural-text-light mb-2">
-            <span className="text-[0.65rem] font-bold uppercase tracking-widest">Conversion Rate</span>
-            <CalendarCheck className="w-4 h-4 text-green-600" />
-          </div>
-          <h4 className="text-xl font-bold font-serif text-green-700">
-            {conversionRate.toFixed(1)}%
-          </h4>
-          <span className="text-[10px] font-bold text-natural-text-light block mt-1">
-            {confirmedBookings.length} of {nonArchivedBookings.length} Inquiries
           </span>
         </div>
 

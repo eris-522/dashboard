@@ -9,6 +9,7 @@ import {
   BarChart3, 
   History, 
   Settings,
+  Globe,
   ChevronRight
 } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -20,6 +21,7 @@ const navItems = [
   { icon: UtensilsCrossed, label: 'Menu', id: 'menu' },
   { icon: Package, label: 'Packages', id: 'packages' },
   { icon: PackageSearch, label: 'Inventory', id: 'inventory' },
+  { icon: Globe, label: 'CMS (Website)', id: 'cms' },
   { icon: BarChart3, label: 'Analytics', id: 'analytics' },
   { icon: History, label: 'Audit Trail', id: 'audit-trail' },
   { icon: Settings, label: 'Setting', id: 'setting' },

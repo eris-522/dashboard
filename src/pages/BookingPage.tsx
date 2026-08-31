@@ -22,6 +22,9 @@ import {
   XCircle,
   Boxes,
   Warehouse,
+  RotateCcw,
+  CheckCheck,
+  PackageCheck,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { EventCalendar } from "../components/EventCalendar";
@@ -74,6 +77,8 @@ export function BookingPage() {
     restoreBookingInventory,
     calculatePackageEquipment,
     checkInventoryAvailability,
+    completeBookingAndReturnInventory,
+    reconcileCompletedEvents,
     isBookingDeducted,
   } = useInventory();
   const [bookings, setBookings] = useState<any[]>([]);
@@ -101,7 +106,7 @@ export function BookingPage() {
     false,
   );
   const [confirmAction, setConfirmAction] = useState<{
-    type: "confirm" | "cancel" | "archive" | "create";
+    type: "confirm" | "cancel" | "archive" | "create" | "complete";
     bookingId?: string;
     bookingName: string;
   } | null>(null);
@@ -198,6 +203,9 @@ export function BookingPage() {
       } else {
         setBookings(bData || []);
         setFetchError(null);
+        if (bData && bData.length > 0) {
+          reconcileCompletedEvents(bData);
+        }
       }
 
       const [pRes, pkgRes, menuRes, incRes] = await Promise.all([
@@ -471,6 +479,32 @@ export function BookingPage() {
         type: "Update",
         details: `Cancelled booking for ${confirmAction.bookingName} and restored reserved inventory supplies. Reason: ${cancelReason.trim()}`,
       });
+    } else if (type === "complete" && bookingId) {
+      const { error: completeErr } = await supabase
+        .from("bookings")
+        .update({ status: "Completed" })
+        .eq("id", bookingId);
+
+      if (completeErr) {
+        console.error("Error completing booking:", completeErr.message);
+        setFetchError(`Failed to complete booking: ${completeErr.message}`);
+        setConfirmAction(null);
+        return;
+      }
+
+      // Automatically restore package equipment back to inventory
+      await restoreBookingInventory(
+        bookingId,
+        confirmAction.bookingName,
+        `Event Completed - All supplies returned to warehouse inventory (Booking #${bookingId})`
+      );
+
+      await logAuditAction({
+        action: "Completed Booking",
+        target: confirmAction.bookingName,
+        type: "Update",
+        details: `Marked event as Completed for ${confirmAction.bookingName} and returned all allocated supplies to warehouse inventory`,
+      });
     } else if (type === "archive" && bookingId) {
       const { error: archiveErr } = await supabase
         .from("bookings")
@@ -647,6 +681,7 @@ export function BookingPage() {
             >
               <option>All Status</option>
               <option>Confirmed</option>
+              <option>Completed</option>
               <option>Pending</option>
               <option>Cancelled</option>
               <option>Archived</option>
@@ -875,13 +910,15 @@ export function BookingPage() {
                           "text-[0.6rem] font-bold uppercase tracking-widest px-2 py-1 rounded border",
                           (booking.status || "Pending") === "Confirmed"
                             ? "bg-green-50 text-green-700 border-green-200"
-                            : (booking.status || "Pending") === "Pending"
-                              ? "bg-orange-50 text-orange-700 border-orange-200"
-                              : (booking.status || "Pending") === "Cancelled"
-                                ? "bg-red-50 text-red-700 border-red-200"
-                                : (booking.status || "Pending") === "Archived"
-                                  ? "bg-gray-100 text-gray-600 border-gray-300"
-                                  : "bg-gray-50 text-gray-700 border-gray-200",
+                            : (booking.status || "Pending") === "Completed"
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              : (booking.status || "Pending") === "Pending"
+                                ? "bg-orange-50 text-orange-700 border-orange-200"
+                                : (booking.status || "Pending") === "Cancelled"
+                                  ? "bg-red-50 text-red-700 border-red-200"
+                                  : (booking.status || "Pending") === "Archived"
+                                    ? "bg-gray-100 text-gray-600 border-gray-300"
+                                    : "bg-gray-50 text-gray-700 border-gray-200",
                         )}
                       >
                         {booking.status || "Pending"}
@@ -927,6 +964,24 @@ export function BookingPage() {
                                   <XCircle className="w-4 h-4" />
                                 </button>
                               </>
+                            )}
+                            {(booking.status || "Pending") === "Confirmed" && (
+                              <button
+                                onClick={() =>
+                                  setConfirmAction({
+                                    type: "complete",
+                                    bookingId: booking.id,
+                                    bookingName:
+                                      booking.profiles?.name ||
+                                      booking.profiles?.full_name ||
+                                      "Unknown User",
+                                  })
+                                }
+                                className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+                                title="Mark Event Completed & Return Equipment to Inventory"
+                              >
+                                <RotateCcw className="w-4 h-4" />
+                              </button>
                             )}
                             <button
                               onClick={() => setSelectedBooking(booking)}
@@ -1796,14 +1851,41 @@ export function BookingPage() {
                   </button>
                 </>
               )}
-              {(selectedBooking.status || "Pending") !== "Pending" && (
-                <button
-                  onClick={() => setSelectedBooking(null)}
-                  className="flex-1 bg-natural-accent text-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm"
-                >
-                  Close View
-                </button>
+              {(selectedBooking.status || "Pending") === "Confirmed" && (
+                <>
+                  <button
+                    onClick={() =>
+                      setConfirmAction({
+                        type: "complete",
+                        bookingId: selectedBooking.id,
+                        bookingName:
+                          selectedBooking.profiles?.name ||
+                          selectedBooking.profiles?.full_name ||
+                          "Unknown User",
+                      })
+                    }
+                    className="flex-1 bg-emerald-600 text-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-sm flex items-center justify-center gap-1.5"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Mark Event Done & Return Equipment
+                  </button>
+                  <button
+                    onClick={() => setSelectedBooking(null)}
+                    className="px-6 border border-natural-border text-natural-text-light hover:text-natural-text-main bg-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest transition-all"
+                  >
+                    Close
+                  </button>
+                </>
               )}
+              {(selectedBooking.status || "Pending") !== "Pending" &&
+                (selectedBooking.status || "Pending") !== "Confirmed" && (
+                  <button
+                    onClick={() => setSelectedBooking(null)}
+                    className="flex-1 bg-natural-accent text-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm"
+                  >
+                    Close View
+                  </button>
+                )}
             </div>
           </div>
         </div>
@@ -1818,15 +1900,20 @@ export function BookingPage() {
                   "w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4",
                   confirmAction.type === "confirm"
                     ? "bg-green-100"
-                    : confirmAction.type === "cancel"
-                      ? "bg-orange-100"
-                      : confirmAction.type === "archive"
-                        ? "bg-gray-100"
-                        : "bg-blue-100",
+                    : confirmAction.type === "complete"
+                      ? "bg-emerald-100"
+                      : confirmAction.type === "cancel"
+                        ? "bg-orange-100"
+                        : confirmAction.type === "archive"
+                          ? "bg-gray-100"
+                          : "bg-blue-100",
                 )}
               >
                 {confirmAction.type === "confirm" && (
                   <CheckCircle2 className="w-8 h-8 text-green-600" />
+                )}
+                {confirmAction.type === "complete" && (
+                  <RotateCcw className="w-8 h-8 text-emerald-600" />
                 )}
                 {confirmAction.type === "cancel" && (
                   <XCircle className="w-8 h-8 text-orange-600" />
@@ -1839,13 +1926,27 @@ export function BookingPage() {
                 )}
               </div>
               <h3 className="text-lg font-serif font-bold text-natural-text-main mb-2 capitalize">
-                {confirmAction.type} Booking?
+                {confirmAction.type === "complete" ? "Complete Event?" : `${confirmAction.type} Booking?`}
               </h3>
               <p className="text-sm text-natural-text-light mb-4">
                 {confirmAction.type === "create"
                   ? `Are you sure you want to create a new booking for ${confirmAction.bookingName}?`
-                  : `Are you sure you want to ${confirmAction.type} the booking for ${confirmAction.bookingName}?`}
+                  : confirmAction.type === "complete"
+                    ? `Are you sure the event for ${confirmAction.bookingName} is finished? This will return all allocated supplies to warehouse inventory.`
+                    : `Are you sure you want to ${confirmAction.type} the booking for ${confirmAction.bookingName}?`}
               </p>
+
+              {confirmAction.type === "complete" && (
+                <div className="mb-5 p-3.5 bg-emerald-50/80 border border-emerald-200/90 rounded-xl text-left space-y-1.5">
+                  <div className="flex items-center gap-2 text-emerald-900 font-bold text-xs">
+                    <RotateCcw className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>Automatic Equipment Return</span>
+                  </div>
+                  <p className="text-[11px] text-emerald-950/80 leading-relaxed">
+                    Marking this event as Completed will automatically return all reserved tableware, equipment, and supplies back to the warehouse physical inventory.
+                  </p>
+                </div>
+              )}
 
               {confirmAction.type === "confirm" && (() => {
                 const targetBooking = bookings.find((b) => b.id === confirmAction.bookingId);
@@ -1952,17 +2053,21 @@ export function BookingPage() {
                     "w-full py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest text-white transition-all shadow-sm",
                     confirmAction.type === "confirm"
                       ? "bg-green-600 hover:bg-green-700"
-                      : confirmAction.type === "cancel"
-                        ? "bg-orange-600 hover:bg-orange-700"
-                        : confirmAction.type === "archive"
-                          ? "bg-gray-600 hover:bg-gray-700"
-                          : "bg-blue-600 hover:bg-blue-700",
+                      : confirmAction.type === "complete"
+                        ? "bg-emerald-600 hover:bg-emerald-700"
+                        : confirmAction.type === "cancel"
+                          ? "bg-orange-600 hover:bg-orange-700"
+                          : confirmAction.type === "archive"
+                            ? "bg-gray-600 hover:bg-gray-700"
+                            : "bg-blue-600 hover:bg-blue-700",
                   )}
                 >
                   Yes,{" "}
                   {confirmAction.type === "create"
                     ? "Create"
-                    : confirmAction.type}
+                    : confirmAction.type === "complete"
+                      ? "Complete & Return Supplies"
+                      : confirmAction.type}
                 </button>
                 <button
                   onClick={() => setConfirmAction(null)}

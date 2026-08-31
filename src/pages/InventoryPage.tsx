@@ -72,12 +72,34 @@ export function InventoryPage() {
     getPackageRules,
     savePackageRules,
     refreshItems,
+    reconcileCompletedEvents,
   } = useInventory();
 
   const { bookings } = useBooking();
 
   // Active Tab
   const [activeTab, setActiveTab] = useState<TabType>("stock");
+
+  // Reconcile status state
+  const [isReconciling, setIsReconciling] = useState(false);
+  const [reconcileMsg, setReconcileMsg] = useState<string | null>(null);
+
+  const handleReconcile = async () => {
+    setIsReconciling(true);
+    try {
+      const count = await reconcileCompletedEvents(bookings);
+      if (count > 0) {
+        setReconcileMsg(`Successfully returned supplies from ${count} completed event(s) back into inventory!`);
+      } else {
+        setReconcileMsg("All inventory equipment is up-to-date with active event schedules.");
+      }
+      setTimeout(() => setReconcileMsg(null), 4000);
+    } catch (e) {
+      console.error("Reconciliation error:", e);
+    } finally {
+      setIsReconciling(false);
+    }
+  };
 
   // Filter & Search
   const [searchQuery, setSearchQuery] = useState("");
@@ -440,7 +462,21 @@ export function InventoryPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={handleReconcile}
+            disabled={isReconciling}
+            title="Reconcile Completed Events & Return Equipment"
+            className="flex items-center gap-2 px-3.5 py-2.5 border border-natural-border bg-white rounded-lg text-xs font-bold text-natural-text-main hover:bg-natural-bg transition-all shadow-xs cursor-pointer disabled:opacity-50"
+          >
+            <RotateCcw className={cn("w-3.5 h-3.5 text-natural-accent", isReconciling && "animate-spin")} />
+            <span>Auto-Return Check</span>
+            {deductionRecords.length > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-natural-accent/10 text-natural-accent font-bold">
+                {deductionRecords.length} Active Events
+              </span>
+            )}
+          </button>
           <button
             onClick={() => refreshItems()}
             title="Refresh Stock Data"
@@ -460,6 +496,17 @@ export function InventoryPage() {
           </button>
         </div>
       </div>
+
+      {reconcileMsg && (
+        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-3 animate-in slide-in-from-top-2 duration-300 shadow-xs">
+          <div className="p-2 bg-emerald-100 rounded-lg text-emerald-800 shrink-0">
+            <CheckCircle2 className="w-5 h-5" />
+          </div>
+          <p className="text-xs font-bold text-emerald-950 font-serif">
+            {reconcileMsg}
+          </p>
+        </div>
+      )}
 
       {/* KPI Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

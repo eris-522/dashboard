@@ -14,6 +14,7 @@ import { InventoryPage } from "./pages/InventoryPage";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { AuditTrailPage } from "./pages/AuditTrailPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { CMSPage } from "./pages/CMSPage";
 import { NotificationCenter } from "./components/NotificationCenter";
 import { Bell, Mail, LogOut, Users, Sun, Moon } from "lucide-react";
 import { cn } from "./lib/utils";
@@ -33,25 +34,25 @@ import { LoginPage } from "./pages/LoginPage";
  */
 function Dashboard({ onNavigate }: { onNavigate: (id: string) => void }) {
   const { bookings } = useBooking();
-  const confirmedBookings = bookings.filter((b) => b.status === "Confirmed");
+  const confirmedBookings = bookings.filter((b) => b.status === "Confirmed" || b.status === "Completed");
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
+    <div className="w-full space-y-8 animate-in fade-in duration-500 min-w-0">
       {/* Stats */}
       <MetricCards />
 
       {/* Charts & Calendar Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 lg:gap-8 w-full">
+        <div className="xl:col-span-2">
           <RevenueChart />
         </div>
-        <div className="lg:col-span-1">
+        <div className="xl:col-span-1">
           <EventCalendar bookings={confirmedBookings} />
         </div>
       </div>
 
       {/* Inventory & Activity Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 lg:gap-8 w-full">
         <InventorySummary onViewAll={() => onNavigate("inventory")} />
         <RecentActivities onViewLogs={() => onNavigate("audit-trail")} />
       </div>
@@ -128,9 +129,9 @@ function AppContent() {
     <div className="flex bg-natural-bg min-h-screen">
       <Sidebar active={activeTab} setActive={setActiveTab} />
 
-      <main className="flex-1 ml-56 p-8">
+      <main className="flex-1 ml-56 p-6 lg:p-8 min-w-0">
         {/* Top Header */}
-        <header className="flex items-center justify-between mb-8">
+        <header className="flex items-center justify-between mb-8 flex-wrap gap-4">
           <div>
             <h2 className="text-2xl font-serif font-bold text-natural-text-main">
               {activeTab === "dashboard"
@@ -145,13 +146,15 @@ function AppContent() {
                         ? "Package Bundles"
                         : activeTab === "inventory"
                           ? "Inventory Control"
-                          : activeTab === "analytics"
-                            ? "Insights & Performance"
-                            : activeTab === "audit-trail"
-                              ? "Administrative Log"
-                              : activeTab === "setting"
-                                ? "Account Preferences"
-                                : "Catering Workspace"}
+                          : activeTab === "cms"
+                            ? "Website Content Management"
+                            : activeTab === "analytics"
+                              ? "Insights & Performance"
+                              : activeTab === "audit-trail"
+                                ? "Administrative Log"
+                                : activeTab === "setting"
+                                  ? "Account Preferences"
+                                  : "Catering Workspace"}
             </h2>
             <p className="text-natural-text-light text-[0.8rem] font-medium uppercase tracking-wider">
               {activeTab === "dashboard"
@@ -166,13 +169,15 @@ function AppContent() {
                         ? "Tiered Event Solutions"
                         : activeTab === "inventory"
                           ? "Asset Management & Fulfillment"
-                          : activeTab === "analytics"
-                            ? "Data-Driven Growth Strategies"
-                            : activeTab === "audit-trail"
-                              ? "Chronological System Activity Trail"
-                              : activeTab === "setting"
-                                ? "Workflow & Environment Configuration"
-                                : "Management Console"}
+                          : activeTab === "cms"
+                            ? "Customer Portal Customization & Real-Time Sync"
+                            : activeTab === "analytics"
+                              ? "Data-Driven Growth Strategies"
+                              : activeTab === "audit-trail"
+                                ? "Chronological System Activity Trail"
+                                : activeTab === "setting"
+                                  ? "Workflow & Environment Configuration"
+                                  : "Management Console"}
             </p>
           </div>
 
@@ -253,7 +258,7 @@ function AppContent() {
         </header>
 
         {/* Content Area */}
-        <div className="max-w-7xl">
+        <div className="w-full max-w-none transition-all duration-300 min-w-0">
           {activeTab === "dashboard" ? (
             <Dashboard onNavigate={setActiveTab} />
           ) : activeTab === "user" ? (
@@ -266,6 +271,8 @@ function AppContent() {
             <PackagePage />
           ) : activeTab === "inventory" ? (
             <InventoryPage />
+          ) : activeTab === "cms" ? (
+            <CMSPage />
           ) : activeTab === "analytics" ? (
             <AnalyticsPage />
           ) : activeTab === "audit-trail" ? (

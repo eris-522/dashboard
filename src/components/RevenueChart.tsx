@@ -43,7 +43,7 @@ export function RevenueChart() {
   }, [bookings, currentYear]);
 
   const data = useMemo(() => {
-    const confirmedBookings = bookings.filter((b) => b.status === "Confirmed");
+    const confirmedBookings = bookings.filter((b) => b.status === "Confirmed" || b.status === "Completed");
     const yearBookings = confirmedBookings.filter((b) => {
       return getEventDate(b).getFullYear().toString() === selectedYear;
     });

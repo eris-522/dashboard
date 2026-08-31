@@ -77,7 +77,9 @@ interface InventoryContextType {
     requirements: (EquipmentRequirement & { availableStock: number; deficit: number })[];
   };
   deductBookingInventory: (bookingId: string | number, bookingName: string, packageName: string, guestCount: number, inclusions?: string[]) => Promise<boolean>;
-  restoreBookingInventory: (bookingId: string | number, bookingName?: string) => Promise<boolean>;
+  restoreBookingInventory: (bookingId: string | number, bookingName?: string, reason?: string) => Promise<boolean>;
+  reconcileCompletedEvents: (bookingsList?: any[]) => Promise<number>;
+  completeBookingAndReturnInventory: (bookingId: string | number, bookingName?: string) => Promise<boolean>;
   isBookingDeducted: (bookingId: string | number) => boolean;
   getAllocatedStock: (itemId: string | number) => number;
   recordStockMovement: (movement: Omit<StockMovement, 'id' | 'timestamp'>) => void;
@@ -95,6 +97,47 @@ export const getStatus = (stock: number, minStock: number): 'Healthy' | 'Low Sto
   if (stock <= minStock * 0.5) return 'Critical';
   if (stock <= minStock) return 'Low Stock';
   return 'Healthy';
+};
+
+/**
+ * Checks if a booking's event has concluded.
+ * Returns true if:
+ * 1. Event date is in the past (before today).
+ * 2. Event date is today and the event start time plus estimated event duration (4-5 hours) has elapsed,
+ *    or if the date is today and standard catering hours have completed.
+ */
+export const isBookingEventDone = (eventDateStr?: string, eventTimeStr?: string): boolean => {
+  if (!eventDateStr || !eventDateStr.trim()) return false;
+
+  try {
+    const now = new Date();
+
+    // Parse YYYY-MM-DD or standard ISO date
+    const dateParts = eventDateStr.split('-').map(Number);
+    if (dateParts.length < 3 || isNaN(dateParts[0]) || isNaN(dateParts[1]) || isNaN(dateParts[2])) {
+      const parsed = new Date(eventDateStr);
+      if (isNaN(parsed.getTime())) return false;
+      return now.getTime() > parsed.getTime();
+    }
+
+    const [year, month, day] = dateParts;
+
+    let eventEndTime: Date;
+    if (eventTimeStr && eventTimeStr.trim()) {
+      const timeParts = eventTimeStr.split(':').map(Number);
+      const hours = isNaN(timeParts[0]) ? 0 : timeParts[0];
+      const minutes = isNaN(timeParts[1]) ? 0 : timeParts[1];
+      // Assume catering event concludes 5 hours after event start time
+      eventEndTime = new Date(year, month - 1, day, hours + 5, minutes);
+    } else {
+      // Default to end of event day (23:59:59)
+      eventEndTime = new Date(year, month - 1, day, 23, 59, 59);
+    }
+
+    return now.getTime() >= eventEndTime.getTime();
+  } catch (e) {
+    return false;
+  }
 };
 
 /**
@@ -154,49 +197,95 @@ export const deriveDynamicPackageRules = (
       return;
     }
 
-    // 3. Dining Tables, Tablecloths, Centerpieces, Napkins
-    if (
-      lowerName.includes('dining table') ||
-      lowerName.includes('round table') ||
-      lowerName.includes('tablecloth') ||
-      lowerName.includes('centerpiece') ||
-      lowerName.includes('napkin')
-    ) {
-      const isPerGuest = lowerName.includes('napkin');
-      dynamicRules.push({
-        itemName: item.name,
-        category: cat,
-        type: 'per_pax',
-        ratio: isPerGuest ? 1.0 : 0.1,
-        unit: item.unit || 'pcs',
-      });
+    // 3. Tables (Dining tables -> 1 per 8-10 pax; Buffet/Cake/Gift tables -> fixed count)
+    if (lowerName.includes('table')) {
+      if (lowerName.includes('buffet')) {
+        dynamicRules.push({
+          itemName: item.name,
+          category: cat,
+          type: 'fixed',
+          fixedCount: 2,
+          unit: item.unit || 'pcs',
+        });
+      } else if (
+        lowerName.includes('cake') ||
+        lowerName.includes('gift') ||
+        lowerName.includes('registration')
+      ) {
+        dynamicRules.push({
+          itemName: item.name,
+          category: cat,
+          type: 'fixed',
+          fixedCount: 1,
+          unit: item.unit || 'pcs',
+        });
+      } else {
+        // Round/Dining Guest Tables -> 1 per 10 guests
+        dynamicRules.push({
+          itemName: item.name,
+          category: cat,
+          type: 'per_pax',
+          ratio: 0.1,
+          unit: item.unit || 'pcs',
+        });
+      }
       return;
     }
 
-    // 4. Inclusions Match: If the item matches an inclusion in the package
-    const matchesInclusion = inclusionStrings.some(
-      (inc) => inc.includes(lowerName) || lowerName.includes(inc)
-    );
-    if (matchesInclusion) {
+    // 4. Linen & Styling (Tablecloths -> 1 per 10 pax; Napkins -> 1 per guest; Table Runners -> 1 per 10 pax)
+    if (cat === 'Linen & Styling' || lowerName.includes('linen') || lowerName.includes('cloth')) {
+      if (lowerName.includes('napkin')) {
+        dynamicRules.push({
+          itemName: item.name,
+          category: cat,
+          type: 'per_pax',
+          ratio: 1.0,
+          unit: item.unit || 'pcs',
+        });
+      } else if (lowerName.includes('runner') || lowerName.includes('tablecloth') || lowerName.includes('cover')) {
+        dynamicRules.push({
+          itemName: item.name,
+          category: cat,
+          type: 'per_pax',
+          ratio: 0.1,
+          unit: item.unit || 'pcs',
+        });
+      } else {
+        dynamicRules.push({
+          itemName: item.name,
+          category: cat,
+          type: 'fixed',
+          fixedCount: 2,
+          unit: item.unit || 'pcs',
+        });
+      }
+      return;
+    }
+
+    // 5. Chafing Dishes & Food Warmers -> Fixed 4-6 units per event
+    if (
+      lowerName.includes('chafing') ||
+      lowerName.includes('warmer') ||
+      lowerName.includes('roll top')
+    ) {
       dynamicRules.push({
         itemName: item.name,
         category: cat,
         type: 'fixed',
-        fixedCount: lowerName.includes('buffet') ? 2 : 1,
+        fixedCount: 5,
         unit: item.unit || 'pcs',
       });
       return;
     }
 
-    // 5. Standard Essential Event Equipment (Buffet tables, Sound, Lights, Staging, Backdrops)
+    // 6. Audio/Visual, Lights, Background Props, Centerpieces
     if (
-      lowerName.includes('buffet') ||
       lowerName.includes('sound') ||
+      lowerName.includes('speaker') ||
+      lowerName.includes('mic') ||
       lowerName.includes('light') ||
-      lowerName.includes('stage') ||
-      lowerName.includes('backdrop') ||
       lowerName.includes('arch') ||
-      lowerName.includes('cord') ||
+      lowerName.includes('backdrop') ||
       lowerName.includes('skirt') ||
       lowerName.includes('projector') ||
       lowerName.includes('cake stand')
@@ -332,46 +421,20 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const recordStockMovement = (movementData: Omit<StockMovement, 'id' | 'timestamp'>) => {
+  const recordStockMovement = (movement: Omit<StockMovement, 'id' | 'timestamp'>) => {
     const newMovement: StockMovement = {
-      ...movementData,
-      id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-      timestamp: new Date().toISOString(),
+      ...movement,
+      id: `mov-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      timestamp: new Date().toISOString()
     };
-    setStockMovements(prev => [newMovement, ...prev]);
+    setStockMovements(prev => [newMovement, ...prev.slice(0, 199)]);
   };
 
-  const getPackageRules = (packageName: string, inclusions?: string[]): PackageEquipmentRule[] => {
-    // 1. Check custom package rules configured by admin
+  const getPackageRules = (packageName: string): PackageEquipmentRule[] => {
     if (customPackageRules[packageName] && customPackageRules[packageName].length > 0) {
       return customPackageRules[packageName];
     }
-    // Match by substring/case
-    const key = Object.keys(customPackageRules).find(
-      (k) =>
-        k.toLowerCase() === packageName.toLowerCase() ||
-        packageName.toLowerCase().includes(k.toLowerCase()) ||
-        k.toLowerCase().includes(packageName.toLowerCase())
-    );
-    if (key && customPackageRules[key] && customPackageRules[key].length > 0) {
-      return customPackageRules[key];
-    }
-
-    // 2. Automatically derive dynamically from live warehouse items
-    const dynamic = deriveDynamicPackageRules(items, inclusions);
-    if (dynamic.length > 0) {
-      return dynamic;
-    }
-
-    // 3. Fallback to active items if still loading
-    return items.map((i) => ({
-      itemName: i.name,
-      category: i.category,
-      type: i.category === 'Tableware' || i.name.toLowerCase().includes('chair') ? 'per_pax' : 'fixed',
-      ratio: i.category === 'Tableware' || i.name.toLowerCase().includes('chair') ? 1.0 : (i.name.toLowerCase().includes('table') ? 0.1 : undefined),
-      fixedCount: i.category === 'Tableware' || i.name.toLowerCase().includes('chair') ? undefined : 1,
-      unit: i.unit || 'pcs',
-    }));
+    return deriveDynamicPackageRules(items);
   };
 
   const savePackageRules = (packageName: string, rules: PackageEquipmentRule[]) => {
@@ -381,80 +444,35 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     }));
   };
 
-  /**
-   * Calculates required inventory items dynamically based on package and guest count.
-   */
   const calculatePackageEquipment = (
     packageName: string,
     pax: number,
     inclusions?: string[]
   ): EquipmentRequirement[] => {
-    const rules = getPackageRules(packageName, inclusions);
-    const guestCount = Math.max(1, pax || 50);
+    const rules = getPackageRules(packageName);
+    const calculated: EquipmentRequirement[] = [];
 
-    const calculated: EquipmentRequirement[] = rules.map(rule => {
-      const quantity = rule.type === 'per_pax'
-        ? Math.ceil((rule.ratio || 1) * guestCount)
-        : (rule.fixedCount || 1);
+    for (const rule of rules) {
+      let qty = 0;
+      if (rule.type === 'per_pax') {
+        const ratio = rule.ratio || 1.0;
+        qty = Math.ceil(pax * ratio);
+      } else {
+        qty = rule.fixedCount || 1;
+      }
 
-      const matchedItem = items.find(i => 
-        i.status !== 'Archived' && 
-        (i.name.toLowerCase() === rule.itemName.toLowerCase() ||
-         i.name.toLowerCase().includes(rule.itemName.toLowerCase()) ||
-         rule.itemName.toLowerCase().includes(i.name.toLowerCase()))
-      );
-
-      return {
-        itemName: matchedItem ? matchedItem.name : rule.itemName,
-        category: matchedItem ? matchedItem.category : rule.category,
-        quantity,
-        unit: matchedItem ? matchedItem.unit : rule.unit,
-        type: rule.type,
-        matchedItemId: matchedItem?.id,
-        currentStock: matchedItem ? matchedItem.stock : 0,
-        isAvailable: matchedItem ? matchedItem.stock >= quantity : false,
-      };
-    });
-
-    // If extra inclusions are passed, dynamically ensure inclusion equipment is covered
-    if (inclusions && inclusions.length > 0) {
-      inclusions.forEach((inc) => {
-        const lowerInc = inc.toLowerCase();
-        const matchingInventoryItem = items.find(
-          (i) =>
-            i.status !== 'Archived' &&
-            (lowerInc.includes(i.name.toLowerCase()) ||
-              i.name.toLowerCase().includes(lowerInc))
-        );
-
-        if (
-          matchingInventoryItem &&
-          !calculated.some(
-            (c) =>
-              c.matchedItemId === matchingInventoryItem.id ||
-              c.itemName.toLowerCase() === matchingInventoryItem.name.toLowerCase()
-          )
-        ) {
-          calculated.push({
-            itemName: matchingInventoryItem.name,
-            category: matchingInventoryItem.category,
-            quantity: 1,
-            unit: matchingInventoryItem.unit,
-            type: 'fixed',
-            matchedItemId: matchingInventoryItem.id,
-            currentStock: matchingInventoryItem.stock,
-            isAvailable: matchingInventoryItem.stock >= 1,
-          });
-        }
+      calculated.push({
+        itemName: rule.itemName,
+        category: rule.category,
+        quantity: Math.max(1, qty),
+        unit: rule.unit,
+        type: rule.type
       });
     }
 
     return calculated;
   };
 
-  /**
-   * Checks if there is enough inventory available for a package & pax count.
-   */
   const checkInventoryAvailability = (
     packageName: string,
     pax: number,
@@ -570,11 +588,12 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   };
 
   /**
-   * Automatically returns/restores previously deducted inventory when a booking is cancelled or archived.
+   * Automatically returns/restores previously deducted inventory when a booking is completed, cancelled, or archived.
    */
   const restoreBookingInventory = async (
     bookingId: string | number,
-    bookingName?: string
+    bookingName?: string,
+    reason?: string
   ): Promise<boolean> => {
     const record = deductionRecords.find(d => String(d.bookingId) === String(bookingId));
     if (!record) {
@@ -606,10 +625,10 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
           previousStock: prevStock,
           newStock: newStock,
           type: 'Booking Return',
-          reason: `Restored from Cancelled Booking #${bookingId} (${record.packageName})`,
+          reason: reason || `Restored from Concluded Booking #${bookingId} (${record.packageName})`,
           bookingId,
           bookingName: bookingName || record.bookingName,
-          user: 'System (Booking Engine)'
+          user: 'System (Inventory Reconciler)'
         });
       }
     }
@@ -618,6 +637,97 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     setDeductionRecords(prev => prev.filter(d => String(d.bookingId) !== String(bookingId)));
     return true;
   };
+
+  /**
+   * Automatically checks all deducted bookings and returns items to warehouse inventory
+   * if the event is done within that day or has already passed.
+   */
+  const reconcileCompletedEvents = async (bookingsList?: any[]): Promise<number> => {
+    if (!deductionRecords || deductionRecords.length === 0) return 0;
+
+    let currentBookings = bookingsList;
+    if (!currentBookings || currentBookings.length === 0) {
+      const { data } = await supabase
+        .from('bookings')
+        .select('id, status, event_date, event_time, event_location, profiles(name, full_name)');
+      currentBookings = data || [];
+    }
+
+    let restoredCount = 0;
+
+    for (const record of [...deductionRecords]) {
+      const matchedBooking = currentBookings.find((b: any) => String(b.id) === String(record.bookingId));
+      if (!matchedBooking) continue;
+
+      const eventDate = matchedBooking.event_date || matchedBooking.date;
+      const eventTime = matchedBooking.event_time || matchedBooking.time;
+      const status = matchedBooking.status;
+
+      const isDone = status === 'Completed' || (status === 'Confirmed' && isBookingEventDone(eventDate, eventTime));
+
+      if (isDone) {
+        console.log(`Event for booking #${record.bookingId} (${record.bookingName}) has concluded. Returning inventory supplies...`);
+
+        const success = await restoreBookingInventory(
+          record.bookingId,
+          record.bookingName,
+          `Event concluded on ${eventDate || 'today'} - Supplies returned to warehouse inventory`
+        );
+
+        if (success) {
+          restoredCount++;
+          // Update status in Supabase to Completed if it was Confirmed
+          if (status === 'Confirmed') {
+            await supabase
+              .from('bookings')
+              .update({ status: 'Completed' })
+              .eq('id', record.bookingId);
+          }
+        }
+      }
+    }
+
+    return restoredCount;
+  };
+
+  /**
+   * Manually marks a booking as Completed and restores all allocated inventory supplies.
+   */
+  const completeBookingAndReturnInventory = async (
+    bookingId: string | number,
+    bookingName?: string
+  ): Promise<boolean> => {
+    // 1. Update status in Supabase
+    await supabase
+      .from('bookings')
+      .update({ status: 'Completed' })
+      .eq('id', bookingId);
+
+    // 2. Restore inventory if deducted
+    if (isBookingDeducted(bookingId)) {
+      await restoreBookingInventory(
+        bookingId,
+        bookingName,
+        `Event Completed - All supplies returned to warehouse inventory (Booking #${bookingId})`
+      );
+    }
+    return true;
+  };
+
+  // Run automatic reconciliation periodically
+  useEffect(() => {
+    if (!isLoading && items.length > 0 && deductionRecords.length > 0) {
+      reconcileCompletedEvents();
+    }
+
+    const interval = setInterval(() => {
+      if (deductionRecords.length > 0) {
+        reconcileCompletedEvents();
+      }
+    }, 20000); // Check every 20 seconds
+
+    return () => clearInterval(interval);
+  }, [isLoading, items.length, deductionRecords.length]);
 
   const isBookingDeducted = (bookingId: string | number): boolean => {
     return deductionRecords.some(d => String(d.bookingId) === String(bookingId));
@@ -768,6 +878,8 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       checkInventoryAvailability,
       deductBookingInventory,
       restoreBookingInventory,
+      reconcileCompletedEvents,
+      completeBookingAndReturnInventory,
       isBookingDeducted,
       getAllocatedStock,
       recordStockMovement,

@@ -9,7 +9,7 @@ export function MetricCards() {
   const { bookings } = useBooking();
   const { activeUserCount } = useUser();
 
-  const confirmedCount = bookings.filter((b) => b.status === 'Confirmed').length;
+  const confirmedCount = bookings.filter((b) => b.status === 'Confirmed' || b.status === 'Completed').length;
   const pendingCount = bookings.filter((b) => b.status === 'Pending').length;
 
   // “Active Users” should reflect the same status used in User Management.

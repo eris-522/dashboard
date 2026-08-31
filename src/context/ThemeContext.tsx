@@ -6,84 +6,83 @@ export type AccentColor = "gold" | "emerald" | "amber" | "rose" | "indigo";
 export interface AccentOption {
   id: AccentColor;
   label: string;
+  description: string;
   lightHex: string;
   darkHex: string;
-  description: string;
 }
 
 export const ACCENT_OPTIONS: AccentOption[] = [
   {
     id: "gold",
-    label: "Signature Gold",
-    lightHex: "#a68a56",
-    darkHex: "#c4a96e",
-    description: "Classic Roxan Policarpio warm ivory & gold editorial aesthetic",
+    label: "Champagne Gold",
+    description: "Classic catering elegance and warmth",
+    lightHex: "#b89047",
+    darkHex: "#d4af37",
   },
   {
     id: "emerald",
-    label: "Sage Emerald",
-    lightHex: "#2e7d32",
-    darkHex: "#4caf50",
-    description: "Organic, fresh botanical elegance for catering & garden events",
+    label: "Royal Emerald",
+    description: "Lush botanical and garden receptions",
+    lightHex: "#059669",
+    darkHex: "#10b981",
   },
   {
     id: "amber",
-    label: "Sunset Amber",
-    lightHex: "#b45309",
+    label: "Warm Amber",
+    description: "Cozy bistro and rustic sunset events",
+    lightHex: "#d97706",
     darkHex: "#f59e0b",
-    description: "Warm, inviting rustic bronze tone with vibrant accents",
   },
   {
     id: "rose",
-    label: "Vintage Rose",
-    lightHex: "#9e2a2b",
-    darkHex: "#f472b6",
-    description: "Romantic, refined rosewood tone ideal for weddings & galas",
+    label: "Velvet Rose",
+    description: "Romantic banquets and anniversary galas",
+    lightHex: "#e11d48",
+    darkHex: "#f43f5e",
   },
   {
     id: "indigo",
     label: "Midnight Indigo",
-    lightHex: "#3949ab",
-    darkHex: "#818cf8",
-    description: "Modern, sophisticated corporate and executive atmosphere",
+    description: "Modern corporate and luxury galas",
+    lightHex: "#4f46e5",
+    darkHex: "#6366f1",
   },
 ];
 
 interface ThemeContextType {
   theme: ThemeMode;
+  themeMode: ThemeMode;
   resolvedTheme: "light" | "dark";
-  accentColor: AccentColor;
-  setTheme: (theme: ThemeMode) => void;
-  setAccentColor: (accent: AccentColor) => void;
+  setTheme: (mode: ThemeMode) => void;
+  setThemeMode: (mode: ThemeMode) => void;
   toggleTheme: () => void;
+  accentColor: AccentColor;
+  setAccentColor: (accent: AccentColor) => void;
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
-const THEME_STORAGE_KEY = "rp_admin_theme_mode";
-const ACCENT_STORAGE_KEY = "rp_admin_theme_accent";
-
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<ThemeMode>(() => {
+  const [themeMode, setThemeModeState] = useState<ThemeMode>(() => {
     try {
-      const saved = localStorage.getItem(THEME_STORAGE_KEY);
+      const saved = localStorage.getItem("theme_mode") as ThemeMode;
       if (saved === "light" || saved === "dark" || saved === "system") {
         return saved;
       }
     } catch (e) {
-      // Ignore localStorage errors
+      console.error("Failed to read theme_mode from localStorage", e);
     }
-    return "system";
+    return "light";
   });
 
   const [accentColor, setAccentColorState] = useState<AccentColor>(() => {
     try {
-      const saved = localStorage.getItem(ACCENT_STORAGE_KEY) as AccentColor;
-      if (ACCENT_OPTIONS.some((opt) => opt.id === saved)) {
+      const saved = localStorage.getItem("theme_accent") as AccentColor;
+      if (["gold", "emerald", "amber", "rose", "indigo"].includes(saved)) {
         return saved;
       }
     } catch (e) {
-      // Ignore localStorage errors
+      console.error("Failed to read theme_accent from localStorage", e);
     }
     return "gold";
   });
@@ -95,83 +94,66 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return false;
   });
 
-  // Listen to OS system color scheme changes
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
-
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    const handleChange = (e: MediaQueryListEvent) => {
-      setSystemIsDark(e.matches);
-    };
+    const handler = (e: MediaQueryListEvent) => setSystemIsDark(e.matches);
 
-    mediaQuery.addEventListener("change", handleChange);
-    return () => mediaQuery.removeEventListener("change", handleChange);
+    mediaQuery.addEventListener("change", handler);
+    return () => mediaQuery.removeEventListener("change", handler);
   }, []);
 
   const resolvedTheme: "light" | "dark" =
-    theme === "system" ? (systemIsDark ? "dark" : "light") : theme;
+    themeMode === "system" ? (systemIsDark ? "dark" : "light") : themeMode;
 
-  // Apply theme class and data attributes to HTML root element
   useEffect(() => {
     const root = document.documentElement;
-
     if (resolvedTheme === "dark") {
       root.classList.add("dark");
-      root.classList.remove("light");
     } else {
-      root.classList.add("light");
       root.classList.remove("dark");
     }
+  }, [resolvedTheme]);
 
-    root.setAttribute("data-theme", resolvedTheme);
+  useEffect(() => {
+    const root = document.documentElement;
     root.setAttribute("data-accent", accentColor);
-    root.style.colorScheme = resolvedTheme;
+  }, [accentColor]);
 
-    // Update meta color-scheme
-    let metaTag = document.querySelector('meta[name="color-scheme"]');
-    if (!metaTag) {
-      metaTag = document.createElement("meta");
-      metaTag.setAttribute("name", "color-scheme");
-      document.head.appendChild(metaTag);
-    }
-    metaTag.setAttribute("content", resolvedTheme);
-  }, [resolvedTheme, accentColor]);
-
-  const setTheme = (newTheme: ThemeMode) => {
-    setThemeState(newTheme);
+  const setThemeMode = (mode: ThemeMode) => {
+    setThemeModeState(mode);
     try {
-      localStorage.setItem(THEME_STORAGE_KEY, newTheme);
+      localStorage.setItem("theme_mode", mode);
     } catch (e) {
-      console.error("Failed to save theme to localStorage:", e);
-    }
-  };
-
-  const setAccentColor = (newAccent: AccentColor) => {
-    setAccentColorState(newAccent);
-    try {
-      localStorage.setItem(ACCENT_STORAGE_KEY, newAccent);
-    } catch (e) {
-      console.error("Failed to save accent to localStorage:", e);
+      console.error("Failed to save theme_mode", e);
     }
   };
 
   const toggleTheme = () => {
-    if (resolvedTheme === "dark") {
-      setTheme("light");
-    } else {
-      setTheme("dark");
+    const nextMode = resolvedTheme === "dark" ? "light" : "dark";
+    setThemeMode(nextMode);
+  };
+
+  const setAccentColor = (accent: AccentColor) => {
+    setAccentColorState(accent);
+    try {
+      localStorage.setItem("theme_accent", accent);
+    } catch (e) {
+      console.error("Failed to save theme_accent", e);
     }
   };
 
   return (
     <ThemeContext.Provider
       value={{
-        theme,
+        theme: themeMode,
+        themeMode,
         resolvedTheme,
-        accentColor,
-        setTheme,
-        setAccentColor,
+        setTheme: setThemeMode,
+        setThemeMode,
         toggleTheme,
+        accentColor,
+        setAccentColor,
       }}
     >
       {children}
@@ -186,4 +168,3 @@ export function useTheme() {
   }
   return context;
 }
-
