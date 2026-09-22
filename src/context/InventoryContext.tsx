@@ -661,9 +661,12 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
 
       const eventDate = matchedBooking.event_date || matchedBooking.date;
       const eventTime = matchedBooking.event_time || matchedBooking.time;
-      const status = matchedBooking.status;
+      const isFinalPaid =
+        matchedBooking.final_balance_status === 'Verified' ||
+        (typeof matchedBooking.food_allergies === 'string' &&
+          matchedBooking.food_allergies.includes('"finalBalanceStatus":"Verified"'));
 
-      const isDone = status === 'Completed' || (status === 'Confirmed' && isBookingEventDone(eventDate, eventTime));
+      const isDone = status === 'Completed' || (status === 'Confirmed' && isBookingEventDone(eventDate, eventTime) && isFinalPaid);
 
       if (isDone) {
         console.log(`Event for booking #${record.bookingId} (${record.bookingName}) has concluded. Returning inventory supplies...`);

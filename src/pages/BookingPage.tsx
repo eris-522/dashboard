@@ -189,7 +189,13 @@ export function BookingPage() {
     false,
   );
   const [confirmAction, setConfirmAction] = useState<{
-    type: "confirm" | "cancel" | "archive" | "create" | "complete";
+    type:
+      | "confirm"
+      | "cancel"
+      | "archive"
+      | "create"
+      | "complete"
+      | "verify_final_payment";
     bookingId?: string;
     bookingName: string;
   } | null>(null);
@@ -712,6 +718,10 @@ export function BookingPage() {
         details: `Manually created and confirmed a booking for ${confirmAction.bookingName}, automatically allocating warehouse inventory`,
       });
       resetNewBooking();
+    } else if (type === "verify_final_payment" && bookingId) {
+      await handleVerifyFinalBalance(bookingId);
+      setConfirmAction(null);
+      return;
     }
 
     await fetchAllData();
@@ -729,19 +739,24 @@ export function BookingPage() {
       .update({ final_balance_status: "Verified" })
       .eq("id", bookingId);
 
-    if (error && error.message.toLowerCase().includes("column")) {
-      console.warn("Direct column not present, using fallback metadata update", error.message);
-      if (targetBooking.food_allergies?.includes("__PAYMENT_METADATA__:")) {
-        try {
-          const parts = targetBooking.food_allergies.split("__PAYMENT_METADATA__:");
-          const meta = JSON.parse(parts[1]);
-          meta.finalBalanceStatus = "Verified";
-          const updated = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
-          const fb = await supabase.from("bookings").update({ food_allergies: updated }).eq("id", bookingId);
-          error = fb.error;
-        } catch (e) {}
+    // Keep metadata in sync as dual-layer fallback
+    const currentAllergies = targetBooking.food_allergies || "";
+    let updatedAllergies = currentAllergies;
+    try {
+      if (currentAllergies.includes("__PAYMENT_METADATA__:")) {
+        const parts = currentAllergies.split("__PAYMENT_METADATA__:");
+        const meta = JSON.parse(parts[1]);
+        meta.finalBalanceStatus = "Verified";
+        updatedAllergies = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+        const fb = await supabase.from("bookings").update({ food_allergies: updatedAllergies }).eq("id", bookingId);
+        if (error) error = fb.error;
+      } else if (error) {
+        const meta = { finalBalanceStatus: "Verified", status: "Verified" };
+        updatedAllergies = `${currentAllergies.trim() ? currentAllergies.trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+        const fb = await supabase.from("bookings").update({ food_allergies: updatedAllergies }).eq("id", bookingId);
+        error = fb.error;
       }
-    }
+    } catch (e) {}
 
     if (error) {
       console.error("Error verifying final balance:", error.message);
@@ -753,13 +768,14 @@ export function BookingPage() {
       action: "Verified Final Balance Payment",
       target: clientName,
       type: "Update",
-      details: `Admin confirmed and verified 15-day final balance settlement for ${clientName} (Booking #${bookingId})`,
+      details: `Admin confirmed and verified final balance settlement for ${clientName} (Booking #${bookingId})`,
     });
 
     if (selectedBooking && String(selectedBooking.id) === String(bookingId)) {
       setSelectedBooking({
         ...selectedBooking,
         final_balance_status: "Verified",
+        food_allergies: updatedAllergies,
       });
     }
 
@@ -1277,24 +1293,50 @@ export function BookingPage() {
                                 </button>
                               </>
                             )}
-                            {(booking.status || "Pending") === "Confirmed" && (
-                              <button
-                                onClick={() =>
-                                  setConfirmAction({
-                                    type: "complete",
-                                    bookingId: booking.id,
-                                    bookingName:
-                                      booking.profiles?.name ||
-                                      booking.profiles?.full_name ||
-                                      "Unknown User",
-                                  })
-                                }
-                                className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
-                                title="Mark Event Completed & Return Equipment to Inventory"
-                              >
-                                <RotateCcw className="w-4 h-4" />
-                              </button>
-                            )}
+                            {(booking.status || "Pending") === "Confirmed" && (() => {
+                              const payment = getBookingPayment(booking);
+                              const isFinalVerified = payment.final_balance_status === "Verified";
+
+                              if (!isFinalVerified) {
+                                return (
+                                  <button
+                                    onClick={() =>
+                                      setConfirmAction({
+                                        type: "verify_final_payment",
+                                        bookingId: booking.id,
+                                        bookingName:
+                                          booking.profiles?.name ||
+                                          booking.profiles?.full_name ||
+                                          "Unknown User",
+                                      })
+                                    }
+                                    className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                                    title="Confirm Final Client Payment (Required before completing event)"
+                                  >
+                                    <CheckCheck className="w-4 h-4" />
+                                  </button>
+                                );
+                              }
+
+                              return (
+                                <button
+                                  onClick={() =>
+                                    setConfirmAction({
+                                      type: "complete",
+                                      bookingId: booking.id,
+                                      bookingName:
+                                        booking.profiles?.name ||
+                                        booking.profiles?.full_name ||
+                                        "Unknown User",
+                                    })
+                                  }
+                                  className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+                                  title="Mark Event Completed & Return Equipment to Inventory"
+                                >
+                                  <RotateCcw className="w-4 h-4" />
+                                </button>
+                              );
+                            })()}
                             <button
                               onClick={() => setSelectedBooking(booking)}
                               className="p-1.5 text-natural-text-light hover:text-natural-accent hover:bg-natural-accent/5 rounded-lg transition-all"
@@ -2380,14 +2422,14 @@ export function BookingPage() {
                           )}
 
                           {/* Admin Verification Action */}
-                          {hasFinalReceipt && !isFinalVerified && (
+                          {!isFinalVerified && (
                             <button
                               type="button"
                               onClick={() => handleVerifyFinalBalance(selectedBooking.id)}
-                              className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                              className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
                             >
                               <CheckCheck className="w-3.5 h-3.5" />
-                              Verify Final Balance Payment
+                              {hasFinalReceipt ? "Verify Final Balance Payment" : "Confirm Final Payment Received"}
                             </button>
                           )}
                           {isFinalVerified && (
@@ -2617,32 +2659,81 @@ export function BookingPage() {
                   </button>
                 </>
               )}
-              {(selectedBooking.status || "Pending") === "Confirmed" && (
-                <>
-                  <button
-                    onClick={() =>
-                      setConfirmAction({
-                        type: "complete",
-                        bookingId: selectedBooking.id,
-                        bookingName:
-                          selectedBooking.profiles?.name ||
-                          selectedBooking.profiles?.full_name ||
-                          "Unknown User",
-                      })
-                    }
-                    className="flex-1 bg-emerald-600 text-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-sm flex items-center justify-center gap-1.5"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    Mark Event Done & Return Equipment
-                  </button>
-                  <button
-                    onClick={() => setSelectedBooking(null)}
-                    className="px-6 border border-natural-border text-natural-text-light hover:text-natural-text-main bg-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest transition-all"
-                  >
-                    Close
-                  </button>
-                </>
-              )}
+              {(selectedBooking.status || "Pending") === "Confirmed" && (() => {
+                const payment = getBookingPayment(selectedBooking);
+                const isFinalVerified = payment.final_balance_status === "Verified";
+                const totalBudget = calculateBudget(selectedBooking);
+                const is50Percent = payment.payment_scheme === "Standard 50%";
+                const downpaymentDue =
+                  payment.downpayment_amount > 0
+                    ? payment.downpayment_amount
+                    : Math.round(totalBudget * (is50Percent ? 0.5 : 0.2));
+                const finalBalanceAmount =
+                  payment.final_balance_amount > 0
+                    ? payment.final_balance_amount
+                    : Math.max(0, totalBudget - downpaymentDue);
+
+                return (
+                  <>
+                    {!isFinalVerified ? (
+                      <div className="flex-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setConfirmAction({
+                              type: "verify_final_payment",
+                              bookingId: selectedBooking.id,
+                              bookingName:
+                                selectedBooking.profiles?.name ||
+                                selectedBooking.profiles?.full_name ||
+                                "Unknown User",
+                            })
+                          }
+                          className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 px-4 rounded-lg text-xs font-bold uppercase tracking-widest transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <CheckCheck className="w-4 h-4" />
+                          Confirm Final Payment (₱{finalBalanceAmount.toLocaleString()})
+                        </button>
+                        <div className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200/80 px-3 py-2 rounded-lg flex items-center gap-1.5 self-stretch sm:self-auto shrink-0 font-medium">
+                          <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                          <span>Confirm final payment first to mark complete</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                        <div className="flex items-center gap-1.5 px-3 py-2 bg-green-50 border border-green-200 text-green-700 rounded-lg text-xs font-semibold shrink-0">
+                          <CheckCircle2 className="w-4 h-4 text-green-600" />
+                          <span>Final Payment Confirmed</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setConfirmAction({
+                              type: "complete",
+                              bookingId: selectedBooking.id,
+                              bookingName:
+                                selectedBooking.profiles?.name ||
+                                selectedBooking.profiles?.full_name ||
+                                "Unknown User",
+                            })
+                          }
+                          className="flex-1 bg-emerald-600 text-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          Mark Event Done & Return Equipment
+                        </button>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedBooking(null)}
+                      className="px-6 border border-natural-border text-natural-text-light hover:text-natural-text-main bg-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest transition-all cursor-pointer shrink-0"
+                    >
+                      Close
+                    </button>
+                  </>
+                );
+              })()}
               {(selectedBooking.status || "Pending") !== "Pending" &&
                 (selectedBooking.status || "Pending") !== "Confirmed" && (
                   <button
@@ -2690,17 +2781,111 @@ export function BookingPage() {
                 {confirmAction.type === "create" && (
                   <Plus className="w-8 h-8 text-blue-600" />
                 )}
+                {confirmAction.type === "verify_final_payment" && (
+                  <CheckCheck className="w-8 h-8 text-blue-600" />
+                )}
               </div>
               <h3 className="text-lg font-serif font-bold text-natural-text-main mb-2 capitalize">
-                {confirmAction.type === "complete" ? "Complete Event?" : `${confirmAction.type} Booking?`}
+                {confirmAction.type === "complete"
+                  ? "Complete Event?"
+                  : confirmAction.type === "verify_final_payment"
+                    ? "Confirm Final Payment?"
+                    : `${confirmAction.type} Booking?`}
               </h3>
               <p className="text-sm text-natural-text-light mb-4">
                 {confirmAction.type === "create"
                   ? `Are you sure you want to create a new booking for ${confirmAction.bookingName}?`
                   : confirmAction.type === "complete"
                     ? `Are you sure the event for ${confirmAction.bookingName} is finished? This will return all allocated supplies to warehouse inventory.`
-                    : `Are you sure you want to ${confirmAction.type} the booking for ${confirmAction.bookingName}?`}
+                    : confirmAction.type === "verify_final_payment"
+                      ? `Confirming the final payment will record the client's balance settlement and unlock the Mark Event Complete action for ${confirmAction.bookingName}.`
+                      : `Are you sure you want to ${confirmAction.type} the booking for ${confirmAction.bookingName}?`}
               </p>
+
+              {confirmAction.type === "verify_final_payment" && (() => {
+                const targetBooking = bookings.find((b) => b.id === confirmAction.bookingId);
+                const payment = targetBooking ? getBookingPayment(targetBooking) : null;
+                const totalBudget = targetBooking ? calculateBudget(targetBooking) : 0;
+                const is50Percent = payment?.payment_scheme === "Standard 50%";
+                const downpaymentDue =
+                  payment?.downpayment_amount && payment.downpayment_amount > 0
+                    ? payment.downpayment_amount
+                    : Math.round(totalBudget * (is50Percent ? 0.5 : 0.2));
+                const finalBalanceAmount =
+                  payment?.final_balance_amount && payment.final_balance_amount > 0
+                    ? payment.final_balance_amount
+                    : Math.max(0, totalBudget - downpaymentDue);
+
+                return (
+                  <div className="space-y-3 mb-5">
+                    <div className="p-3.5 bg-blue-50/90 border border-blue-200/90 rounded-xl text-left space-y-2">
+                      <div className="flex items-center justify-between text-blue-900 font-bold text-xs">
+                        <div className="flex items-center gap-1.5">
+                          <CheckCheck className="w-4 h-4 text-blue-600" />
+                          <span>Final Balance Settlement</span>
+                        </div>
+                        <span className="font-mono text-blue-800 font-bold text-sm">
+                          ₱{finalBalanceAmount.toLocaleString()}
+                        </span>
+                      </div>
+
+                      <div className="text-[11px] text-blue-950/80 space-y-1">
+                        <div className="flex justify-between">
+                          <span className="text-natural-text-light">Payment Scheme:</span>
+                          <span className="font-semibold text-natural-text-main">
+                            {payment?.payment_scheme || "Standard 50%"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-natural-text-light">Payment Method:</span>
+                          <span className="font-semibold text-natural-text-main">
+                            {payment?.final_balance_method || "Manual / In-Person"}
+                          </span>
+                        </div>
+                        {payment?.final_balance_reference && (
+                          <div className="flex justify-between">
+                            <span className="text-natural-text-light">Reference:</span>
+                            <span className="font-mono font-bold text-natural-accent">
+                              {payment.final_balance_reference}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {payment?.final_balance_receipt && (
+                        <div className="pt-2 border-t border-blue-200/70 flex items-center justify-between">
+                          <span className="text-[10px] text-natural-text-light">
+                            Receipt attached by client
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setViewingReceipt({
+                                url: payment.final_balance_receipt,
+                                bookingName: confirmAction.bookingName,
+                                ref: payment.final_balance_reference,
+                                method: payment.final_balance_method,
+                                amount: finalBalanceAmount,
+                                title: "15-Day Final Balance Receipt",
+                              })
+                            }
+                            className="px-2 py-1 bg-blue-600 text-white text-[10px] font-bold uppercase tracking-wider rounded hover:bg-blue-700 transition-all flex items-center gap-1 cursor-pointer"
+                          >
+                            <Eye className="w-3 h-3" /> Inspect Slip
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="p-2.5 bg-emerald-50 border border-emerald-200/80 rounded-lg text-left text-[11px] text-emerald-900 flex items-start gap-2">
+                      <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                      <span>
+                        Confirming will verify the client's final balance and immediately reveal the <strong>Mark Event Done & Return Equipment</strong> button.
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {confirmAction.type === "complete" && (
                 <div className="mb-5 p-3.5 bg-emerald-50/80 border border-emerald-200/90 rounded-xl text-left space-y-1.5">
@@ -2863,16 +3048,18 @@ export function BookingPage() {
                 <button
                   onClick={handleConfirmAction}
                   className={cn(
-                    "w-full py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest text-white transition-all shadow-sm",
+                    "w-full py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest text-white transition-all shadow-sm cursor-pointer",
                     confirmAction.type === "confirm"
                       ? "bg-green-600 hover:bg-green-700"
                       : confirmAction.type === "complete"
                         ? "bg-emerald-600 hover:bg-emerald-700"
-                        : confirmAction.type === "cancel"
-                          ? "bg-orange-600 hover:bg-orange-700"
-                          : confirmAction.type === "archive"
-                            ? "bg-gray-600 hover:bg-gray-700"
-                            : "bg-blue-600 hover:bg-blue-700",
+                        : confirmAction.type === "verify_final_payment"
+                          ? "bg-blue-600 hover:bg-blue-700"
+                          : confirmAction.type === "cancel"
+                            ? "bg-orange-600 hover:bg-orange-700"
+                            : confirmAction.type === "archive"
+                              ? "bg-gray-600 hover:bg-gray-700"
+                              : "bg-blue-600 hover:bg-blue-700",
                   )}
                 >
                   Yes,{" "}
@@ -2880,7 +3067,9 @@ export function BookingPage() {
                     ? "Create"
                     : confirmAction.type === "complete"
                       ? "Complete & Return Supplies"
-                      : confirmAction.type}
+                      : confirmAction.type === "verify_final_payment"
+                        ? "Confirm Final Payment"
+                        : confirmAction.type}
                 </button>
                 <button
                   onClick={() => setConfirmAction(null)}
