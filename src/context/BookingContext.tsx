@@ -40,6 +40,19 @@ export interface Booking {
     | "Rejected"
     | "Archived";
   cancellation_reason?: string;
+  downpayment_amount?: number;
+  payment_method?: string;
+  payment_status?: string;
+  receipt_url?: string;
+  reference_number?: string;
+  terms_accepted?: boolean;
+  payment_scheme?: string;
+  final_balance_amount?: number;
+  final_balance_status?: string;
+  final_balance_method?: string;
+  final_balance_reference?: string;
+  final_balance_receipt?: string;
+  installment_schedule?: any;
   created_at?: string;
   updated_at?: string;
 }
@@ -116,53 +129,108 @@ export function BookingProvider({ children }: { children: ReactNode }) {
         setBookings([]);
       } else {
         // Transform database rows to Booking interface
-        const transformedBookings = (bData || []).map((booking: any) => ({
-          id: booking.id,
-          customerName:
-            booking.profiles?.name ||
-            booking.profiles?.full_name ||
-            "Unknown User",
-          email: booking.profiles?.email || "",
-          phone:
-            booking.profiles?.phone_number || booking.profiles?.phone || "",
-          eventType: booking.event_type || "",
-          package: booking.packages?.name || "",
-          date: booking.event_date || "",
-          time: booking.event_time || "",
-          guestCount: booking.guest_count || 0,
-          additionalPax: booking.additional_pax || 0,
-          venueName: booking.event_location?.split(" - ")[0] || "",
-          venueAddress: booking.event_location?.split(" - ")[1] || "",
-          menu: booking.selected_menu_items || [],
-          additionalServices: booking.selected_add_ons || [],
-          foodAllergies: booking.food_allergies || "",
-          budget: (() => {
-            const basePrice =
-              parseFloat(
-                String(booking.packages?.price || "0").replace(
-                  /[^0-9.-]+/g,
-                  "",
-                ),
-              ) || 0;
-            const addPrice =
-              parseFloat(
-                String(booking.packages?.additional_pax_price || "0").replace(
-                  /[^0-9.-]+/g,
-                  "",
-                ),
-              ) || 0;
-            const extraPax = booking.additional_pax || 0;
-            return basePrice + addPrice * extraPax;
-          })(),
-          status: booking.status || "Pending",
-          cancellation_reason:
-            booking.cancellation_reason ||
-            booking.cancel_reason ||
-            booking.reason ||
-            "",
-          created_at: booking.created_at,
-          updated_at: booking.updated_at,
-        }));
+        const transformedBookings = (bData || []).map((booking: any) => {
+          let paymentMethod = booking.payment_method || "";
+          let downpaymentAmount = Number(booking.downpayment_amount) || 0;
+          let paymentStatus = booking.payment_status || "Pending Verification";
+          let receiptUrl = booking.receipt_url || "";
+          let referenceNumber = booking.reference_number || "";
+          let termsAccepted = Boolean(booking.terms_accepted);
+          let paymentScheme = booking.payment_scheme || "";
+          let finalBalanceAmount = Number(booking.final_balance_amount) || 0;
+          let finalBalanceStatus = booking.final_balance_status || "Unpaid";
+          let finalBalanceMethod = booking.final_balance_method || "";
+          let finalBalanceReference = booking.final_balance_reference || "";
+          let finalBalanceReceipt = booking.final_balance_receipt || "";
+          let installmentSchedule = booking.installment_schedule || null;
+
+          // Fallback extraction if embedded in food_allergies
+          if (typeof booking.food_allergies === "string" && booking.food_allergies.includes("__PAYMENT_METADATA__:")) {
+            try {
+              const raw = booking.food_allergies.split("__PAYMENT_METADATA__:")[1];
+              const parsed = JSON.parse(raw);
+              if (!paymentMethod) paymentMethod = parsed.method || "";
+              if (!downpaymentAmount) downpaymentAmount = Number(parsed.downpayment) || 0;
+              if (!paymentStatus || paymentStatus === "Pending Verification") paymentStatus = parsed.status || "Pending Verification";
+              if (!receiptUrl) receiptUrl = parsed.receipt || "";
+              if (!referenceNumber) referenceNumber = parsed.ref || "";
+              if (!termsAccepted) termsAccepted = Boolean(parsed.termsAccepted);
+              if (!paymentScheme) paymentScheme = parsed.scheme || "";
+              if (!finalBalanceAmount) finalBalanceAmount = Number(parsed.balance) || 0;
+              if (!finalBalanceStatus || finalBalanceStatus === "Unpaid") finalBalanceStatus = parsed.finalBalanceStatus || "Unpaid";
+              if (!finalBalanceMethod) finalBalanceMethod = parsed.finalBalanceMethod || "";
+              if (!finalBalanceReference) finalBalanceReference = parsed.finalBalanceRef || "";
+              if (!finalBalanceReceipt) finalBalanceReceipt = parsed.finalBalanceReceipt || "";
+              if (!installmentSchedule) installmentSchedule = parsed.installments || null;
+            } catch (e) {}
+          }
+
+          // Clean food allergies string if fallback was used
+          const cleanFoodAllergies = typeof booking.food_allergies === "string" && booking.food_allergies.includes("__PAYMENT_METADATA__:")
+            ? booking.food_allergies.split("__PAYMENT_METADATA__:")[0].trim()
+            : (booking.food_allergies || "");
+
+          return {
+            id: booking.id,
+            customerName:
+              booking.profiles?.name ||
+              booking.profiles?.full_name ||
+              "Unknown User",
+            email: booking.profiles?.email || "",
+            phone:
+              booking.profiles?.phone_number || booking.profiles?.phone || "",
+            eventType: booking.event_type || "",
+            package: booking.packages?.name || "",
+            date: booking.event_date || "",
+            time: booking.event_time || "",
+            guestCount: booking.guest_count || 0,
+            additionalPax: booking.additional_pax || 0,
+            venueName: booking.event_location?.split(" - ")[0] || "",
+            venueAddress: booking.event_location?.split(" - ")[1] || "",
+            menu: booking.selected_menu_items || [],
+            additionalServices: booking.selected_add_ons || [],
+            foodAllergies: cleanFoodAllergies,
+            budget: (() => {
+              const basePrice =
+                parseFloat(
+                  String(booking.packages?.price || "0").replace(
+                    /[^0-9.-]+/g,
+                    "",
+                  ),
+                ) || 0;
+              const addPrice =
+                parseFloat(
+                  String(booking.packages?.additional_pax_price || "0").replace(
+                    /[^0-9.-]+/g,
+                    "",
+                  ),
+                ) || 0;
+              const extraPax = booking.additional_pax || 0;
+              return basePrice + addPrice * extraPax;
+            })(),
+            status: booking.status || "Pending",
+            downpayment_amount: downpaymentAmount,
+            payment_method: paymentMethod,
+            payment_status: paymentStatus,
+            receipt_url: receiptUrl,
+            reference_number: referenceNumber,
+            terms_accepted: termsAccepted,
+            payment_scheme: paymentScheme,
+            final_balance_amount: finalBalanceAmount,
+            final_balance_status: finalBalanceStatus,
+            final_balance_method: finalBalanceMethod,
+            final_balance_reference: finalBalanceReference,
+            final_balance_receipt: finalBalanceReceipt,
+            installment_schedule: installmentSchedule,
+            cancellation_reason:
+              booking.cancellation_reason ||
+              booking.cancel_reason ||
+              booking.reason ||
+              "",
+            created_at: booking.created_at,
+            updated_at: booking.updated_at,
+          };
+        });
         setBookings(transformedBookings);
         setError(null);
       }

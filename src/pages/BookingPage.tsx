@@ -25,6 +25,10 @@ import {
   RotateCcw,
   CheckCheck,
   PackageCheck,
+  Eye,
+  Receipt,
+  ShieldCheck,
+  FileText,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { EventCalendar } from "../components/EventCalendar";
@@ -46,6 +50,77 @@ interface SortConfig {
   field: SortField;
   order: SortOrder;
 }
+
+export interface BookingPaymentInfo {
+  payment_scheme: string;
+  downpayment_amount: number;
+  payment_method: string;
+  payment_status: string;
+  receipt_url: string;
+  reference_number: string;
+  terms_accepted: boolean;
+  final_balance_amount: number;
+  final_balance_status: string;
+  final_balance_method: string;
+  final_balance_reference: string;
+  final_balance_receipt: string;
+  installment_schedule: any[] | null;
+}
+
+export const getBookingPayment = (booking: any): BookingPaymentInfo => {
+  let payment_method = booking?.payment_method || "";
+  let payment_scheme = booking?.payment_scheme || "";
+  let downpayment_amount = Number(booking?.downpayment_amount) || 0;
+  let payment_status = booking?.payment_status || "Pending Verification";
+  let receipt_url = booking?.receipt_url || "";
+  let reference_number = booking?.reference_number || "";
+  let terms_accepted = Boolean(booking?.terms_accepted);
+  let final_balance_amount = Number(booking?.final_balance_amount) || 0;
+  let final_balance_status = booking?.final_balance_status || "Unpaid";
+  let final_balance_method = booking?.final_balance_method || "";
+  let final_balance_reference = booking?.final_balance_reference || "";
+  let final_balance_receipt = booking?.final_balance_receipt || "";
+  let installment_schedule = booking?.installment_schedule || null;
+
+  if (
+    typeof booking?.food_allergies === "string" &&
+    booking.food_allergies.includes("__PAYMENT_METADATA__:")
+  ) {
+    try {
+      const raw = booking.food_allergies.split("__PAYMENT_METADATA__:")[1];
+      const parsed = JSON.parse(raw);
+      if (!payment_method) payment_method = parsed.method || "";
+      if (!payment_scheme) payment_scheme = parsed.scheme || "";
+      if (!downpayment_amount) downpayment_amount = Number(parsed.downpayment) || 0;
+      if (!payment_status || payment_status === "Pending Verification") payment_status = parsed.status || "Pending Verification";
+      if (!receipt_url) receipt_url = parsed.receipt || "";
+      if (!reference_number) reference_number = parsed.ref || "";
+      if (!terms_accepted) terms_accepted = Boolean(parsed.termsAccepted);
+      if (!final_balance_amount) final_balance_amount = Number(parsed.balance) || 0;
+      if (!final_balance_status || final_balance_status === "Unpaid") final_balance_status = parsed.finalBalanceStatus || "Unpaid";
+      if (!final_balance_method) final_balance_method = parsed.finalBalanceMethod || "";
+      if (!final_balance_reference) final_balance_reference = parsed.finalBalanceRef || "";
+      if (!final_balance_receipt) final_balance_receipt = parsed.finalBalanceReceipt || "";
+      if (!installment_schedule) installment_schedule = parsed.installments || null;
+    } catch (e) {}
+  }
+
+  return {
+    payment_scheme: payment_scheme || "Standard 50%",
+    downpayment_amount,
+    payment_method,
+    payment_status,
+    receipt_url,
+    reference_number,
+    terms_accepted,
+    final_balance_amount,
+    final_balance_status,
+    final_balance_method,
+    final_balance_reference,
+    final_balance_receipt,
+    installment_schedule,
+  };
+};
 
 const formatEventDate = (dateStr?: string) => {
   if (!dateStr) return "N/A";
@@ -99,6 +174,14 @@ export function BookingPage() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState<any | null>(null);
+  const [viewingReceipt, setViewingReceipt] = useState<{
+    url: string;
+    bookingName: string;
+    ref?: string;
+    method?: string;
+    amount?: number;
+    title?: string;
+  } | null>(null);
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordError, setPasswordError] = useState<string | boolean>(false);
   const [cancelReason, setCancelReason] = useState("");
@@ -304,10 +387,25 @@ export function BookingPage() {
         (booking.event_location || "").toLowerCase().includes(query);
 
       const currentStatus = booking.status || "Pending";
-      const matchesStatus =
-        statusFilter === "All Status"
-          ? currentStatus !== "Archived" && currentStatus !== "Cancelled"
-          : currentStatus === statusFilter;
+      let matchesStatus = false;
+      if (statusFilter === "All Status") {
+        matchesStatus = currentStatus !== "Archived" && currentStatus !== "Cancelled";
+      } else if (statusFilter === "15-Day Billing Due") {
+        if (currentStatus === "Cancelled" || currentStatus === "Archived") {
+          matchesStatus = false;
+        } else {
+          const eventDateStr = booking.date || booking.event_date;
+          const eventDate = new Date(eventDateStr);
+          if (!isNaN(eventDate.getTime())) {
+            const diffDays = Math.ceil((eventDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+            const payment = getBookingPayment(booking);
+            // Booking occurring within next 30 days whose balance is not yet verified
+            matchesStatus = diffDays >= 0 && diffDays <= 30 && payment.final_balance_status !== "Verified";
+          }
+        }
+      } else {
+        matchesStatus = currentStatus === statusFilter;
+      }
 
       return matchesSearch && matchesStatus;
     });
@@ -422,10 +520,31 @@ export function BookingPage() {
       const pkgName = targetBooking?.packages?.name || (packages.find(p => p.id === targetBooking?.package_id)?.name) || targetBooking?.package || packages[0]?.name || "Event Package";
       const totalPax = (Number(targetBooking?.guest_count) || 50) + (Number(targetBooking?.additional_pax) || 0);
 
-      const { error: updateErr } = await supabase
+      // Attempt to update with payment_status: "Verified"
+      let { error: updateErr } = await supabase
         .from("bookings")
-        .update({ status: "Confirmed" })
+        .update({ status: "Confirmed", payment_status: "Verified" })
         .eq("id", bookingId);
+
+      if (updateErr) {
+        // Fallback if payment_status column does not exist yet
+        const { error: fallbackErr } = await supabase
+          .from("bookings")
+          .update({ status: "Confirmed" })
+          .eq("id", bookingId);
+        updateErr = fallbackErr;
+
+        // Also update fallback metadata in food_allergies if present
+        if (!fallbackErr && targetBooking?.food_allergies?.includes("__PAYMENT_METADATA__:")) {
+          try {
+            const parts = targetBooking.food_allergies.split("__PAYMENT_METADATA__:");
+            const meta = JSON.parse(parts[1]);
+            meta.status = "Verified";
+            const updatedAllergies = `${parts[0]}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+            await supabase.from("bookings").update({ food_allergies: updatedAllergies }).eq("id", bookingId);
+          } catch (e) {}
+        }
+      }
 
       if (updateErr) {
         console.error("Error confirming booking:", updateErr.message);
@@ -449,6 +568,15 @@ export function BookingPage() {
         details: `Approved booking for ${confirmAction.bookingName} and deducted ${totalPax} Pax equipment from inventory (${pkgName})`,
       });
     } else if (type === "cancel" && bookingId) {
+      const targetBooking = bookings.find((b) => b.id === bookingId);
+      const payment = targetBooking ? getBookingPayment(targetBooking) : null;
+      const totalBudget = targetBooking ? calculateBudget(targetBooking) : 0;
+      const downpaymentAmount =
+        payment?.downpayment_amount ||
+        (payment?.receipt_url
+          ? Math.round(totalBudget * (payment?.payment_scheme === "Standard 50%" ? 0.5 : 0.2))
+          : 0);
+
       const { error: cancelErr } = await supabase
         .from("bookings")
         .update({
@@ -479,6 +607,16 @@ export function BookingPage() {
         type: "Update",
         details: `Cancelled booking for ${confirmAction.bookingName} and restored reserved inventory supplies. Reason: ${cancelReason.trim()}`,
       });
+
+      // Automatically record retained/forfeited funds per Catering Contract Clauses 1 & 16
+      if (downpaymentAmount > 0) {
+        await logAuditAction({
+          action: "Forfeited Funds Accounting (Retained Revenue)",
+          target: confirmAction.bookingName,
+          type: "System",
+          details: `Booking #${bookingId} cancelled. Retained non-refundable downpayment/deposit of ₱${downpaymentAmount.toLocaleString()} as Forfeited Revenue per Catering Contract Clauses 1 & 16.`,
+        });
+      }
     } else if (type === "complete" && bookingId) {
       const { error: completeErr } = await supabase
         .from("bookings")
@@ -579,6 +717,53 @@ export function BookingPage() {
     await fetchAllData();
     setConfirmAction(null);
     setSelectedBooking(null);
+  };
+
+  const handleVerifyFinalBalance = async (bookingId: number | string) => {
+    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId));
+    if (!targetBooking) return;
+    const clientName = targetBooking.profiles?.name || targetBooking.profiles?.full_name || "Client";
+
+    let { error } = await supabase
+      .from("bookings")
+      .update({ final_balance_status: "Verified" })
+      .eq("id", bookingId);
+
+    if (error && error.message.toLowerCase().includes("column")) {
+      console.warn("Direct column not present, using fallback metadata update", error.message);
+      if (targetBooking.food_allergies?.includes("__PAYMENT_METADATA__:")) {
+        try {
+          const parts = targetBooking.food_allergies.split("__PAYMENT_METADATA__:");
+          const meta = JSON.parse(parts[1]);
+          meta.finalBalanceStatus = "Verified";
+          const updated = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+          const fb = await supabase.from("bookings").update({ food_allergies: updated }).eq("id", bookingId);
+          error = fb.error;
+        } catch (e) {}
+      }
+    }
+
+    if (error) {
+      console.error("Error verifying final balance:", error.message);
+      setFetchError(`Failed to verify final balance: ${error.message}`);
+      return;
+    }
+
+    await logAuditAction({
+      action: "Verified Final Balance Payment",
+      target: clientName,
+      type: "Update",
+      details: `Admin confirmed and verified 15-day final balance settlement for ${clientName} (Booking #${bookingId})`,
+    });
+
+    if (selectedBooking && String(selectedBooking.id) === String(bookingId)) {
+      setSelectedBooking({
+        ...selectedBooking,
+        final_balance_status: "Verified",
+      });
+    }
+
+    await fetchAllData();
   };
 
   return (
@@ -683,6 +868,7 @@ export function BookingPage() {
               <option>Confirmed</option>
               <option>Completed</option>
               <option>Pending</option>
+              <option value="15-Day Billing Due">15-Day Billing Due</option>
               <option>Cancelled</option>
               <option>Archived</option>
             </select>
@@ -789,6 +975,9 @@ export function BookingPage() {
                         <ArrowUpDown className="w-3 h-3 opacity-30" />
                       )}
                     </div>
+                  </th>
+                  <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border">
+                    Downpayment
                   </th>
                   <th
                     className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
@@ -903,6 +1092,129 @@ export function BookingPage() {
                         {booking.additional_pax > 0 &&
                           ` (+${booking.additional_pax})`}
                       </p>
+                    </td>
+                    <td className="px-6 py-5 border-b border-natural-border/50">
+                      {(() => {
+                        const payment = getBookingPayment(booking);
+                        const estBudget = calculateBudget(booking);
+                        const is50Plan = payment.payment_scheme === "Standard 50%";
+                        const downpaymentDue =
+                          payment.downpayment_amount > 0
+                            ? payment.downpayment_amount
+                            : Math.round(estBudget * (is50Plan ? 0.5 : 0.2));
+                        const isVerified =
+                          payment.payment_status === "Verified" ||
+                          (booking.status || "Pending") === "Confirmed";
+
+                        return (
+                          <div className="flex flex-col gap-1.5 min-w-[130px]">
+                            {/* Downpayment info & Scheme Badge */}
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <p className="text-xs font-bold text-natural-text-main">
+                                ₱{downpaymentDue.toLocaleString()}
+                              </p>
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-natural-bg font-bold text-natural-accent border border-natural-border/60">
+                                {is50Plan ? "50% Plan" : "20% Deposit"}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className={cn(
+                                  "text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border",
+                                  isVerified
+                                    ? "bg-green-50 text-green-700 border-green-200"
+                                    : payment.receipt_url
+                                      ? "bg-amber-50 text-amber-700 border-amber-200"
+                                      : "bg-gray-50 text-gray-500 border-gray-200",
+                                )}
+                              >
+                                {isVerified
+                                  ? "Deposit Verified"
+                                  : payment.receipt_url
+                                    ? "Review Deposit"
+                                    : "Unpaid"}
+                              </span>
+                            </div>
+
+                            {payment.receipt_url && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setViewingReceipt({
+                                    url: payment.receipt_url,
+                                    bookingName:
+                                      booking.profiles?.name ||
+                                      booking.profiles?.full_name ||
+                                      "Client",
+                                    ref: payment.reference_number,
+                                    method: payment.payment_method,
+                                    amount: downpaymentDue,
+                                    title: "Initial Security Deposit",
+                                  });
+                                }}
+                                className="inline-flex items-center gap-1 text-[10px] font-semibold text-natural-accent hover:underline cursor-pointer"
+                              >
+                                <Receipt className="w-3 h-3" />
+                                View Deposit Slip
+                              </button>
+                            )}
+
+                            {/* 15-Day Final Balance Settlement Row */}
+                            {payment.final_balance_amount > 0 && (
+                              <div className="pt-1.5 mt-0.5 border-t border-natural-border/50 flex flex-col gap-1">
+                                <div className="flex items-center justify-between gap-1 text-[10px]">
+                                  <span className="text-natural-text-light font-medium">15-Day Balance:</span>
+                                  <span className="font-bold text-natural-text-main font-serif">
+                                    ₱{payment.final_balance_amount.toLocaleString()}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <span
+                                    className={cn(
+                                      "text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border",
+                                      payment.final_balance_status === "Verified"
+                                        ? "bg-green-50 text-green-700 border-green-200"
+                                        : payment.final_balance_status === "Pending Verification"
+                                          ? "bg-amber-50 text-amber-700 border-amber-200"
+                                          : "bg-gray-100 text-gray-600 border-gray-200",
+                                    )}
+                                  >
+                                    {payment.final_balance_status === "Verified"
+                                      ? "Balance Paid"
+                                      : payment.final_balance_status === "Pending Verification"
+                                        ? "Verify Balance"
+                                        : "Balance Due"}
+                                  </span>
+                                </div>
+                                {payment.final_balance_receipt && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setViewingReceipt({
+                                        url: payment.final_balance_receipt,
+                                        bookingName:
+                                          booking.profiles?.name ||
+                                          booking.profiles?.full_name ||
+                                          "Client",
+                                        ref: payment.final_balance_reference,
+                                        method: payment.final_balance_method,
+                                        amount: payment.final_balance_amount,
+                                        title: "15-Day Final Balance Settlement",
+                                      });
+                                    }}
+                                    className="inline-flex items-center gap-1 text-[10px] font-semibold text-natural-accent hover:underline cursor-pointer"
+                                  >
+                                    <Receipt className="w-3 h-3" />
+                                    View Balance Slip
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="px-6 py-5 border-b border-natural-border/50">
                       <span
@@ -1651,19 +1963,473 @@ export function BookingPage() {
                 </div>
               </div>
 
-              {selectedBooking.food_allergies && (
-                <div className="p-4 bg-orange-50/80 border border-orange-200/60 rounded-xl flex items-start gap-3">
-                  <AlertCircle className="w-5 h-5 text-orange-600 shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-[10px] font-bold text-orange-800 uppercase tracking-widest mb-1">
-                      Food Allergies & Dietary Restrictions
-                    </p>
-                    <p className="text-sm text-orange-900 font-medium leading-relaxed">
-                      {selectedBooking.food_allergies}
-                    </p>
+              {/* Payment Scheme & Installment Ledger Section (Catering Contract Clause 1 & Clause 16) */}
+              {(() => {
+                const payment = getBookingPayment(selectedBooking);
+                const totalBudget = calculateBudget(selectedBooking);
+                const is50Percent = payment.payment_scheme === "Standard 50%";
+
+                const downpaymentDue =
+                  payment.downpayment_amount > 0
+                    ? payment.downpayment_amount
+                    : Math.round(totalBudget * (is50Percent ? 0.5 : 0.2));
+
+                const balanceDue = Math.max(0, totalBudget - downpaymentDue);
+                const finalBalanceAmount =
+                  payment.final_balance_amount > 0
+                    ? payment.final_balance_amount
+                    : balanceDue;
+
+                const isDepositVerified =
+                  payment.payment_status === "Verified" ||
+                  (selectedBooking.status || "Pending") === "Confirmed";
+
+                const isFinalVerified = payment.final_balance_status === "Verified";
+                const hasFinalReceipt = Boolean(payment.final_balance_receipt);
+
+                // 15-Day Balance Settlement Deadline Calculation
+                let deadlineStr = "N/A";
+                let daysRemaining: number | null = null;
+                if (selectedBooking.event_date) {
+                  const evDate = new Date(selectedBooking.event_date);
+                  const dl = new Date(evDate);
+                  dl.setDate(dl.getDate() - 15);
+                  deadlineStr = dl.toLocaleDateString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  });
+                  daysRemaining = Math.ceil((dl.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                }
+
+                return (
+                  <div className="p-5 bg-gradient-to-br from-natural-bg/70 via-natural-bg/30 to-amber-50/40 border border-natural-border rounded-2xl space-y-4">
+                    {/* Header */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-natural-accent/10 flex items-center justify-center text-natural-accent shrink-0">
+                          <Receipt className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h5 className="text-xs font-bold text-natural-text-main uppercase tracking-wider">
+                              Payment Scheme & Ledger
+                            </h5>
+                            <span
+                              className={cn(
+                                "text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider border",
+                                is50Percent
+                                  ? "bg-blue-50 text-blue-700 border-blue-200"
+                                  : "bg-purple-50 text-purple-700 border-purple-200"
+                              )}
+                            >
+                              {payment.payment_scheme}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-natural-text-light">
+                            Catering Agreement Clauses 1 & 16 Billing Schedule
+                          </p>
+                        </div>
+                      </div>
+
+                      <span
+                        className={cn(
+                          "text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider border flex items-center gap-1 self-start sm:self-auto",
+                          isDepositVerified
+                            ? "bg-green-50 text-green-700 border-green-200"
+                            : payment.receipt_url
+                              ? "bg-amber-50 text-amber-700 border-amber-200"
+                              : "bg-gray-100 text-gray-600 border-gray-200"
+                        )}
+                      >
+                        {isDepositVerified ? (
+                          <>
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                            Deposit Confirmed
+                          </>
+                        ) : payment.receipt_url ? (
+                          <>
+                            <AlertCircle className="w-3.5 h-3.5" />
+                            Slip Uploaded (Needs Review)
+                          </>
+                        ) : (
+                          "No Deposit Slip"
+                        )}
+                      </span>
+                    </div>
+
+                    {/* Cost Overview Grid */}
+                    <div className="grid grid-cols-3 gap-3 p-3 bg-white rounded-xl border border-natural-border/60 text-center">
+                      <div>
+                        <p className="text-[9px] font-bold uppercase tracking-widest text-natural-text-light">
+                          Total Event Cost
+                        </p>
+                        <p className="text-sm font-bold text-natural-text-main font-serif">
+                          ₱{totalBudget.toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="border-x border-natural-border/40 px-1">
+                        <p className="text-[9px] font-bold uppercase tracking-widest text-natural-accent">
+                          {is50Percent ? "50% Downpayment" : "20% Deposit"}
+                        </p>
+                        <p className="text-sm font-bold text-natural-accent font-serif">
+                          ₱{downpaymentDue.toLocaleString()}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[9px] font-bold uppercase tracking-widest text-natural-text-light">
+                          {is50Percent ? "50% Final Balance" : "Remaining Balance"}
+                        </p>
+                        <p className="text-sm font-bold text-natural-text-main font-serif">
+                          ₱{balanceDue.toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Section 1: Initial Deposit Details & Slip */}
+                    <div className="space-y-2 bg-white/70 p-3.5 rounded-xl border border-natural-border/50">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[11px] font-bold text-natural-text-main flex items-center gap-1.5 uppercase tracking-wider">
+                          <CreditCard className="w-3.5 h-3.5 text-natural-accent" />
+                          Stage 1: Date Lock Deposit ({is50Percent ? "50%" : "20%"})
+                        </p>
+                        <span
+                          className={cn(
+                            "text-[9px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider border",
+                            isDepositVerified
+                              ? "bg-green-50 text-green-700 border-green-200"
+                              : payment.receipt_url
+                                ? "bg-amber-50 text-amber-700 border-amber-200"
+                                : "bg-gray-100 text-gray-600 border-gray-200"
+                          )}
+                        >
+                          {isDepositVerified
+                            ? "Deposit Verified"
+                            : payment.receipt_url
+                              ? "Pending Review"
+                              : "Unpaid"}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs pt-1">
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between items-center text-[11px]">
+                            <span className="text-natural-text-light">Method:</span>
+                            <span className="font-semibold text-natural-text-main">
+                              {payment.payment_method || "Not selected"}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center text-[11px]">
+                            <span className="text-natural-text-light">Reference:</span>
+                            <span className="font-mono font-bold text-natural-accent">
+                              {payment.reference_number || "None provided"}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center text-[11px]">
+                            <span className="text-natural-text-light">Contract Terms:</span>
+                            <span className="font-semibold text-green-700">
+                              {payment.terms_accepted
+                                ? "✓ Signed (Clauses 1 & 16 Agreed)"
+                                : "Agreed upon Submission"}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div>
+                          {payment.receipt_url ? (
+                            <div className="flex items-center gap-2.5 bg-white p-2 rounded-lg border border-natural-border shadow-2xs justify-between">
+                              <div className="flex items-center gap-2">
+                                <img
+                                  src={payment.receipt_url}
+                                  alt="Deposit Slip"
+                                  className="w-10 h-10 object-cover rounded-md border border-natural-border cursor-pointer hover:opacity-80 transition-opacity"
+                                  onClick={() =>
+                                    setViewingReceipt({
+                                      url: payment.receipt_url,
+                                      bookingName:
+                                        selectedBooking.profiles?.name ||
+                                        selectedBooking.profiles?.full_name ||
+                                        "Client",
+                                      ref: payment.reference_number,
+                                      method: payment.payment_method,
+                                      amount: downpaymentDue,
+                                      title: `${is50Percent ? "50%" : "20%"} Reservation Deposit Slip`,
+                                    })
+                                  }
+                                />
+                                <div>
+                                  <p className="text-[10px] font-bold text-natural-text-main">
+                                    Deposit Receipt Slip
+                                  </p>
+                                  <p className="text-[9px] text-natural-text-light">
+                                    ₱{downpaymentDue.toLocaleString()}
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setViewingReceipt({
+                                    url: payment.receipt_url,
+                                    bookingName:
+                                      selectedBooking.profiles?.name ||
+                                      selectedBooking.profiles?.full_name ||
+                                      "Client",
+                                    ref: payment.reference_number,
+                                    method: payment.payment_method,
+                                    amount: downpaymentDue,
+                                    title: `${is50Percent ? "50%" : "20%"} Reservation Deposit Slip`,
+                                  })
+                                }
+                                className="px-2.5 py-1 bg-natural-accent text-white text-[10px] font-bold uppercase tracking-wider rounded-md hover:bg-natural-accent/90 transition-all flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
+                              >
+                                <Eye className="w-3 h-3" /> Inspect
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="p-2.5 bg-amber-50/50 rounded-lg border border-amber-200/50 text-center">
+                              <p className="text-[10px] text-amber-700 italic">
+                                No deposit slip uploaded yet.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Section 2: Installment Milestones (If 20% Installment Scheme) */}
+                    {!is50Percent && (
+                      <div className="space-y-2 bg-white/70 p-3.5 rounded-xl border border-purple-100">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[11px] font-bold text-purple-900 flex items-center gap-1.5 uppercase tracking-wider">
+                            <Clock className="w-3.5 h-3.5 text-purple-600" />
+                            Stage 2: Installment Breakdown Schedule
+                          </p>
+                          <span className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-200">
+                            Monthly Plan
+                          </span>
+                        </div>
+
+                        {payment.installment_schedule &&
+                        payment.installment_schedule.length > 0 ? (
+                          <div className="space-y-1.5 pt-1">
+                            {payment.installment_schedule.map((milestone: any, idx: number) => (
+                              <div
+                                key={idx}
+                                className="flex items-center justify-between text-xs p-2 bg-white rounded-lg border border-purple-100/70"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <div className="w-5 h-5 rounded-full bg-purple-100 text-purple-800 font-bold text-[10px] flex items-center justify-center shrink-0">
+                                    {idx + 1}
+                                  </div>
+                                  <div>
+                                    <p className="font-semibold text-natural-text-main text-[11px]">
+                                      {milestone.milestone}
+                                    </p>
+                                    <p className="text-[9px] text-natural-text-light">
+                                      Due: {milestone.dueDate}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <p className="font-bold text-natural-text-main font-serif text-xs">
+                                    ₱{Number(milestone.amount).toLocaleString()}
+                                  </p>
+                                  <span
+                                    className={cn(
+                                      "text-[8px] font-bold px-1.5 py-0.2 rounded uppercase",
+                                      milestone.status === "Due Now"
+                                        ? "bg-amber-100 text-amber-800"
+                                        : milestone.status === "Paid"
+                                          ? "bg-green-100 text-green-800"
+                                          : "bg-gray-100 text-gray-600"
+                                    )}
+                                  >
+                                    {milestone.status || "Scheduled"}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="p-2.5 bg-purple-50/40 rounded-lg text-xs text-purple-800 space-y-1">
+                            <p className="text-[11px] font-medium">
+                              Client opted for monthly installment distribution leading up to the 15-day final balance.
+                            </p>
+                            <p className="text-[10px] text-purple-600">
+                              Remaining balance of ₱{balanceDue.toLocaleString()} is settled in monthly milestones, concluding strictly 15 days before the event.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Section 3: 15-Day Final Balance Settlement Tracker & Verification */}
+                    <div className="space-y-3 bg-white/70 p-3.5 rounded-xl border border-natural-border/60">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                        <div>
+                          <p className="text-[11px] font-bold text-natural-text-main flex items-center gap-1.5 uppercase tracking-wider">
+                            <ShieldCheck className="w-3.5 h-3.5 text-natural-accent" />
+                            {is50Percent ? "Stage 2" : "Stage 3"}: 15-Day Final Balance Settlement
+                          </p>
+                          <p className="text-[10px] text-natural-text-light">
+                            Strictly due 15 days prior to event date ({deadlineStr})
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          {isFinalVerified ? (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-green-50 text-green-700 border border-green-200 flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3 text-green-600" /> Settled & Verified
+                            </span>
+                          ) : daysRemaining !== null && daysRemaining < 0 ? (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-red-50 text-red-700 border border-red-200 flex items-center gap-1">
+                              <AlertCircle className="w-3 h-3 text-red-600" /> Overdue by {Math.abs(daysRemaining)}d
+                            </span>
+                          ) : daysRemaining !== null && daysRemaining <= 15 ? (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1">
+                              <Clock className="w-3 h-3 text-amber-600" /> Due in {daysRemaining}d
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-gray-100 text-gray-600 border border-gray-200">
+                              {daysRemaining !== null ? `Due in ${daysRemaining}d` : "Upcoming"}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs pt-1">
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between items-center text-[11px]">
+                            <span className="text-natural-text-light">Final Balance Amount:</span>
+                            <span className="font-bold text-natural-accent font-serif text-sm">
+                              ₱{finalBalanceAmount.toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center text-[11px]">
+                            <span className="text-natural-text-light">Payment Method:</span>
+                            <span className="font-semibold text-natural-text-main">
+                              {payment.final_balance_method || "Pending submission"}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center text-[11px]">
+                            <span className="text-natural-text-light">Reference Number:</span>
+                            <span className="font-mono font-semibold text-natural-text-main">
+                              {payment.final_balance_reference || "N/A"}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          {hasFinalReceipt ? (
+                            <div className="flex items-center gap-2.5 bg-white p-2 rounded-lg border border-natural-border shadow-2xs justify-between">
+                              <div className="flex items-center gap-2">
+                                <img
+                                  src={payment.final_balance_receipt}
+                                  alt="Final Balance Slip"
+                                  className="w-10 h-10 object-cover rounded-md border border-natural-border cursor-pointer hover:opacity-80 transition-opacity"
+                                  onClick={() =>
+                                    setViewingReceipt({
+                                      url: payment.final_balance_receipt,
+                                      bookingName:
+                                        selectedBooking.profiles?.name ||
+                                        selectedBooking.profiles?.full_name ||
+                                        "Client",
+                                      ref: payment.final_balance_reference,
+                                      method: payment.final_balance_method,
+                                      amount: finalBalanceAmount,
+                                      title: "15-Day Final Balance Slip",
+                                    })
+                                  }
+                                />
+                                <div>
+                                  <p className="text-[10px] font-bold text-natural-text-main">
+                                    Final Balance Slip
+                                  </p>
+                                  <p className="text-[9px] text-natural-text-light">
+                                    ₱{finalBalanceAmount.toLocaleString()}
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setViewingReceipt({
+                                    url: payment.final_balance_receipt,
+                                    bookingName:
+                                      selectedBooking.profiles?.name ||
+                                      selectedBooking.profiles?.full_name ||
+                                      "Client",
+                                    ref: payment.final_balance_reference,
+                                    method: payment.final_balance_method,
+                                    amount: finalBalanceAmount,
+                                    title: "15-Day Final Balance Slip",
+                                  })
+                                }
+                                className="px-2.5 py-1 bg-natural-accent text-white text-[10px] font-bold uppercase tracking-wider rounded-md hover:bg-natural-accent/90 transition-all flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
+                              >
+                                <Eye className="w-3 h-3" /> Inspect
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 text-center">
+                              <p className="text-[10px] text-gray-500 italic">
+                                No final balance slip uploaded yet.
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Admin Verification Action */}
+                          {hasFinalReceipt && !isFinalVerified && (
+                            <button
+                              type="button"
+                              onClick={() => handleVerifyFinalBalance(selectedBooking.id)}
+                              className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                            >
+                              <CheckCheck className="w-3.5 h-3.5" />
+                              Verify Final Balance Payment
+                            </button>
+                          )}
+                          {isFinalVerified && (
+                            <div className="w-full py-1.5 bg-green-50 border border-green-200 text-green-700 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
+                              Final Balance Fully Settled & Confirmed
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
+
+              {(() => {
+                const cleanAllergies =
+                  typeof selectedBooking.food_allergies === "string" &&
+                  selectedBooking.food_allergies.includes(
+                    "__PAYMENT_METADATA__:",
+                  )
+                    ? selectedBooking.food_allergies
+                        .split("__PAYMENT_METADATA__:")[0]
+                        .trim()
+                    : (selectedBooking.food_allergies || "").trim();
+
+                if (!cleanAllergies) return null;
+
+                return (
+                  <div className="p-4 bg-orange-50/80 border border-orange-200/60 rounded-xl flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-orange-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-[10px] font-bold text-orange-800 uppercase tracking-widest mb-1">
+                        Food Allergies & Dietary Restrictions
+                      </p>
+                      <p className="text-sm text-orange-900 font-medium leading-relaxed">
+                        {cleanAllergies}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="space-y-4">
                 <h5 className="text-[0.65rem] font-bold text-natural-accent uppercase tracking-widest">
@@ -1950,6 +2716,10 @@ export function BookingPage() {
 
               {confirmAction.type === "confirm" && (() => {
                 const targetBooking = bookings.find((b) => b.id === confirmAction.bookingId);
+                const payment = targetBooking ? getBookingPayment(targetBooking) : null;
+                const totalBudget = targetBooking ? calculateBudget(targetBooking) : 0;
+                const downpaymentDue = payment?.downpayment_amount || Math.round(totalBudget * 0.2);
+
                 const pkgName =
                   targetBooking?.packages?.name ||
                   packages.find((p) => p.id === targetBooking?.package_id)?.name ||
@@ -1962,23 +2732,66 @@ export function BookingPage() {
                 const check = checkInventoryAvailability(pkgName, totalPax, targetBooking?.packages?.inclusions || targetBooking?.inclusions);
 
                 return (
-                  <div className="mb-5 p-3.5 bg-amber-50/80 border border-amber-200/90 rounded-xl text-left space-y-2">
-                    <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
-                      <Boxes className="w-4 h-4 text-amber-600 shrink-0" />
-                      <span>Automatic Stock Deduction</span>
-                    </div>
-                    <p className="text-[11px] text-amber-950/80 leading-relaxed">
-                      Confirming will deduct equipment for <span className="font-bold">{totalPax} Guests</span> ({pkgName}) from warehouse inventory.
-                    </p>
-                    {!check.isAvailable && (
-                      <div className="p-2 bg-red-50 border border-red-200 rounded-lg text-[10px] text-red-700 font-semibold leading-tight">
-                        ⚠️ Low stock warning:{" "}
-                        {check.requirements
-                          .filter((r) => !r.isAvailable)
-                          .map((r) => `${r.itemName} (Deficit: ${r.deficit} ${r.unit})`)
-                          .join(", ")}
+                  <div className="space-y-3 mb-5">
+                    <div className="p-3.5 bg-blue-50/80 border border-blue-200/90 rounded-xl text-left space-y-1.5">
+                      <div className="flex items-center justify-between text-blue-900 font-bold text-xs">
+                        <div className="flex items-center gap-1.5">
+                          <ShieldCheck className="w-4 h-4 text-blue-600" />
+                          <span>20% Downpayment Verification</span>
+                        </div>
+                        <span className="font-mono text-blue-700 font-bold">
+                          ₱{downpaymentDue.toLocaleString()}
+                        </span>
                       </div>
-                    )}
+                      <p className="text-[11px] text-blue-950/80 leading-relaxed">
+                        {payment?.receipt_url ? (
+                          <>
+                            Client submitted proof slip via{" "}
+                            <span className="font-semibold">
+                              {payment.payment_method || "Online"}
+                            </span>{" "}
+                            (Ref:{" "}
+                            <span className="font-mono font-semibold">
+                              {payment.reference_number || "N/A"}
+                            </span>
+                            ). Confirming marks payment as{" "}
+                            <span className="font-semibold text-green-700">
+                              Verified
+                            </span>
+                            .
+                          </>
+                        ) : (
+                          <>
+                            Confirming will verify the 20% downpayment requirement
+                            and lock in the event date for the client.
+                          </>
+                        )}
+                      </p>
+                    </div>
+
+                    <div className="p-3.5 bg-amber-50/80 border border-amber-200/90 rounded-xl text-left space-y-2">
+                      <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
+                        <Boxes className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>Automatic Stock Deduction</span>
+                      </div>
+                      <p className="text-[11px] text-amber-950/80 leading-relaxed">
+                        Confirming will deduct equipment for{" "}
+                        <span className="font-bold">{totalPax} Guests</span> (
+                        {pkgName}) from warehouse inventory.
+                      </p>
+                      {!check.isAvailable && (
+                        <div className="p-2 bg-red-50 border border-red-200 rounded-lg text-[10px] text-red-700 font-semibold leading-tight">
+                          ⚠️ Low stock warning:{" "}
+                          {check.requirements
+                            .filter((r) => !r.isAvailable)
+                            .map(
+                              (r) =>
+                                `${r.itemName} (Deficit: ${r.deficit} ${r.unit})`,
+                            )
+                            .join(", ")}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })()}
@@ -2038,8 +2851,8 @@ export function BookingPage() {
                     {passwordError && (
                       <p className="text-[10px] font-bold text-red-500 uppercase tracking-tighter pl-1">
                         {typeof passwordError === "string"
-                          ? passwordError
-                          : "Password is required to proceed."}
+                            ? passwordError
+                            : "Password is required to proceed."}
                       </p>
                     )}
                   </div>
@@ -2076,6 +2889,73 @@ export function BookingPage() {
                   Cancel
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Proof of Payment Full Inspection Modal */}
+      {viewingReceipt && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-70 p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden flex flex-col max-h-[92vh]">
+            <div className="p-4 border-b border-natural-border flex items-center justify-between bg-natural-bg/30">
+              <div className="flex items-center gap-2">
+                <Receipt className="w-5 h-5 text-natural-accent" />
+                <div>
+                  <h4 className="text-sm font-bold text-natural-text-main">
+                    {viewingReceipt.title || "Proof of Payment Receipt"}
+                  </h4>
+                  <p className="text-[10px] text-natural-text-light">
+                    Submitted by {viewingReceipt.bookingName}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setViewingReceipt(null)}
+                className="p-1 hover:bg-natural-bg rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5 text-natural-text-light" />
+              </button>
+            </div>
+
+            <div className="p-4 bg-natural-bg/10 flex-1 overflow-y-auto flex flex-col items-center justify-center min-h-[300px]">
+              <img
+                src={viewingReceipt.url}
+                alt="Proof of Payment"
+                className="max-h-[55vh] w-auto max-w-full rounded-lg shadow-md object-contain border border-natural-border bg-white"
+              />
+            </div>
+
+            <div className="p-4 bg-white border-t border-natural-border flex items-center justify-between gap-3">
+              <div className="text-left">
+                {typeof viewingReceipt.amount === "number" && (
+                  <p className="text-xs font-bold text-natural-accent">
+                    ₱{viewingReceipt.amount.toLocaleString()} {viewingReceipt.title ? `(${viewingReceipt.title})` : ""}
+                  </p>
+                )}
+                <p className="text-[10px] text-natural-text-light">
+                  Method:{" "}
+                  <span className="font-semibold text-natural-text-main">
+                    {viewingReceipt.method || "N/A"}
+                  </span>
+                  {viewingReceipt.ref && (
+                    <>
+                      {" "}
+                      • Ref:{" "}
+                      <span className="font-mono font-semibold text-natural-text-main">
+                        {viewingReceipt.ref}
+                      </span>
+                    </>
+                  )}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingReceipt(null)}
+                className="px-5 py-2 bg-natural-accent text-white rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-natural-accent/90 cursor-pointer shrink-0"
+              >
+                Close Slip
+              </button>
             </div>
           </div>
         </div>
