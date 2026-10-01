@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Globe,
   Sparkles,
@@ -37,9 +37,12 @@ import {
   Info,
   Maximize2,
   Minimize2,
+  Package,
 } from "lucide-react";
 import { cn } from "../lib/utils";
+import { supabase } from "../utils/supabase";
 import { useUser } from "../context/UserContext";
+import { ImageUploadField } from "../components/ImageUploadField";
 import {
   FullCMSData,
   DEFAULT_CMS_DATA,
@@ -50,6 +53,10 @@ import {
   FAQItem,
   ProcessStep,
   WhyUsHighlight,
+  PackageCMSItem,
+  PackagesCMS,
+  MenuCMSItem,
+  MenuCMS,
 } from "../utils/cms";
 
 const AVAILABLE_PILLAR_ICONS = [
@@ -81,13 +88,67 @@ const PRESET_HERO_IMAGES = [
   },
 ];
 
+const PRESET_PACKAGE_IMAGES = [
+  {
+    label: "Rustic Garden Wedding",
+    url: "https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=1200",
+  },
+  {
+    label: "Grand Ballroom Reception",
+    url: "https://images.unsplash.com/photo-1511578314322-379afb476865?auto=format&fit=crop&q=80&w=1200",
+  },
+  {
+    label: "Gourmet Plated Banquet",
+    url: "https://images.unsplash.com/photo-1547825407-2d060104b7f8?auto=format&fit=crop&q=80&w=1200",
+  },
+  {
+    label: "Luxury Buffet Presentation",
+    url: "https://images.unsplash.com/photo-1555244162-803834f70033?auto=format&fit=crop&q=80&w=1200",
+  },
+  {
+    label: "Modern Intimate Gathering",
+    url: "https://images.unsplash.com/photo-1414235077428-338989a2e8c0?auto=format&fit=crop&q=80&w=1200",
+  },
+  {
+    label: "Cocktail & Canapés Station",
+    url: "https://images.unsplash.com/photo-1532635241-17e820acc59f?auto=format&fit=crop&q=80&w=1200",
+  },
+];
+
+const PRESET_MENU_IMAGES = [
+  {
+    label: "Artisan Roast Beef",
+    url: "https://images.unsplash.com/photo-1544025162-d76694265947?auto=format&fit=crop&q=80&w=800",
+  },
+  {
+    label: "Pan-Seared Salmon",
+    url: "https://images.unsplash.com/photo-1467003909585-2f8a72700288?auto=format&fit=crop&q=80&w=800",
+  },
+  {
+    label: "Truffle Penne Pasta",
+    url: "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?auto=format&fit=crop&q=80&w=800",
+  },
+  {
+    label: "Gourmet Charcuterie",
+    url: "https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&q=80&w=800",
+  },
+  {
+    label: "Mango Panna Cotta",
+    url: "https://images.unsplash.com/photo-1551024709-8f23befc6f87?auto=format&fit=crop&q=80&w=800",
+  },
+  {
+    label: "Herb-Crusted Chicken",
+    url: "https://images.unsplash.com/photo-1532550907401-a500c9a57435?auto=format&fit=crop&q=80&w=800",
+  },
+];
+
 export function CMSPage() {
   const { currentUser } = useUser();
   const [activeTab, setActiveTab] = useState<
-    "hero" | "about" | "contact" | "testimonials" | "process" | "faqs"
+    "hero" | "packages" | "menu" | "about" | "contact" | "testimonials" | "process" | "faqs"
   >("hero");
   const [previewPage, setPreviewPage] = useState<
-    "hero" | "about" | "contact" | "testimonials" | "process" | "faqs"
+    "hero" | "packages" | "menu" | "about" | "contact" | "testimonials" | "process" | "faqs"
   >("hero");
   const [cmsData, setCmsData] = useState<FullCMSData>(DEFAULT_CMS_DATA);
   const [isLoading, setIsLoading] = useState(true);
@@ -109,6 +170,12 @@ export function CMSPage() {
   const [announcementForm, setAnnouncementForm] = useState(
     DEFAULT_CMS_DATA.announcement
   );
+  const [packagesForm, setPackagesForm] = useState(DEFAULT_CMS_DATA.packages);
+  const [dbPackages, setDbPackages] = useState<any[]>([]);
+  const [menuForm, setMenuForm] = useState(DEFAULT_CMS_DATA.menu);
+  const [dbMenuItems, setDbMenuItems] = useState<any[]>([]);
+  const [selectedMenuCategory, setSelectedMenuCategory] = useState("All");
+  const [menuSearchQuery, setMenuSearchQuery] = useState("");
   const [aboutForm, setAboutForm] = useState(DEFAULT_CMS_DATA.about);
   const [contactForm, setContactForm] = useState(DEFAULT_CMS_DATA.contact);
   const [testimonialsForm, setTestimonialsForm] = useState(
@@ -135,12 +202,237 @@ export function CMSPage() {
     setCmsData(data);
     setHeroForm(data.hero);
     setAnnouncementForm(data.announcement);
+    setPackagesForm(data.packages || DEFAULT_CMS_DATA.packages);
+    setMenuForm(data.menu || DEFAULT_CMS_DATA.menu);
     setAboutForm(data.about);
     setContactForm(data.contact);
     setTestimonialsForm(data.testimonials);
     setProcessForm(data.process);
     setFaqsForm(data.faqs);
+
+    // Also load live packages from Supabase packages table
+    try {
+      const { data: pkgs } = await supabase
+        .from("packages")
+        .select("*")
+        .neq("status", "Archived");
+      if (pkgs && pkgs.length > 0) {
+        setDbPackages(pkgs);
+      }
+    } catch (e) {
+      console.warn("Error fetching db packages for CMS:", e);
+    }
+
+    // Also load live menu items from Supabase menu_items table
+    try {
+      const { data: dishes } = await supabase
+        .from("menu_items")
+        .select("*")
+        .neq("status", "Archived");
+      if (dishes && dishes.length > 0) {
+        setDbMenuItems(dishes);
+      }
+    } catch (e) {
+      console.warn("Error fetching db menu items for CMS:", e);
+    }
+
     setIsLoading(false);
+  };
+
+  const displayPackages = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        price?: string;
+        pax?: string;
+        tag?: string;
+        image?: string;
+        image_url?: string;
+      }
+    >();
+
+    // 1. Default presets
+    (DEFAULT_CMS_DATA.packages.items || []).forEach((item) => {
+      map.set(item.name.toLowerCase(), { ...item });
+    });
+
+    // 2. CMS configured items
+    (packagesForm.items || []).forEach((item) => {
+      const key = item.name.toLowerCase();
+      const existing = map.get(key);
+      map.set(key, { ...existing, ...item });
+    });
+
+    // 3. Database packages from Supabase
+    dbPackages.forEach((pkg) => {
+      const key = pkg.name.toLowerCase();
+      const existing = map.get(key);
+      const customImg =
+        packagesForm.packageImages?.[pkg.id] ||
+        packagesForm.packageImages?.[pkg.name] ||
+        existing?.image ||
+        pkg.image_url ||
+        "";
+      map.set(key, {
+        id: pkg.id,
+        name: pkg.name,
+        price: pkg.price || existing?.price,
+        pax: pkg.pax || existing?.pax,
+        tag: pkg.tag || existing?.tag,
+        image: customImg,
+      });
+    });
+
+    return Array.from(map.values());
+  }, [dbPackages, packagesForm]);
+
+  const displayMenuItems = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        category: string;
+        sub_category?: string;
+        description?: string;
+        image?: string;
+        image_url?: string;
+      }
+    >();
+
+    // 1. Default presets
+    (DEFAULT_CMS_DATA.menu.items || []).forEach((item) => {
+      map.set(item.name.toLowerCase(), { ...item });
+    });
+
+    // 2. CMS configured items
+    (menuForm.items || []).forEach((item) => {
+      const key = item.name.toLowerCase();
+      const existing = map.get(key);
+      map.set(key, { ...existing, ...item });
+    });
+
+    // 3. Database menu items from Supabase
+    dbMenuItems.forEach((item) => {
+      const key = item.name.toLowerCase();
+      const existing = map.get(key);
+      const customImg =
+        menuForm.menuImages?.[item.id] ||
+        menuForm.menuImages?.[item.name] ||
+        existing?.image ||
+        item.image_url ||
+        "";
+      map.set(key, {
+        id: item.id,
+        name: item.name,
+        category: item.category || existing?.category || "Main Course",
+        sub_category: item.sub_category,
+        description:
+          item.description || existing?.description || item.sub_category || "",
+        image: customImg,
+        image_url: item.image_url,
+      });
+    });
+
+    return Array.from(map.values());
+  }, [dbMenuItems, menuForm]);
+
+  const filteredMenuItems = useMemo(() => {
+    return displayMenuItems.filter((item) => {
+      const matchesCategory =
+        selectedMenuCategory === "All" ||
+        item.category.toLowerCase() === selectedMenuCategory.toLowerCase();
+      const matchesSearch =
+        !menuSearchQuery ||
+        item.name.toLowerCase().includes(menuSearchQuery.toLowerCase()) ||
+        item.category.toLowerCase().includes(menuSearchQuery.toLowerCase()) ||
+        (item.description &&
+          item.description.toLowerCase().includes(menuSearchQuery.toLowerCase()));
+      return matchesCategory && matchesSearch;
+    });
+  }, [displayMenuItems, selectedMenuCategory, menuSearchQuery]);
+
+  const handleUpdatePackageImage = (
+    pkgId: string,
+    pkgName: string,
+    newUrl: string
+  ) => {
+    setPackagesForm((prev) => {
+      const updatedImages = {
+        ...(prev.packageImages || {}),
+        [pkgId]: newUrl,
+        [pkgName]: newUrl,
+      };
+
+      const existingIndex = (prev.items || []).findIndex(
+        (item) =>
+          item.id === pkgId ||
+          item.name.toLowerCase() === pkgName.toLowerCase()
+      );
+
+      let updatedItems = [...(prev.items || [])];
+      if (existingIndex >= 0) {
+        updatedItems[existingIndex] = {
+          ...updatedItems[existingIndex],
+          image: newUrl,
+        };
+      } else {
+        updatedItems.push({
+          id: pkgId || `pkg-${Date.now()}`,
+          name: pkgName,
+          image: newUrl,
+        });
+      }
+
+      return {
+        ...prev,
+        packageImages: updatedImages,
+        items: updatedItems,
+      };
+    });
+  };
+
+  const handleUpdateMenuImage = (
+    itemId: string,
+    itemName: string,
+    newUrl: string
+  ) => {
+    setMenuForm((prev) => {
+      const updatedImages = {
+        ...(prev.menuImages || {}),
+        [itemId]: newUrl,
+        [itemName]: newUrl,
+      };
+
+      const existingIndex = (prev.items || []).findIndex(
+        (item) =>
+          item.id === itemId ||
+          item.name.toLowerCase() === itemName.toLowerCase()
+      );
+
+      let updatedItems = [...(prev.items || [])];
+      if (existingIndex >= 0) {
+        updatedItems[existingIndex] = {
+          ...updatedItems[existingIndex],
+          image: newUrl,
+        };
+      } else {
+        updatedItems.push({
+          id: itemId || `menu-${Date.now()}`,
+          name: itemName,
+          category: "Main Course",
+          image: newUrl,
+        });
+      }
+
+      return {
+        ...prev,
+        menuImages: updatedImages,
+        items: updatedItems,
+      };
+    });
   };
 
   const handleSaveCurrentSection = async () => {
@@ -157,6 +449,40 @@ export function CMSPage() {
           hero: heroForm,
           announcement: announcementForm,
         }));
+      } else if (activeTab === "packages") {
+        await saveCMSSection("packages", packagesForm, userName);
+        try {
+          if (packagesForm.packageImages) {
+            for (const [key, imgUrl] of Object.entries(packagesForm.packageImages)) {
+              if (imgUrl) {
+                await supabase
+                  .from("packages")
+                  .update({ image_url: imgUrl })
+                  .or(`id.eq.${key},name.eq.${key}`);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("Could not sync image_url directly to packages table:", e);
+        }
+        setCmsData((prev) => ({ ...prev, packages: packagesForm }));
+      } else if (activeTab === "menu") {
+        await saveCMSSection("menu", menuForm, userName);
+        try {
+          if (menuForm.menuImages) {
+            for (const [key, imgUrl] of Object.entries(menuForm.menuImages)) {
+              if (imgUrl) {
+                await supabase
+                  .from("menu_items")
+                  .update({ image_url: imgUrl })
+                  .or(`id.eq.${key},name.eq.${key}`);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("Could not sync image_url directly to menu_items table:", e);
+        }
+        setCmsData((prev) => ({ ...prev, menu: menuForm }));
       } else if (activeTab === "about") {
         await saveCMSSection("about", aboutForm, userName);
         setCmsData((prev) => ({ ...prev, about: aboutForm }));
@@ -194,6 +520,10 @@ export function CMSPage() {
     if (activeTab === "hero") {
       setHeroForm(DEFAULT_CMS_DATA.hero);
       setAnnouncementForm(DEFAULT_CMS_DATA.announcement);
+    } else if (activeTab === "packages") {
+      setPackagesForm(DEFAULT_CMS_DATA.packages);
+    } else if (activeTab === "menu") {
+      setMenuForm(DEFAULT_CMS_DATA.menu);
     } else if (activeTab === "about") {
       setAboutForm(DEFAULT_CMS_DATA.about);
     } else if (activeTab === "contact") {
@@ -219,6 +549,18 @@ export function CMSPage() {
       label: "Hero & Banner",
       icon: Sparkles,
       desc: "Header, tagline, main hero imagery, and announcement bar",
+    },
+    {
+      id: "packages",
+      label: "Packages & Imagery",
+      icon: Package,
+      desc: "Package cover photos, collections header, and showcase styling",
+    },
+    {
+      id: "menu",
+      label: "Menu & Culinary",
+      icon: Utensils,
+      desc: "Dish presentation photos, menu categories, and selection header",
     },
     {
       id: "about",
@@ -660,72 +1002,20 @@ export function CMSPage() {
 
                 {/* Hero Background Image */}
                 <div className="pt-4 border-t border-natural-border space-y-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-natural-text-main uppercase tracking-wider">
-                      Hero Backdrop Photography
-                    </span>
-                    <span className="text-[10px] text-natural-text-light">
-                      High-resolution web landscape image recommended (1920x1080)
-                    </span>
-                  </div>
-
-                  <div className="space-y-2">
-                    <input
-                      type="url"
-                      value={heroForm.backgroundImage}
-                      onChange={(e) =>
-                        setHeroForm({
-                          ...heroForm,
-                          backgroundImage: e.target.value,
-                        })
-                      }
-                      placeholder="https://images.unsplash.com/..."
-                      className="w-full px-3.5 py-2.5 bg-natural-bg/40 border border-natural-border rounded-lg text-xs text-natural-text-main focus:outline-none focus:ring-2 focus:ring-natural-accent/20"
-                    />
-                  </div>
-
-                  {/* Preset Images Bar */}
-                  <div>
-                    <label className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest block mb-2">
-                      Or Choose from Curated Presets:
-                    </label>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      {PRESET_HERO_IMAGES.map((preset, idx) => (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={() =>
-                            setHeroForm({
-                              ...heroForm,
-                              backgroundImage: preset.url,
-                            })
-                          }
-                          className={cn(
-                            "relative aspect-video rounded-lg overflow-hidden border-2 text-left group transition-all cursor-pointer",
-                            heroForm.backgroundImage === preset.url
-                              ? "border-natural-accent ring-2 ring-natural-accent/30"
-                              : "border-natural-border hover:border-natural-accent/50 opacity-70 hover:opacity-100"
-                          )}
-                        >
-                          <img
-                            src={preset.url}
-                            alt={preset.label}
-                            className="w-full h-full object-cover"
-                          />
-                          <div className="absolute inset-0 bg-black/50 p-1.5 flex items-end">
-                            <span className="text-[9px] font-bold text-white leading-tight">
-                              {preset.label}
-                            </span>
-                          </div>
-                          {heroForm.backgroundImage === preset.url && (
-                            <div className="absolute top-1 right-1 p-0.5 bg-natural-accent rounded-full text-white">
-                              <Check className="w-3 h-3" />
-                            </div>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  <ImageUploadField
+                    label="Hero Backdrop Photography"
+                    sublabel="High-resolution web landscape image recommended (1920x1080)"
+                    value={heroForm.backgroundImage}
+                    onChange={(url) =>
+                      setHeroForm({
+                        ...heroForm,
+                        backgroundImage: url,
+                      })
+                    }
+                    presets={PRESET_HERO_IMAGES}
+                    aspectRatio="wide"
+                    placeholder="https://images.unsplash.com/..."
+                  />
 
                   {/* Live Thumbnail Preview */}
                   {heroForm.backgroundImage && (
@@ -747,6 +1037,486 @@ export function CMSPage() {
                     </div>
                   )}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* TAB: PACKAGES & IMAGERY */}
+          {/* ========================================================================= */}
+          {activeTab === "packages" && (
+            <div className="glass-card p-8 space-y-8">
+              <div className="border-b border-natural-border pb-4">
+                <div className="flex items-center gap-2">
+                  <span className="p-1 rounded bg-natural-accent/10 text-natural-accent">
+                    <Package className="w-5 h-5" />
+                  </span>
+                  <h3 className="text-lg font-serif font-bold text-natural-text-main">
+                    Catering Packages & Showcase Imagery
+                  </h3>
+                </div>
+                <p className="text-xs text-natural-text-light mt-1">
+                  Customize the packages intro narrative and assign high-resolution cover photos for each package collection. Photos can be uploaded directly from your computer, drag & dropped, or picked from curated presets.
+                </p>
+              </div>
+
+              {/* Section Header Controls */}
+              <div className="p-6 rounded-xl border border-natural-border bg-natural-bg/20 space-y-4">
+                <div className="flex items-center gap-2 border-b border-natural-border/60 pb-3">
+                  <FileText className="w-4 h-4 text-natural-accent" />
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-natural-text-main">
+                    Package Catalog Header & Subtitle
+                  </h4>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest">
+                      Header Subtitle
+                    </label>
+                    <input
+                      type="text"
+                      value={packagesForm.headerSubtitle}
+                      onChange={(e) =>
+                        setPackagesForm({
+                          ...packagesForm,
+                          headerSubtitle: e.target.value,
+                        })
+                      }
+                      placeholder="Exclusive Collections"
+                      className="w-full px-3 py-2 bg-white dark:bg-black/20 border border-natural-border rounded-lg text-xs text-natural-text-main"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest">
+                      Header Title
+                    </label>
+                    <input
+                      type="text"
+                      value={packagesForm.headerTitle}
+                      onChange={(e) =>
+                        setPackagesForm({
+                          ...packagesForm,
+                          headerTitle: e.target.value,
+                        })
+                      }
+                      placeholder="Catering"
+                      className="w-full px-3 py-2 bg-white dark:bg-black/20 border border-natural-border rounded-lg text-xs text-natural-text-main"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest">
+                      Title Italic Highlight
+                    </label>
+                    <input
+                      type="text"
+                      value={packagesForm.headerTitleItalic}
+                      onChange={(e) =>
+                        setPackagesForm({
+                          ...packagesForm,
+                          headerTitleItalic: e.target.value,
+                        })
+                      }
+                      placeholder="Packages"
+                      className="w-full px-3 py-2 bg-white dark:bg-black/20 border border-natural-border rounded-lg text-xs text-natural-text-main font-serif italic"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest">
+                    Section Description
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={packagesForm.description}
+                    onChange={(e) =>
+                      setPackagesForm({
+                        ...packagesForm,
+                        description: e.target.value,
+                      })
+                    }
+                    placeholder="From intimate gatherings to grand celebrations, find the perfect curation for your event's specific needs and scale."
+                    className="w-full px-3 py-2 bg-white dark:bg-black/20 border border-natural-border rounded-lg text-xs text-natural-text-main leading-relaxed"
+                  />
+                </div>
+              </div>
+
+              {/* Package Imagery Cards */}
+              <div className="space-y-6">
+                <div className="flex items-center justify-between border-b border-natural-border pb-3">
+                  <div>
+                    <h4 className="text-sm font-bold uppercase tracking-wider text-natural-text-main flex items-center gap-2">
+                      <ImageIcon className="w-4 h-4 text-natural-accent" />
+                      Package Cover Photos ({displayPackages.length})
+                    </h4>
+                    <p className="text-xs text-natural-text-light mt-0.5">
+                      Assign distinct presentation photography for each catering offering. These photos sync live to both the Home page showcase and the /packages catalog.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-6">
+                  {displayPackages.map((pkg, idx) => {
+                    const currentImg =
+                      packagesForm.packageImages?.[pkg.id] ||
+                      packagesForm.packageImages?.[pkg.name] ||
+                      pkg.image ||
+                      pkg.image_url ||
+                      "";
+
+                    return (
+                      <div
+                        key={pkg.id || idx}
+                        className="p-6 rounded-2xl border border-natural-border/80 bg-white/40 dark:bg-white/[0.02] shadow-sm hover:shadow-md transition-all space-y-4"
+                      >
+                        {/* Package Header Row */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-natural-border/60 pb-3">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="text-base font-serif font-bold text-natural-text-main uppercase tracking-wider">
+                                {pkg.name}
+                              </h4>
+                              {pkg.tag && pkg.tag.toLowerCase() !== "none" && (
+                                <span className="bg-amber-400 text-black px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-widest rounded-sm">
+                                  {pkg.tag}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3 text-xs text-natural-text-light">
+                              <span className="text-natural-accent font-semibold">
+                                {pkg.price ? `₱ ${pkg.price}` : "Custom Pricing"}
+                              </span>
+                              <span>•</span>
+                              <span>{pkg.pax ? `${pkg.pax} Guests` : "Flexible Pax"}</span>
+                            </div>
+                          </div>
+
+                          {currentImg && (
+                            <div className="flex items-center gap-2 shrink-0">
+                              <div className="w-16 h-10 rounded-md overflow-hidden border border-natural-border/80 shadow-inner bg-black/40">
+                                <img
+                                  src={currentImg}
+                                  alt={pkg.name}
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    e.currentTarget.src =
+                                      "https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=600";
+                                  }}
+                                />
+                              </div>
+                              <span className="text-[10px] uppercase tracking-wider font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3" /> Image Active
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Image Upload Field */}
+                        <ImageUploadField
+                          label={`Cover Photo for "${pkg.name}"`}
+                          sublabel="Upload a photo from your computer, drag & drop, or paste an image link."
+                          value={currentImg}
+                          onChange={(url) =>
+                            handleUpdatePackageImage(pkg.id, pkg.name, url)
+                          }
+                          presets={PRESET_PACKAGE_IMAGES}
+                          aspectRatio="video"
+                          placeholder="https://images.unsplash.com/..."
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Bottom Actions */}
+              <div className="pt-6 border-t border-natural-border flex items-center justify-between gap-4 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmActionType("reset");
+                    setShowConfirmModal(true);
+                  }}
+                  className="px-4 py-2 border border-natural-border rounded-xl text-xs font-bold text-natural-text-light hover:text-red-500 hover:border-red-300 transition-colors flex items-center gap-2 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" /> Reset Packages to Default
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmActionType("save");
+                    setShowConfirmModal(true);
+                  }}
+                  disabled={isSaving}
+                  className="px-6 py-2.5 bg-natural-accent text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:opacity-90 shadow-lg shadow-natural-accent/20 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <Save className="w-4 h-4" /> Save Packages & Imagery
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* TAB: MENU & CULINARY */}
+          {/* ========================================================================= */}
+          {activeTab === "menu" && (
+            <div className="glass-card p-8 space-y-8">
+              <div className="border-b border-natural-border pb-4">
+                <div className="flex items-center gap-2">
+                  <span className="p-1 rounded bg-natural-accent/10 text-natural-accent">
+                    <Utensils className="w-5 h-5" />
+                  </span>
+                  <h3 className="text-lg font-serif font-bold text-natural-text-main">
+                    Menu & Culinary Presentation Showcase
+                  </h3>
+                </div>
+                <p className="text-xs text-natural-text-light mt-1">
+                  Customize the menu page narrative and assign high-resolution presentation photography for each dish across your culinary categories.
+                </p>
+              </div>
+
+              {/* Section Header Controls */}
+              <div className="p-6 rounded-xl border border-natural-border bg-natural-bg/20 space-y-4">
+                <div className="flex items-center gap-2 border-b border-natural-border/60 pb-3">
+                  <FileText className="w-4 h-4 text-natural-accent" />
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-natural-text-main">
+                    Menu Page Header & Subtitle
+                  </h4>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest">
+                      Header Subtitle
+                    </label>
+                    <input
+                      type="text"
+                      value={menuForm.headerSubtitle}
+                      onChange={(e) =>
+                        setMenuForm({
+                          ...menuForm,
+                          headerSubtitle: e.target.value,
+                        })
+                      }
+                      placeholder="Roxan Policarpio Catering"
+                      className="w-full px-3 py-2 bg-white dark:bg-black/20 border border-natural-border rounded-lg text-xs text-natural-text-main"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest">
+                      Header Title
+                    </label>
+                    <input
+                      type="text"
+                      value={menuForm.headerTitle}
+                      onChange={(e) =>
+                        setMenuForm({
+                          ...menuForm,
+                          headerTitle: e.target.value,
+                        })
+                      }
+                      placeholder="Curated"
+                      className="w-full px-3 py-2 bg-white dark:bg-black/20 border border-natural-border rounded-lg text-xs text-natural-text-main"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest">
+                      Title Italic Highlight
+                    </label>
+                    <input
+                      type="text"
+                      value={menuForm.headerTitleItalic}
+                      onChange={(e) =>
+                        setMenuForm({
+                          ...menuForm,
+                          headerTitleItalic: e.target.value,
+                        })
+                      }
+                      placeholder="Selection"
+                      className="w-full px-3 py-2 bg-white dark:bg-black/20 border border-natural-border rounded-lg text-xs text-natural-text-main font-serif italic"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest">
+                    Section Description
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={menuForm.description}
+                    onChange={(e) =>
+                      setMenuForm({
+                        ...menuForm,
+                        description: e.target.value,
+                      })
+                    }
+                    placeholder="Explore our dynamic culinary offerings crafted with passion, artful presentation, and the finest ingredients."
+                    className="w-full px-3 py-2 bg-white dark:bg-black/20 border border-natural-border rounded-lg text-xs text-natural-text-main leading-relaxed"
+                  />
+                </div>
+              </div>
+
+              {/* Menu Dishes Imagery Manager */}
+              <div className="space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-natural-border pb-4">
+                  <div>
+                    <h4 className="text-sm font-bold uppercase tracking-wider text-natural-text-main flex items-center gap-2">
+                      <ImageIcon className="w-4 h-4 text-natural-accent" />
+                      Culinary Presentation Photos ({filteredMenuItems.length} of {displayMenuItems.length})
+                    </h4>
+                    <p className="text-xs text-natural-text-light mt-0.5">
+                      Assign distinct presentation photos for each dish. Changes reflect live on the customer /menu sliders.
+                    </p>
+                  </div>
+
+                  {/* Search input */}
+                  <div className="w-full sm:w-64">
+                    <input
+                      type="text"
+                      value={menuSearchQuery}
+                      onChange={(e) => setMenuSearchQuery(e.target.value)}
+                      placeholder="Search dishes or categories..."
+                      className="w-full px-3 py-1.5 bg-white dark:bg-black/20 border border-natural-border rounded-lg text-xs text-natural-text-main"
+                    />
+                  </div>
+                </div>
+
+                {/* Category Filter Pills */}
+                <div className="flex items-center gap-2 overflow-x-auto pb-2 custom-scrollbar">
+                  {[
+                    "All",
+                    "Main Course",
+                    "Appetizers",
+                    "Pasta",
+                    "Desserts",
+                    "Beverages",
+                  ].map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setSelectedMenuCategory(cat)}
+                      className={cn(
+                        "px-3 py-1 rounded-full text-xs font-bold tracking-wider uppercase transition-all shrink-0 cursor-pointer",
+                        selectedMenuCategory.toLowerCase() === cat.toLowerCase()
+                          ? "bg-natural-accent text-white shadow-sm"
+                          : "bg-natural-bg/40 text-natural-text-light hover:text-natural-text-main hover:bg-natural-bg/70"
+                      )}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Dishes Grid */}
+                <div className="grid grid-cols-1 gap-6">
+                  {filteredMenuItems.length === 0 ? (
+                    <div className="p-12 text-center border border-dashed border-natural-border rounded-xl bg-natural-bg/10">
+                      <Utensils className="w-8 h-8 text-natural-text-light mx-auto mb-2 opacity-50" />
+                      <p className="text-xs text-natural-text-light uppercase tracking-wider">
+                        No dishes found matching "{menuSearchQuery || selectedMenuCategory}".
+                      </p>
+                    </div>
+                  ) : (
+                    filteredMenuItems.map((dish, idx) => {
+                      const currentImg =
+                        menuForm.menuImages?.[dish.id] ||
+                        menuForm.menuImages?.[dish.name] ||
+                        dish.image ||
+                        dish.image_url ||
+                        "";
+
+                      return (
+                        <div
+                          key={dish.id || idx}
+                          className="p-6 rounded-2xl border border-natural-border/80 bg-white/40 dark:bg-white/[0.02] shadow-sm hover:shadow-md transition-all space-y-4"
+                        >
+                          {/* Dish Header */}
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-natural-border/60 pb-3">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h4 className="text-base font-serif font-bold text-natural-text-main uppercase tracking-wider">
+                                  {dish.name}
+                                </h4>
+                                <span className="bg-natural-accent/15 text-natural-accent px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded">
+                                  {dish.category}
+                                </span>
+                                {dish.sub_category && (
+                                  <span className="bg-black/10 dark:bg-white/10 text-natural-text-light px-2 py-0.5 text-[9px] font-medium uppercase tracking-wider rounded">
+                                    {dish.sub_category}
+                                  </span>
+                                )}
+                              </div>
+                              {dish.description && (
+                                <p className="text-xs text-natural-text-light line-clamp-1">
+                                  {dish.description}
+                                </p>
+                              )}
+                            </div>
+
+                            {currentImg && (
+                              <div className="flex items-center gap-2 shrink-0">
+                                <div className="w-16 h-10 rounded-md overflow-hidden border border-natural-border/80 shadow-inner bg-black/40">
+                                  <img
+                                    src={currentImg}
+                                    alt={dish.name}
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                      e.currentTarget.src =
+                                        "https://images.unsplash.com/photo-1544025162-d76694265947?auto=format&fit=crop&q=80&w=600";
+                                    }}
+                                  />
+                                </div>
+                                <span className="text-[10px] uppercase tracking-wider font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                                  <CheckCircle2 className="w-3 h-3" /> Image Active
+                                </span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Image Upload Field */}
+                          <ImageUploadField
+                            label={`Presentation Photo for "${dish.name}"`}
+                            sublabel="Upload a photo from your computer, drag & drop, or paste an image link."
+                            value={currentImg}
+                            onChange={(url) =>
+                              handleUpdateMenuImage(dish.id, dish.name, url)
+                            }
+                            presets={PRESET_MENU_IMAGES}
+                            aspectRatio="video"
+                            placeholder="https://images.unsplash.com/photo-..."
+                          />
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* Bottom Actions */}
+              <div className="pt-6 border-t border-natural-border flex items-center justify-between gap-4 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmActionType("reset");
+                    setShowConfirmModal(true);
+                  }}
+                  className="px-4 py-2 border border-natural-border rounded-xl text-xs font-bold text-natural-text-light hover:text-red-500 hover:border-red-300 transition-colors flex items-center gap-2 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" /> Reset Menu to Default
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmActionType("save");
+                    setShowConfirmModal(true);
+                  }}
+                  disabled={isSaving}
+                  className="px-6 py-2.5 bg-natural-accent text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:opacity-90 shadow-lg shadow-natural-accent/20 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <Save className="w-4 h-4" /> Save Menu & Imagery
+                </button>
               </div>
             </div>
           )}
@@ -893,22 +1663,19 @@ export function CMSPage() {
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest">
-                    Story Feature Image URL
-                  </label>
-                  <input
-                    type="url"
-                    value={aboutForm.storyImage}
-                    onChange={(e) =>
-                      setAboutForm({
-                        ...aboutForm,
-                        storyImage: e.target.value,
-                      })
-                    }
-                    className="w-full px-3 py-2 bg-natural-bg/40 border border-natural-border rounded-lg text-xs text-natural-text-main"
-                  />
-                </div>
+                <ImageUploadField
+                  label="Story Feature Image"
+                  sublabel="High-resolution photography showcasing the culinary team, venue, or banquet feast"
+                  value={aboutForm.storyImage}
+                  onChange={(url) =>
+                    setAboutForm({
+                      ...aboutForm,
+                      storyImage: url,
+                    })
+                  }
+                  aspectRatio="video"
+                  placeholder="Paste image link or upload a file from your device..."
+                />
               </div>
 
               {/* Pillars of Excellence Manager */}
@@ -1202,6 +1969,44 @@ export function CMSPage() {
                       })
                     }
                     className="w-full px-3 py-2 bg-natural-bg/40 border border-natural-border rounded-lg text-xs text-natural-text-main"
+                  />
+                </div>
+              </div>
+
+              {/* Why Us Feature Images */}
+              <div className="pt-4 border-t border-natural-border space-y-4">
+                <div>
+                  <span className="text-[11px] font-bold text-natural-text-main uppercase tracking-wider block">
+                    "Why Us" Feature Photography
+                  </span>
+                  <p className="text-[10px] text-natural-text-light">
+                    Visual showcase imagery displayed in the Why Us section of the customer portal.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <ImageUploadField
+                    label="Why Us Showcase Image 1"
+                    value={contactForm.whyUsImage1}
+                    onChange={(url) =>
+                      setContactForm({
+                        ...contactForm,
+                        whyUsImage1: url,
+                      })
+                    }
+                    aspectRatio="landscape"
+                    placeholder="Upload or paste image link..."
+                  />
+                  <ImageUploadField
+                    label="Why Us Showcase Image 2"
+                    value={contactForm.whyUsImage2}
+                    onChange={(url) =>
+                      setContactForm({
+                        ...contactForm,
+                        whyUsImage2: url,
+                      })
+                    }
+                    aspectRatio="landscape"
+                    placeholder="Upload or paste image link..."
                   />
                 </div>
               </div>
@@ -1614,6 +2419,8 @@ export function CMSPage() {
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
             {[
               { id: "hero", label: "Hero", icon: Globe },
+              { id: "packages", label: "Packages", icon: Package },
+              { id: "menu", label: "Menu", icon: Utensils },
               { id: "about", label: "About", icon: Sparkles },
               { id: "contact", label: "Contact", icon: Phone },
               { id: "testimonials", label: "Reviews", icon: Star },
@@ -1679,6 +2486,135 @@ export function CMSPage() {
                     </span>
                   </div>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* PACKAGES PREVIEW */}
+          {previewPage === "packages" && (
+            <div className="space-y-4">
+              <div className="text-center p-3 border-b border-white/10">
+                <span className="text-amber-400 text-[9px] tracking-[0.3em] font-bold uppercase block mb-1">
+                  {packagesForm.headerSubtitle || "Exclusive Collections"}
+                </span>
+                <h4 className="text-lg font-serif text-white font-bold leading-tight">
+                  {packagesForm.headerTitle || "Catering"}{" "}
+                  <span className="italic text-amber-300 font-normal">
+                    {packagesForm.headerTitleItalic || "Packages"}
+                  </span>
+                </h4>
+                <p className="text-[9px] text-white/50 uppercase tracking-widest mt-1 line-clamp-2">
+                  {packagesForm.description || "From intimate gatherings to grand celebrations..."}
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                {displayPackages.map((pkg, idx) => {
+                  const img =
+                    packagesForm.packageImages?.[pkg.id] ||
+                    packagesForm.packageImages?.[pkg.name] ||
+                    pkg.image ||
+                    pkg.image_url ||
+                    "https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=600";
+                  return (
+                    <div
+                      key={pkg.id || idx}
+                      className="rounded-lg overflow-hidden border border-white/10 bg-white/5 shadow-md flex flex-col"
+                    >
+                      <div className="relative aspect-video w-full overflow-hidden bg-black/60">
+                        {pkg.tag && pkg.tag.toLowerCase() !== "none" && (
+                          <span className="absolute top-2 left-2 z-10 bg-amber-400 text-black px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest rounded-sm shadow">
+                            {pkg.tag}
+                          </span>
+                        )}
+                        <img
+                          src={img}
+                          alt={pkg.name}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            e.currentTarget.src =
+                              "https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=600";
+                          }}
+                        />
+                      </div>
+                      <div className="p-3">
+                        <div className="flex justify-between items-baseline gap-2">
+                          <h5 className="text-xs font-serif font-bold text-white uppercase tracking-wider line-clamp-1">
+                            {pkg.name}
+                          </h5>
+                          <span className="text-amber-400 font-serif text-xs font-bold shrink-0">
+                            {pkg.price ? `₱ ${pkg.price}` : "Custom"}
+                          </span>
+                        </div>
+                        <p className="text-[9px] text-white/60 tracking-wider mt-0.5">
+                          {pkg.pax ? `${pkg.pax} Guests` : "Flexible Pax"}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* MENU PREVIEW */}
+          {previewPage === "menu" && (
+            <div className="space-y-4">
+              <div className="text-center p-3 border-b border-white/10">
+                <span className="text-amber-400 text-[9px] tracking-[0.3em] font-bold uppercase block mb-1">
+                  {menuForm.headerSubtitle || "Roxan Policarpio Catering"}
+                </span>
+                <h4 className="text-lg font-serif text-white font-bold leading-tight">
+                  {menuForm.headerTitle || "Curated"}{" "}
+                  <span className="italic text-amber-300 font-normal">
+                    {menuForm.headerTitleItalic || "Selection"}
+                  </span>
+                </h4>
+                <p className="text-[9px] text-white/50 uppercase tracking-widest mt-1 line-clamp-2">
+                  {menuForm.description || "Explore our dynamic culinary offerings..."}
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                {displayMenuItems.slice(0, 4).map((dish, idx) => {
+                  const img =
+                    menuForm.menuImages?.[dish.id] ||
+                    menuForm.menuImages?.[dish.name] ||
+                    dish.image ||
+                    dish.image_url ||
+                    "https://images.unsplash.com/photo-1544025162-d76694265947?auto=format&fit=crop&q=80&w=600";
+                  return (
+                    <div
+                      key={dish.id || idx}
+                      className="rounded-lg overflow-hidden border border-white/10 bg-white/5 shadow-md flex items-center gap-3 p-2.5"
+                    >
+                      <div className="w-16 h-16 rounded-md overflow-hidden bg-black/60 shrink-0">
+                        <img
+                          src={img}
+                          alt={dish.name}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            e.currentTarget.src =
+                              "https://images.unsplash.com/photo-1544025162-d76694265947?auto=format&fit=crop&q=80&w=600";
+                          }}
+                        />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-[8px] font-bold uppercase tracking-wider text-amber-400 block mb-0.5">
+                          {dish.category}
+                        </span>
+                        <h5 className="text-xs font-serif font-bold text-white uppercase tracking-wider truncate">
+                          {dish.name}
+                        </h5>
+                        {dish.description && (
+                          <p className="text-[9px] text-white/50 line-clamp-1 mt-0.5">
+                            {dish.description}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -2033,6 +2969,8 @@ export function CMSPage() {
               <div className="hidden sm:flex items-center gap-1.5">
                 {[
                   { id: "hero", label: "Hero & Banner" },
+                  { id: "packages", label: "Packages" },
+                  { id: "menu", label: "Menu Catalog" },
                   { id: "about", label: "About Page" },
                   { id: "contact", label: "Contact Page" },
                   { id: "testimonials", label: "Reviews" },
@@ -2106,6 +3044,147 @@ export function CMSPage() {
                       </span>
                     </div>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {previewPage === "packages" && (
+              <div className="space-y-8 max-w-5xl mx-auto">
+                <div className="text-center py-6 border-b border-white/10">
+                  <span className="text-amber-400 text-xs tracking-[0.4em] font-bold uppercase block mb-3">
+                    {packagesForm.headerSubtitle || "Exclusive Collections"}
+                  </span>
+                  <h3 className="text-4xl md:text-5xl font-serif text-white font-bold leading-tight mb-4">
+                    {packagesForm.headerTitle || "Catering"}{" "}
+                    <span className="italic text-amber-300 font-normal">
+                      {packagesForm.headerTitleItalic || "Packages"}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-white/50 uppercase tracking-[0.3em] font-bold max-w-xl mx-auto">
+                    {packagesForm.description}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {displayPackages.map((pkg, idx) => {
+                    const img =
+                      packagesForm.packageImages?.[pkg.id] ||
+                      packagesForm.packageImages?.[pkg.name] ||
+                      pkg.image ||
+                      pkg.image_url ||
+                      "https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=800";
+                    return (
+                      <div
+                        key={pkg.id || idx}
+                        className="rounded-xl overflow-hidden border border-white/15 bg-white/[0.03] backdrop-blur-md flex flex-col group hover:border-amber-400/40 transition-all duration-300 shadow-xl"
+                      >
+                        <div className="relative aspect-video w-full overflow-hidden bg-black/60">
+                          {pkg.tag && pkg.tag.toLowerCase() !== "none" && (
+                            <span className="absolute top-3 left-3 z-10 bg-amber-400 text-black px-2.5 py-1 text-[9px] font-bold uppercase tracking-widest rounded shadow">
+                              {pkg.tag}
+                            </span>
+                          )}
+                          <img
+                            src={img}
+                            alt={pkg.name}
+                            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                            onError={(e) => {
+                              e.currentTarget.src =
+                                "https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=800";
+                            }}
+                          />
+                        </div>
+                        <div className="p-6 flex-grow flex flex-col justify-between">
+                          <div>
+                            <div className="flex justify-between items-start gap-3 mb-2">
+                              <h4 className="text-lg font-serif font-bold text-white uppercase tracking-wider">
+                                {pkg.name}
+                              </h4>
+                              <span className="text-amber-400 font-serif text-base font-bold shrink-0">
+                                {pkg.price ? `₱ ${pkg.price}` : "Custom"}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-white/60 tracking-wider">
+                              {pkg.pax ? `${pkg.pax} Guests` : "Flexible Pax"}
+                            </p>
+                          </div>
+                          <div className="pt-6 mt-4 border-t border-white/10">
+                            <div className="w-full py-2.5 text-center text-amber-400 border border-amber-400/30 rounded text-[10px] uppercase tracking-widest font-bold">
+                              Select Package →
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {previewPage === "menu" && (
+              <div className="space-y-8 max-w-5xl mx-auto">
+                <div className="text-center py-6 border-b border-white/10">
+                  <span className="text-amber-400 text-xs tracking-[0.4em] font-bold uppercase block mb-3">
+                    {menuForm.headerSubtitle || "Roxan Policarpio Catering"}
+                  </span>
+                  <h3 className="text-4xl md:text-5xl font-serif text-white font-bold leading-tight mb-4">
+                    {menuForm.headerTitle || "Curated"}{" "}
+                    <span className="italic text-amber-300 font-normal">
+                      {menuForm.headerTitleItalic || "Selection"}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-white/50 uppercase tracking-[0.3em] font-bold max-w-xl mx-auto">
+                    {menuForm.description}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {displayMenuItems.map((dish, idx) => {
+                    const img =
+                      menuForm.menuImages?.[dish.id] ||
+                      menuForm.menuImages?.[dish.name] ||
+                      dish.image ||
+                      dish.image_url ||
+                      "https://images.unsplash.com/photo-1544025162-d76694265947?auto=format&fit=crop&q=80&w=800";
+                    return (
+                      <div
+                        key={dish.id || idx}
+                        className="rounded-xl overflow-hidden border border-white/15 bg-white/[0.03] backdrop-blur-md flex flex-col group hover:border-amber-400/40 transition-all duration-300 shadow-xl"
+                      >
+                        <div className="relative aspect-[4/3] w-full overflow-hidden bg-black/60">
+                          <span className="absolute top-3 left-3 z-10 bg-amber-400 text-black px-2.5 py-1 text-[9px] font-bold uppercase tracking-widest rounded shadow">
+                            {dish.category}
+                          </span>
+                          <img
+                            src={img}
+                            alt={dish.name}
+                            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                            onError={(e) => {
+                              e.currentTarget.src =
+                                "https://images.unsplash.com/photo-1544025162-d76694265947?auto=format&fit=crop&q=80&w=800";
+                            }}
+                          />
+                        </div>
+                        <div className="p-5 flex-grow flex flex-col justify-between">
+                          <div>
+                            <h4 className="text-base font-serif font-bold text-white uppercase tracking-wider mb-1">
+                              {dish.name}
+                            </h4>
+                            {dish.description && (
+                              <p className="text-[11px] text-white/60 leading-relaxed line-clamp-2">
+                                {dish.description}
+                              </p>
+                            )}
+                          </div>
+                          {dish.sub_category && (
+                            <span className="text-[9px] uppercase tracking-widest text-amber-400/80 font-bold mt-3 block">
+                              {dish.sub_category}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

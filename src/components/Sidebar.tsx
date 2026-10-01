@@ -20,7 +20,7 @@ const navItems = [
   { icon: CalendarCheck, label: 'Booking', id: 'booking' },
   { icon: UtensilsCrossed, label: 'Menu', id: 'menu' },
   { icon: Package, label: 'Packages', id: 'packages' },
-  { icon: PackageSearch, label: 'Inventory', id: 'inventory' },
+  { icon: PackageSearch, label: 'Equipment Monitoring', id: 'inventory' },
   { icon: Globe, label: 'CMS (Website)', id: 'cms' },
   { icon: BarChart3, label: 'Analytics', id: 'analytics' },
   { icon: History, label: 'Audit Trail', id: 'audit-trail' },

@@ -19,6 +19,7 @@ import {
 import { cn } from "../lib/utils";
 import { supabase } from "../utils/supabase";
 import { logAuditAction } from "../utils/auditLogger";
+import { ImageUploadField } from "../components/ImageUploadField";
 
 // Defines the structure of a menu item based on the Supabase table
 export interface MenuItem {
@@ -791,29 +792,14 @@ export function MenuPage() {
                 </div>
               )}
 
-              <div className="space-y-2">
-                <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
-                  Image URL
-                </label>
-                <input
-                  type="text"
-                  value={formData.image_url}
-                  onChange={(e) =>
-                    setFormData({ ...formData, image_url: e.target.value })
-                  }
-                  placeholder="e.g. https://example.com/image.jpg"
-                  className="w-full px-4 py-2.5 bg-natural-bg border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 transition-all font-medium"
-                />
-                {formData.image_url && (
-                  <div className="mt-2 w-full h-32 rounded-xl overflow-hidden border border-natural-border">
-                    <img
-                      src={formData.image_url}
-                      alt="Dish Preview"
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                )}
-              </div>
+              <ImageUploadField
+                label="Dish Image"
+                sublabel="Upload photo from device or paste image URL"
+                value={formData.image_url}
+                onChange={(url) => setFormData({ ...formData, image_url: url })}
+                aspectRatio="landscape"
+                placeholder="e.g. https://example.com/image.jpg"
+              />
             </div>
 
             <div className="p-6 bg-natural-bg/30 border-t border-natural-border flex items-center justify-end gap-3 shrink-0">

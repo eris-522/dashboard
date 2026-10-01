@@ -110,12 +110,24 @@
   background-color: rgba(28, 29, 24, 0.6) !important;
 }
 
+.dark .bg-white\/60 {
+  background-color: rgba(28, 29, 24, 0.7) !important;
+}
+
+.dark .bg-white\/70 {
+  background-color: rgba(28, 29, 24, 0.75) !important;
+}
+
 .dark .bg-white\/80 {
   background-color: rgba(28, 29, 24, 0.85) !important;
 }
 
 .dark .bg-white\/90 {
   background-color: rgba(28, 29, 24, 0.95) !important;
+}
+
+.dark .bg-gray-50 {
+  background-color: rgba(28, 29, 24, 0.6) !important;
 }
 
 .dark .focus\:bg-white:focus {

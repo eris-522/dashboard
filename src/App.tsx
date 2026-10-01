@@ -51,7 +51,7 @@ function Dashboard({ onNavigate }: { onNavigate: (id: string) => void }) {
         </div>
       </div>
 
-      {/* Inventory & Activity Row */}
+      {/* Equipment Monitoring & Activity Row */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 lg:gap-8 w-full">
         <InventorySummary onViewAll={() => onNavigate("inventory")} />
         <RecentActivities onViewLogs={() => onNavigate("audit-trail")} />
@@ -145,7 +145,7 @@ function AppContent() {
                       : activeTab === "packages"
                         ? "Package Bundles"
                         : activeTab === "inventory"
-                          ? "Inventory Control"
+                          ? "Equipment Monitoring"
                           : activeTab === "cms"
                             ? "Website Content Management"
                             : activeTab === "analytics"
@@ -164,11 +164,11 @@ function AppContent() {
                   : activeTab === "booking"
                     ? "Scheduled Catering & Operations"
                     : activeTab === "menu"
-                      ? "Menu Development & Inventory Link"
+                      ? "Menu Development & Equipment Link"
                       : activeTab === "packages"
                         ? "Tiered Event Solutions"
                         : activeTab === "inventory"
-                          ? "Asset Management & Fulfillment"
+                          ? "Equipment Tracking, Allocation & Logistics"
                           : activeTab === "cms"
                             ? "Customer Portal Customization & Real-Time Sync"
                             : activeTab === "analytics"

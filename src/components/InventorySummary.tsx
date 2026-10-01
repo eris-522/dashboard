@@ -1,8 +1,8 @@
 import { AlertTriangle, ChevronRight, PackageSearch, Boxes, Warehouse } from 'lucide-react';
-import { useInventory } from '../context/InventoryContext';
+import { useInventory, normalizeStockStatus } from '../context/InventoryContext';
 
 /**
- * Renders a summary of current inventory levels with visual progress bars.
+ * Renders a summary of current equipment monitoring levels with visual progress bars.
  * Highlights items that require restocking based on their status.
  */
 export function InventorySummary({ onViewAll }: { onViewAll?: () => void }) {
@@ -10,15 +10,15 @@ export function InventorySummary({ onViewAll }: { onViewAll?: () => void }) {
   
   const activeItems = items.filter(item => item.status !== 'Archived' && item.status?.toLowerCase() !== 'archived');
   const displayItems = activeItems.slice(0, 5);
-  const restockNeededCount = activeItems.filter(i => i.status !== 'Healthy').length;
+  const restockNeededCount = activeItems.filter(i => normalizeStockStatus(i.status) === 'Low').length;
   const totalAllocated = activeItems.reduce((acc, i) => acc + getAllocatedStock(i.id), 0);
 
   return (
     <div className="glass-card p-6 h-full flex flex-col bg-white">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h3 className="text-lg font-bold text-natural-text-main font-serif">Inventory Overview</h3>
-          <p className="text-[0.7rem] text-natural-text-light font-medium uppercase tracking-wider">Status of catering supplies & equipment</p>
+          <h3 className="text-lg font-bold text-natural-text-main font-serif">Equipment Monitoring Overview</h3>
+          <p className="text-[0.7rem] text-natural-text-light font-medium uppercase tracking-wider">Status of catering equipment & supplies</p>
         </div>
         <button 
           onClick={onViewAll}
@@ -32,7 +32,7 @@ export function InventorySummary({ onViewAll }: { onViewAll?: () => void }) {
         {activeItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-6 text-natural-text-light opacity-60">
             <PackageSearch className="w-8 h-8 mb-2" />
-            <p className="text-[0.7rem] font-serif italic">No inventory records</p>
+            <p className="text-[0.7rem] font-serif italic">No equipment monitoring records</p>
           </div>
         ) : (
           displayItems.map((item) => {
@@ -52,12 +52,17 @@ export function InventorySummary({ onViewAll }: { onViewAll?: () => void }) {
                   <span className="text-[0.65rem] font-bold text-natural-text-light uppercase">{item.stock} {item.unit}</span>
                 </div>
                 <div className="h-[6px] w-full bg-[#efeee7] rounded-full overflow-hidden">
-                  <div 
-                    className={`h-full transition-all duration-500 ${
-                      item.status === 'Healthy' ? 'bg-[#6b8e23]' : item.status === 'Low Stock' ? 'bg-orange-400' : 'bg-red-500'
-                    }`} 
-                    style={{ width: `${stockPercentage}%` }} 
-                  />
+                  {(() => {
+                    const s = normalizeStockStatus(item.status);
+                    return (
+                      <div 
+                        className={`h-full transition-all duration-500 ${
+                          s === 'High' ? 'bg-[#6b8e23]' : s === 'Normal' ? 'bg-amber-400' : 'bg-red-500'
+                        }`} 
+                        style={{ width: `${stockPercentage}%` }} 
+                      />
+                    );
+                  })()}
                 </div>
               </div>
             );
@@ -85,3 +90,5 @@ export function InventorySummary({ onViewAll }: { onViewAll?: () => void }) {
     </div>
   );
 }
+
+export const EquipmentMonitoringSummary = InventorySummary;

@@ -20,6 +20,7 @@ import { cn } from "../lib/utils";
 import { supabase } from "../utils/supabase"; // Database connection
 import { useInventory } from "../context/InventoryContext";
 import { logAuditAction } from "../utils/auditLogger";
+import { ImageUploadField } from "../components/ImageUploadField";
 
 // Feature: Defines the structure for Packages based on the Supabase table
 export interface CateringPackage {
@@ -784,14 +785,14 @@ export function PackagePage() {
               )}
             </div>
 
-            {/* Inventory Equipment Link Footer */}
+            {/* Equipment Monitoring Link Footer */}
             <div className="px-6 py-2.5 bg-amber-50/50 border-t border-natural-border/40 flex items-center justify-between text-[10px]">
               <div className="flex items-center gap-1.5 text-amber-900 font-bold">
                 <Boxes className="w-3.5 h-3.5 text-amber-700" />
-                <span>Inventory Link:</span>
+                <span>Equipment Monitoring:</span>
               </div>
               <span className="font-semibold text-natural-text-main/80">
-                {calculatePackageEquipment(pkg.name, Number(pkg.pax) || 50, pkg.inclusions).length} supplies connected
+                {calculatePackageEquipment(pkg.name, Number(pkg.pax) || 50, pkg.inclusions).length} equipment connected
               </span>
             </div>
           </div>
@@ -983,21 +984,19 @@ export function PackagePage() {
                         </select>
                       </div>
 
-                      <div className="grid grid-cols-3 gap-3 items-center">
-                        <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest col-span-1">
-                          Image URL
-                        </label>
-                        <input
-                          type="text"
+                      <div className="pt-2">
+                        <ImageUploadField
+                          label="Package Image"
+                          sublabel="Upload photo from device or paste image URL"
                           value={editingPackage.image_url || ""}
-                          onChange={(e) =>
+                          onChange={(url) =>
                             setEditingPackage({
                               ...editingPackage,
-                              image_url: e.target.value,
+                              image_url: url,
                             })
                           }
+                          aspectRatio="landscape"
                           placeholder="e.g. https://example.com/image.jpg"
-                          className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 col-span-2"
                         />
                       </div>
 

@@ -8,7 +8,7 @@ export interface InventoryItem {
   stock: number;
   minStock: number;
   unit: string;
-  status: 'Healthy' | 'Low Stock' | 'Critical' | 'Archived';
+  status: 'High' | 'Normal' | 'Low' | 'Archived' | 'Healthy' | 'Low Stock' | 'Critical';
 }
 
 export interface PackageEquipmentRule {
@@ -90,13 +90,26 @@ interface InventoryContextType {
 const InventoryContext = createContext<InventoryContextType | undefined>(undefined);
 
 /**
+ * Normalizes any legacy or modern status string to 'High' | 'Normal' | 'Low' | 'Archived'
+ */
+export const normalizeStockStatus = (status?: string): 'High' | 'Normal' | 'Low' | 'Archived' => {
+  if (!status) return 'Normal';
+  const s = status.toLowerCase().trim();
+  if (s === 'archived') return 'Archived';
+  if (s === 'critical' || s === 'low') return 'Low';
+  if (s === 'low stock' || s === 'normal') return 'Normal';
+  if (s === 'healthy' || s === 'high') return 'High';
+  return 'Normal';
+};
+
+/**
  * Determines the stock status based on current quantity and defined minimum levels.
  */
-export const getStatus = (stock: number, minStock: number): 'Healthy' | 'Low Stock' | 'Critical' => {
-  if (stock <= 0) return 'Critical';
-  if (stock <= minStock * 0.5) return 'Critical';
-  if (stock <= minStock) return 'Low Stock';
-  return 'Healthy';
+export const getStatus = (stock: number, minStock: number): 'High' | 'Normal' | 'Low' => {
+  if (stock <= 0) return 'Low';
+  if (stock <= minStock * 0.5) return 'Low';
+  if (stock <= minStock) return 'Normal';
+  return 'High';
 };
 
 /**
@@ -386,7 +399,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
           stock: Number(item.stock) || 0,
           minStock: Number(item.min_stock) || 0,
           unit: item.unit || 'pcs',
-          status: item.status || getStatus(Number(item.stock) || 0, Number(item.min_stock) || 0)
+          status: normalizeStockStatus(item.status || getStatus(Number(item.stock) || 0, Number(item.min_stock) || 0))
         }));
         setItems(mapped);
       }
@@ -628,7 +641,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
           reason: reason || `Restored from Concluded Booking #${bookingId} (${record.packageName})`,
           bookingId,
           bookingName: bookingName || record.bookingName,
-          user: 'System (Inventory Reconciler)'
+          user: 'System (Equipment Monitoring Reconciler)'
         });
       }
     }
@@ -639,7 +652,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   };
 
   /**
-   * Automatically checks all deducted bookings and returns items to warehouse inventory
+   * Automatically checks all deducted bookings and returns items to equipment monitoring
    * if the event is done within that day or has already passed.
    */
   const reconcileCompletedEvents = async (bookingsList?: any[]): Promise<number> => {
@@ -661,26 +674,27 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
 
       const eventDate = matchedBooking.event_date || matchedBooking.date;
       const eventTime = matchedBooking.event_time || matchedBooking.time;
+      const bookingStatus = matchedBooking.status || 'Pending';
       const isFinalPaid =
         matchedBooking.final_balance_status === 'Verified' ||
         (typeof matchedBooking.food_allergies === 'string' &&
           matchedBooking.food_allergies.includes('"finalBalanceStatus":"Verified"'));
 
-      const isDone = status === 'Completed' || (status === 'Confirmed' && isBookingEventDone(eventDate, eventTime) && isFinalPaid);
+      const isDone = bookingStatus === 'Completed' || (bookingStatus === 'Confirmed' && isBookingEventDone(eventDate, eventTime) && isFinalPaid);
 
       if (isDone) {
-        console.log(`Event for booking #${record.bookingId} (${record.bookingName}) has concluded. Returning inventory supplies...`);
+        console.log(`Event for booking #${record.bookingId} (${record.bookingName}) has concluded. Returning equipment...`);
 
         const success = await restoreBookingInventory(
           record.bookingId,
           record.bookingName,
-          `Event concluded on ${eventDate || 'today'} - Supplies returned to warehouse inventory`
+          `Event concluded on ${eventDate || 'today'} - Equipment returned to equipment monitoring`
         );
 
         if (success) {
           restoredCount++;
           // Update status in Supabase to Completed if it was Confirmed
-          if (status === 'Confirmed') {
+          if (bookingStatus === 'Confirmed') {
             await supabase
               .from('bookings')
               .update({ status: 'Completed' })
@@ -694,7 +708,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   };
 
   /**
-   * Manually marks a booking as Completed and restores all allocated inventory supplies.
+   * Manually marks a booking as Completed and restores all allocated equipment.
    */
   const completeBookingAndReturnInventory = async (
     bookingId: string | number,
@@ -706,12 +720,12 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       .update({ status: 'Completed' })
       .eq('id', bookingId);
 
-    // 2. Restore inventory if deducted
+    // 2. Restore equipment if deducted
     if (isBookingDeducted(bookingId)) {
       await restoreBookingInventory(
         bookingId,
         bookingName,
-        `Event Completed - All supplies returned to warehouse inventory (Booking #${bookingId})`
+        `Event Completed - All equipment returned to equipment monitoring (Booking #${bookingId})`
       );
     }
     return true;
@@ -901,3 +915,8 @@ export function useInventory() {
   }
   return context;
 }
+
+// Aliases for Equipment Monitoring
+export const useEquipmentMonitoring = useInventory;
+export const EquipmentMonitoringProvider = InventoryProvider;
+export type EquipmentItem = InventoryItem;

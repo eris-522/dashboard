@@ -30,7 +30,7 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useBooking } from "../context/BookingContext";
-import { useInventory } from "../context/InventoryContext";
+import { useInventory, normalizeStockStatus } from "../context/InventoryContext";
 import { useUser } from "../context/UserContext";
 import { useTheme } from "../context/ThemeContext";
 
@@ -163,13 +163,13 @@ export function AnalyticsPage() {
     return Object.values(map).sort((a, b) => b.count - a.count);
   }, [confirmedBookings]);
 
-  // Inventory Stock Health Data
+  // Equipment Monitoring Health Data
   const activeItems = useMemo(() => {
     return items.filter((i) => i.status !== "Archived" && i.status?.toLowerCase() !== "archived");
   }, [items]);
 
   const lowStockCount = useMemo(() => {
-    return activeItems.filter((i) => i.status !== "Healthy").length;
+    return activeItems.filter((i) => normalizeStockStatus(i.status) === "Low").length;
   }, [activeItems]);
 
   const totalAllocatedEquipment = useMemo(() => {
@@ -179,18 +179,18 @@ export function AnalyticsPage() {
   const inventoryPieData = useMemo(() => {
     return [
       {
-        name: "Healthy Stock",
-        value: activeItems.filter((i) => i.status === "Healthy").length,
+        name: "High",
+        value: activeItems.filter((i) => normalizeStockStatus(i.status) === "High").length,
         color: "#6b8e23",
       },
       {
-        name: "Low Stock",
-        value: activeItems.filter((i) => i.status === "Low Stock").length,
+        name: "Normal",
+        value: activeItems.filter((i) => normalizeStockStatus(i.status) === "Normal").length,
         color: "#f59e0b",
       },
       {
-        name: "Critical",
-        value: activeItems.filter((i) => i.status === "Critical").length,
+        name: "Low",
+        value: activeItems.filter((i) => normalizeStockStatus(i.status) === "Low").length,
         color: "#ef4444",
       },
     ].filter((d) => d.value > 0);
@@ -208,7 +208,7 @@ export function AnalyticsPage() {
     csv += `Total Confirmed Events,${confirmedBookings.length}\n`;
     csv += `Total Guests Served,${totalPaxServed.toLocaleString()} Pax\n`;
     csv += `Average Event Value,PHP ${Math.round(avgEventValue).toLocaleString()}\n`;
-    csv += `Inventory Units Allocated,${totalAllocatedEquipment} Units\n\n`;
+    csv += `Equipment Units Allocated,${totalAllocatedEquipment} Units\n\n`;
 
     csv += `--- MONTHLY PERFORMANCE BREAKDOWN ---\n`;
     csv += `Month,Revenue (PHP),Confirmed Events,Guests Served\n`;
@@ -340,7 +340,7 @@ export function AnalyticsPage() {
 
         <div className="glass-card p-5 bg-white">
           <div className="flex items-center justify-between text-natural-text-light mb-2">
-            <span className="text-[0.65rem] font-bold uppercase tracking-widest">Inventory Health</span>
+            <span className="text-[0.65rem] font-bold uppercase tracking-widest">Equipment Monitoring Status</span>
             <Package className="w-4 h-4 text-amber-600" />
           </div>
           <h4 className="text-xl font-bold font-serif text-natural-text-main">
@@ -559,15 +559,15 @@ export function AnalyticsPage() {
             )}
           </div>
 
-          {/* Inventory Health & Stock Distribution */}
+          {/* Equipment Monitoring Health & Stock Distribution */}
           <div className="glass-card p-6 bg-white">
             <div className="border-b border-natural-border pb-4 mb-4">
               <h3 className="font-serif font-bold text-lg text-natural-text-main flex items-center gap-2">
                 <Boxes className="w-5 h-5 text-natural-accent" />
-                Warehouse Supply Health & Demand
+                Equipment Health & Event Demand
               </h3>
               <p className="text-xs text-natural-text-light mt-0.5">
-                Status of supplies and equipment ready for event allocation
+                Status of catering equipment ready for event allocation
               </p>
             </div>
 
@@ -582,26 +582,26 @@ export function AnalyticsPage() {
               </div>
               <div className="p-3 bg-green-50 border border-green-200 rounded-xl">
                 <span className="text-xl font-serif font-bold text-green-700 block">
-                  {activeItems.filter((i) => i.status === "Healthy").length}
+                  {activeItems.filter((i) => normalizeStockStatus(i.status) === "High").length}
                 </span>
                 <span className="text-[9px] font-bold text-green-800 uppercase tracking-wider">
-                  Healthy
+                  High
                 </span>
               </div>
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl">
                 <span className="text-xl font-serif font-bold text-amber-700 block">
-                  {activeItems.filter((i) => i.status === "Low Stock").length}
+                  {activeItems.filter((i) => normalizeStockStatus(i.status) === "Normal").length}
                 </span>
                 <span className="text-[9px] font-bold text-amber-800 uppercase tracking-wider">
-                  Low Stock
+                  Normal
                 </span>
               </div>
               <div className="p-3 bg-red-50 border border-red-200 rounded-xl">
                 <span className="text-xl font-serif font-bold text-red-700 block">
-                  {activeItems.filter((i) => i.status === "Critical").length}
+                  {activeItems.filter((i) => normalizeStockStatus(i.status) === "Low").length}
                 </span>
                 <span className="text-[9px] font-bold text-red-800 uppercase tracking-wider">
-                  Critical
+                  Low
                 </span>
               </div>
             </div>

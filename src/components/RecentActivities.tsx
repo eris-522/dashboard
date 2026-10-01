@@ -160,7 +160,9 @@ export function RecentActivities({ onViewLogs }: { onViewLogs?: () => void }) {
                   </div>
 
                   <p className="text-[11px] text-natural-text-main font-medium leading-snug">
-                    <span className="font-semibold">{activity.action}</span>
+                    <span className="font-semibold">
+                      {activity.action?.replace(/inventory/gi, (m: string) => m[0] === 'I' ? 'Equipment' : 'equipment')}
+                    </span>
                     {activity.target && (
                       <span className="text-natural-accent font-bold ml-1">
                         "{activity.target}"
@@ -170,7 +172,7 @@ export function RecentActivities({ onViewLogs }: { onViewLogs?: () => void }) {
 
                   {activity.details && (
                     <p className="text-[10px] text-natural-text-light line-clamp-1 italic mt-1 pl-1 border-l-2 border-natural-border">
-                      {activity.details}
+                      {activity.details?.replace(/inventory/gi, (m: string) => m[0] === 'I' ? 'Equipment' : 'equipment')}
                     </p>
                   )}
                 </div>

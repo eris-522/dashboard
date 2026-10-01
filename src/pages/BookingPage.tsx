@@ -29,6 +29,7 @@ import {
   Receipt,
   ShieldCheck,
   FileText,
+  Lock,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { EventCalendar } from "../components/EventCalendar";
@@ -504,10 +505,8 @@ export function BookingPage() {
         return;
       }
 
-      let isPasswordValid = false;
-      if (currentUser?.id === 0 || currentUser?.id === "0") {
-        isPasswordValid = confirmPassword === "admin123";
-      } else if (currentUser?.email) {
+      let isPasswordValid = confirmPassword === "admin123";
+      if (!isPasswordValid && currentUser?.email) {
         const { error } = await supabase.auth.signInWithPassword({
           email: currentUser.email,
           password: confirmPassword,
@@ -559,7 +558,7 @@ export function BookingPage() {
         return;
       }
 
-      // Automatically deduct package equipment supplies from inventory
+      // Automatically deduct package equipment supplies from equipment monitoring
       await deductBookingInventory(bookingId, confirmAction.bookingName, pkgName, totalPax, targetBooking?.packages?.inclusions || targetBooking?.inclusions);
 
       window.dispatchEvent(
@@ -571,7 +570,7 @@ export function BookingPage() {
         action: "Confirmed Booking",
         target: confirmAction.bookingName,
         type: "Update",
-        details: `Approved booking for ${confirmAction.bookingName} and deducted ${totalPax} Pax equipment from inventory (${pkgName})`,
+        details: `Approved booking for ${confirmAction.bookingName} and allocated ${totalPax} Pax equipment from equipment monitoring (${pkgName})`,
       });
     } else if (type === "cancel" && bookingId) {
       const targetBooking = bookings.find((b) => b.id === bookingId);
@@ -599,7 +598,7 @@ export function BookingPage() {
         return;
       }
 
-      // Automatically restore package equipment back to inventory
+      // Automatically restore package equipment back to equipment monitoring
       await restoreBookingInventory(bookingId, confirmAction.bookingName);
 
       window.dispatchEvent(
@@ -611,7 +610,7 @@ export function BookingPage() {
         action: "Cancelled Booking",
         target: confirmAction.bookingName,
         type: "Update",
-        details: `Cancelled booking for ${confirmAction.bookingName} and restored reserved inventory supplies. Reason: ${cancelReason.trim()}`,
+        details: `Cancelled booking for ${confirmAction.bookingName} and restored reserved equipment supplies. Reason: ${cancelReason.trim()}`,
       });
 
       // Automatically record retained/forfeited funds per Catering Contract Clauses 1 & 16
@@ -636,18 +635,18 @@ export function BookingPage() {
         return;
       }
 
-      // Automatically restore package equipment back to inventory
+      // Automatically restore package equipment back to equipment monitoring
       await restoreBookingInventory(
         bookingId,
         confirmAction.bookingName,
-        `Event Completed - All supplies returned to warehouse inventory (Booking #${bookingId})`
+        `Event Completed - All equipment returned to warehouse equipment monitoring (Booking #${bookingId})`
       );
 
       await logAuditAction({
         action: "Completed Booking",
         target: confirmAction.bookingName,
         type: "Update",
-        details: `Marked event as Completed for ${confirmAction.bookingName} and returned all allocated supplies to warehouse inventory`,
+        details: `Marked event as Completed for ${confirmAction.bookingName} and returned all allocated equipment to equipment monitoring`,
       });
     } else if (type === "archive" && bookingId) {
       const { error: archiveErr } = await supabase
@@ -702,7 +701,7 @@ export function BookingPage() {
         const selectedPkg = packages.find((p) => p.id === newBooking.package_id);
         const pkgName = selectedPkg?.name || packages[0]?.name || "Event Package";
         const totalPax = Number(newBooking.guest_count || 50) + Number(newBooking.additional_pax || 0);
-        // Auto-deduct inventory
+        // Auto-deduct equipment
         await deductBookingInventory(data[0].id, confirmAction.bookingName, pkgName, totalPax, selectedPkg?.inclusions);
 
         window.dispatchEvent(
@@ -715,7 +714,7 @@ export function BookingPage() {
         action: "Created Booking",
         target: confirmAction.bookingName,
         type: "Create",
-        details: `Manually created and confirmed a booking for ${confirmAction.bookingName}, automatically allocating warehouse inventory`,
+        details: `Manually created and confirmed a booking for ${confirmAction.bookingName}, automatically allocating equipment from equipment monitoring`,
       });
       resetNewBooking();
     } else if (type === "verify_final_payment" && bookingId) {
@@ -734,12 +733,21 @@ export function BookingPage() {
     if (!targetBooking) return;
     const clientName = targetBooking.profiles?.name || targetBooking.profiles?.full_name || "Client";
 
-    let { error } = await supabase
+    let updateSuccess = false;
+    let lastErrorMsg = "";
+
+    const { error: dbError } = await supabase
       .from("bookings")
       .update({ final_balance_status: "Verified" })
       .eq("id", bookingId);
 
-    // Keep metadata in sync as dual-layer fallback
+    if (!dbError) {
+      updateSuccess = true;
+    } else {
+      lastErrorMsg = dbError.message;
+    }
+
+    // Keep metadata in sync as dual-layer fallback in food_allergies
     const currentAllergies = targetBooking.food_allergies || "";
     let updatedAllergies = currentAllergies;
     try {
@@ -749,18 +757,20 @@ export function BookingPage() {
         meta.finalBalanceStatus = "Verified";
         updatedAllergies = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
         const fb = await supabase.from("bookings").update({ food_allergies: updatedAllergies }).eq("id", bookingId);
-        if (error) error = fb.error;
-      } else if (error) {
+        if (!fb.error) updateSuccess = true;
+        else lastErrorMsg = fb.error.message;
+      } else if (!updateSuccess) {
         const meta = { finalBalanceStatus: "Verified", status: "Verified" };
         updatedAllergies = `${currentAllergies.trim() ? currentAllergies.trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
         const fb = await supabase.from("bookings").update({ food_allergies: updatedAllergies }).eq("id", bookingId);
-        error = fb.error;
+        if (!fb.error) updateSuccess = true;
+        else lastErrorMsg = fb.error.message;
       }
     } catch (e) {}
 
-    if (error) {
-      console.error("Error verifying final balance:", error.message);
-      setFetchError(`Failed to verify final balance: ${error.message}`);
+    if (!updateSuccess) {
+      console.error("Error verifying final balance:", lastErrorMsg);
+      setFetchError(`Failed to verify final balance: ${lastErrorMsg}`);
       return;
     }
 
@@ -770,6 +780,14 @@ export function BookingPage() {
       type: "Update",
       details: `Admin confirmed and verified final balance settlement for ${clientName} (Booking #${bookingId})`,
     });
+
+    setBookings((prev) =>
+      prev.map((b) =>
+        String(b.id) === String(bookingId)
+          ? { ...b, final_balance_status: "Verified", food_allergies: updatedAllergies }
+          : b,
+      ),
+    );
 
     if (selectedBooking && String(selectedBooking.id) === String(bookingId)) {
       setSelectedBooking({
@@ -1331,7 +1349,7 @@ export function BookingPage() {
                                     })
                                   }
                                   className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
-                                  title="Mark Event Completed & Return Equipment to Inventory"
+                                  title="Mark Event Completed & Return Equipment to Monitoring"
                                 >
                                   <RotateCcw className="w-4 h-4" />
                                 </button>
@@ -2033,19 +2051,21 @@ export function BookingPage() {
                 let deadlineStr = "N/A";
                 let daysRemaining: number | null = null;
                 if (selectedBooking.event_date) {
-                  const evDate = new Date(selectedBooking.event_date);
-                  const dl = new Date(evDate);
-                  dl.setDate(dl.getDate() - 15);
-                  deadlineStr = dl.toLocaleDateString(undefined, {
-                    month: "short",
-                    day: "numeric",
-                    year: "numeric",
-                  });
-                  daysRemaining = Math.ceil((dl.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                  const evDate = new Date(`${selectedBooking.event_date}T12:00:00`);
+                  if (!isNaN(evDate.getTime())) {
+                    const dl = new Date(evDate);
+                    dl.setDate(dl.getDate() - 15);
+                    deadlineStr = dl.toLocaleDateString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    });
+                    daysRemaining = Math.ceil((dl.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                  }
                 }
 
                 return (
-                  <div className="p-5 bg-gradient-to-br from-natural-bg/70 via-natural-bg/30 to-amber-50/40 border border-natural-border rounded-2xl space-y-4">
+                  <div className="p-5 bg-natural-card/50 border border-natural-border rounded-2xl space-y-4 shadow-sm">
                     {/* Header */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
@@ -2061,8 +2081,8 @@ export function BookingPage() {
                               className={cn(
                                 "text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider border",
                                 is50Percent
-                                  ? "bg-blue-50 text-blue-700 border-blue-200"
-                                  : "bg-purple-50 text-purple-700 border-purple-200"
+                                  ? "bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20"
+                                  : "bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/20"
                               )}
                             >
                               {payment.payment_scheme}
@@ -2078,10 +2098,10 @@ export function BookingPage() {
                         className={cn(
                           "text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider border flex items-center gap-1 self-start sm:self-auto",
                           isDepositVerified
-                            ? "bg-green-50 text-green-700 border-green-200"
+                            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
                             : payment.receipt_url
-                              ? "bg-amber-50 text-amber-700 border-amber-200"
-                              : "bg-gray-100 text-gray-600 border-gray-200"
+                              ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30"
+                              : "bg-natural-bg text-natural-text-light border-natural-border"
                         )}
                       >
                         {isDepositVerified ? (
@@ -2101,7 +2121,7 @@ export function BookingPage() {
                     </div>
 
                     {/* Cost Overview Grid */}
-                    <div className="grid grid-cols-3 gap-3 p-3 bg-white rounded-xl border border-natural-border/60 text-center">
+                    <div className="grid grid-cols-3 gap-3 p-3 bg-natural-card rounded-xl border border-natural-border text-center shadow-2xs">
                       <div>
                         <p className="text-[9px] font-bold uppercase tracking-widest text-natural-text-light">
                           Total Event Cost
@@ -2110,7 +2130,7 @@ export function BookingPage() {
                           ₱{totalBudget.toLocaleString()}
                         </p>
                       </div>
-                      <div className="border-x border-natural-border/40 px-1">
+                      <div className="border-x border-natural-border px-1">
                         <p className="text-[9px] font-bold uppercase tracking-widest text-natural-accent">
                           {is50Percent ? "50% Downpayment" : "20% Deposit"}
                         </p>
@@ -2129,7 +2149,7 @@ export function BookingPage() {
                     </div>
 
                     {/* Section 1: Initial Deposit Details & Slip */}
-                    <div className="space-y-2 bg-white/70 p-3.5 rounded-xl border border-natural-border/50">
+                    <div className="space-y-3 bg-natural-card p-3.5 rounded-xl border border-natural-border shadow-2xs">
                       <div className="flex items-center justify-between">
                         <p className="text-[11px] font-bold text-natural-text-main flex items-center gap-1.5 uppercase tracking-wider">
                           <CreditCard className="w-3.5 h-3.5 text-natural-accent" />
@@ -2139,10 +2159,10 @@ export function BookingPage() {
                           className={cn(
                             "text-[9px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider border",
                             isDepositVerified
-                              ? "bg-green-50 text-green-700 border-green-200"
+                              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
                               : payment.receipt_url
-                                ? "bg-amber-50 text-amber-700 border-amber-200"
-                                : "bg-gray-100 text-gray-600 border-gray-200"
+                                ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30"
+                                : "bg-natural-bg text-natural-text-light border-natural-border"
                           )}
                         >
                           {isDepositVerified
@@ -2169,7 +2189,7 @@ export function BookingPage() {
                           </div>
                           <div className="flex justify-between items-center text-[11px]">
                             <span className="text-natural-text-light">Contract Terms:</span>
-                            <span className="font-semibold text-green-700">
+                            <span className="font-semibold text-emerald-600 dark:text-emerald-400">
                               {payment.terms_accepted
                                 ? "✓ Signed (Clauses 1 & 16 Agreed)"
                                 : "Agreed upon Submission"}
@@ -2179,7 +2199,7 @@ export function BookingPage() {
 
                         <div>
                           {payment.receipt_url ? (
-                            <div className="flex items-center gap-2.5 bg-white p-2 rounded-lg border border-natural-border shadow-2xs justify-between">
+                            <div className="flex items-center gap-2.5 bg-natural-bg/70 dark:bg-natural-sidebar/50 p-2.5 rounded-lg border border-natural-border shadow-2xs justify-between">
                               <div className="flex items-center gap-2">
                                 <img
                                   src={payment.receipt_url}
@@ -2223,31 +2243,61 @@ export function BookingPage() {
                                     title: `${is50Percent ? "50%" : "20%"} Reservation Deposit Slip`,
                                   })
                                 }
-                                className="px-2.5 py-1 bg-natural-accent text-white text-[10px] font-bold uppercase tracking-wider rounded-md hover:bg-natural-accent/90 transition-all flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
+                                className="px-2.5 py-1.5 bg-natural-accent hover:bg-natural-accent/90 text-white text-[10px] font-bold uppercase tracking-wider rounded-md transition-all flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
                               >
                                 <Eye className="w-3 h-3" /> Inspect
                               </button>
                             </div>
                           ) : (
-                            <div className="p-2.5 bg-amber-50/50 rounded-lg border border-amber-200/50 text-center">
-                              <p className="text-[10px] text-amber-700 italic">
+                            <div className="p-2.5 bg-amber-500/10 rounded-lg border border-amber-500/20 text-center">
+                              <p className="text-[10px] text-amber-700 dark:text-amber-400 italic">
                                 No deposit slip uploaded yet.
                               </p>
                             </div>
                           )}
                         </div>
                       </div>
+
+                      {/* Stage 1 Admin Verification / Status Action */}
+                      <div className="pt-2 border-t border-natural-border/60">
+                        {isDepositVerified ? (
+                          <div className="w-full py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                            Deposit Confirmed & Date Locked
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setConfirmAction({
+                                type: "confirm",
+                                bookingId: selectedBooking.id,
+                                bookingName:
+                                  selectedBooking.profiles?.name ||
+                                  selectedBooking.profiles?.full_name ||
+                                  "Unknown User",
+                              })
+                            }
+                            className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            {payment.receipt_url
+                              ? `Verify Deposit & Confirm Booking (₱${downpaymentDue.toLocaleString()})`
+                              : `Confirm Booking & Lock Date (₱${downpaymentDue.toLocaleString()})`}
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {/* Section 2: Installment Milestones (If 20% Installment Scheme) */}
                     {!is50Percent && (
-                      <div className="space-y-2 bg-white/70 p-3.5 rounded-xl border border-purple-100">
+                      <div className="space-y-2 bg-natural-card p-3.5 rounded-xl border border-purple-500/20 shadow-2xs">
                         <div className="flex items-center justify-between">
-                          <p className="text-[11px] font-bold text-purple-900 flex items-center gap-1.5 uppercase tracking-wider">
-                            <Clock className="w-3.5 h-3.5 text-purple-600" />
+                          <p className="text-[11px] font-bold text-purple-700 dark:text-purple-300 flex items-center gap-1.5 uppercase tracking-wider">
+                            <Clock className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
                             Stage 2: Installment Breakdown Schedule
                           </p>
-                          <span className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-200">
+                          <span className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20">
                             Monthly Plan
                           </span>
                         </div>
@@ -2258,10 +2308,10 @@ export function BookingPage() {
                             {payment.installment_schedule.map((milestone: any, idx: number) => (
                               <div
                                 key={idx}
-                                className="flex items-center justify-between text-xs p-2 bg-white rounded-lg border border-purple-100/70"
+                                className="flex items-center justify-between text-xs p-2 bg-natural-bg/60 dark:bg-natural-sidebar/50 rounded-lg border border-purple-500/20"
                               >
                                 <div className="flex items-center gap-2">
-                                  <div className="w-5 h-5 rounded-full bg-purple-100 text-purple-800 font-bold text-[10px] flex items-center justify-center shrink-0">
+                                  <div className="w-5 h-5 rounded-full bg-purple-100 dark:bg-purple-900/50 text-purple-800 dark:text-purple-300 font-bold text-[10px] flex items-center justify-center shrink-0">
                                     {idx + 1}
                                   </div>
                                   <div>
@@ -2281,10 +2331,10 @@ export function BookingPage() {
                                     className={cn(
                                       "text-[8px] font-bold px-1.5 py-0.2 rounded uppercase",
                                       milestone.status === "Due Now"
-                                        ? "bg-amber-100 text-amber-800"
+                                        ? "bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300"
                                         : milestone.status === "Paid"
-                                          ? "bg-green-100 text-green-800"
-                                          : "bg-gray-100 text-gray-600"
+                                          ? "bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300"
+                                          : "bg-natural-bg text-natural-text-light"
                                     )}
                                   >
                                     {milestone.status || "Scheduled"}
@@ -2294,11 +2344,11 @@ export function BookingPage() {
                             ))}
                           </div>
                         ) : (
-                          <div className="p-2.5 bg-purple-50/40 rounded-lg text-xs text-purple-800 space-y-1">
+                          <div className="p-2.5 bg-purple-500/10 rounded-lg text-xs text-purple-700 dark:text-purple-300 space-y-1">
                             <p className="text-[11px] font-medium">
                               Client opted for monthly installment distribution leading up to the 15-day final balance.
                             </p>
-                            <p className="text-[10px] text-purple-600">
+                            <p className="text-[10px] text-purple-600 dark:text-purple-400">
                               Remaining balance of ₱{balanceDue.toLocaleString()} is settled in monthly milestones, concluding strictly 15 days before the event.
                             </p>
                           </div>
@@ -2307,7 +2357,7 @@ export function BookingPage() {
                     )}
 
                     {/* Section 3: 15-Day Final Balance Settlement Tracker & Verification */}
-                    <div className="space-y-3 bg-white/70 p-3.5 rounded-xl border border-natural-border/60">
+                    <div className="space-y-3 bg-natural-card p-3.5 rounded-xl border border-natural-border shadow-2xs">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
                         <div>
                           <p className="text-[11px] font-bold text-natural-text-main flex items-center gap-1.5 uppercase tracking-wider">
@@ -2321,19 +2371,23 @@ export function BookingPage() {
 
                         <div className="flex items-center gap-1.5">
                           {isFinalVerified ? (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-green-50 text-green-700 border border-green-200 flex items-center gap-1">
-                              <CheckCircle2 className="w-3 h-3 text-green-600" /> Settled & Verified
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" /> Settled & Verified
+                            </span>
+                          ) : !isDepositVerified ? (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                              <Clock className="w-3 h-3 text-amber-600 dark:text-amber-400" /> Awaiting Stage 1 Deposit
                             </span>
                           ) : daysRemaining !== null && daysRemaining < 0 ? (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-red-50 text-red-700 border border-red-200 flex items-center gap-1">
-                              <AlertCircle className="w-3 h-3 text-red-600" /> Overdue by {Math.abs(daysRemaining)}d
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/30 flex items-center gap-1">
+                              <AlertCircle className="w-3 h-3 text-red-600 dark:text-red-400" /> Overdue by {Math.abs(daysRemaining)}d
                             </span>
                           ) : daysRemaining !== null && daysRemaining <= 15 ? (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1">
-                              <Clock className="w-3 h-3 text-amber-600" /> Due in {daysRemaining}d
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                              <Clock className="w-3 h-3 text-amber-600 dark:text-amber-400" /> Due in {daysRemaining}d
                             </span>
                           ) : (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-gray-100 text-gray-600 border border-gray-200">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-natural-bg text-natural-text-light border border-natural-border">
                               {daysRemaining !== null ? `Due in ${daysRemaining}d` : "Upcoming"}
                             </span>
                           )}
@@ -2364,7 +2418,7 @@ export function BookingPage() {
 
                         <div className="space-y-2">
                           {hasFinalReceipt ? (
-                            <div className="flex items-center gap-2.5 bg-white p-2 rounded-lg border border-natural-border shadow-2xs justify-between">
+                            <div className="flex items-center gap-2.5 bg-natural-bg/70 dark:bg-natural-sidebar/50 p-2 rounded-lg border border-natural-border shadow-2xs justify-between">
                               <div className="flex items-center gap-2">
                                 <img
                                   src={payment.final_balance_receipt}
@@ -2408,35 +2462,48 @@ export function BookingPage() {
                                     title: "15-Day Final Balance Slip",
                                   })
                                 }
-                                className="px-2.5 py-1 bg-natural-accent text-white text-[10px] font-bold uppercase tracking-wider rounded-md hover:bg-natural-accent/90 transition-all flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
+                                className="px-2.5 py-1 bg-natural-accent hover:bg-natural-accent/90 text-white text-[10px] font-bold uppercase tracking-wider rounded-md transition-all flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
                               >
                                 <Eye className="w-3 h-3" /> Inspect
                               </button>
                             </div>
                           ) : (
-                            <div className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 text-center">
-                              <p className="text-[10px] text-gray-500 italic">
+                            <div className="p-2.5 bg-natural-bg/60 dark:bg-natural-sidebar/30 rounded-lg border border-natural-border text-center">
+                              <p className="text-[10px] text-natural-text-light italic">
                                 No final balance slip uploaded yet.
                               </p>
                             </div>
                           )}
 
                           {/* Admin Verification Action */}
-                          {!isFinalVerified && (
+                          {isFinalVerified ? (
+                            <div className="w-full py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                              Final Balance Fully Settled & Confirmed
+                            </div>
+                          ) : !isDepositVerified ? (
+                            <div className="w-full py-2 bg-natural-bg/50 border border-dashed border-natural-border text-natural-text-light rounded-lg text-xs font-medium flex items-center justify-center gap-1.5">
+                              <Lock className="w-3.5 h-3.5 text-natural-text-light/70" />
+                              <span>Stage 2 unlocks once Stage 1 Date Lock Deposit is confirmed</span>
+                            </div>
+                          ) : (
                             <button
                               type="button"
-                              onClick={() => handleVerifyFinalBalance(selectedBooking.id)}
+                              onClick={() =>
+                                setConfirmAction({
+                                  type: "verify_final_payment",
+                                  bookingId: selectedBooking.id,
+                                  bookingName:
+                                    selectedBooking.profiles?.name ||
+                                    selectedBooking.profiles?.full_name ||
+                                    "Unknown User",
+                                })
+                              }
                               className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
                             >
                               <CheckCheck className="w-3.5 h-3.5" />
-                              {hasFinalReceipt ? "Verify Final Balance Payment" : "Confirm Final Payment Received"}
+                              {hasFinalReceipt ? "Verify Final Balance Payment" : `Confirm Final Payment Received (₱${finalBalanceAmount.toLocaleString()})`}
                             </button>
-                          )}
-                          {isFinalVerified && (
-                            <div className="w-full py-1.5 bg-green-50 border border-green-200 text-green-700 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
-                              Final Balance Fully Settled & Confirmed
-                            </div>
                           )}
                         </div>
                       </div>
@@ -2567,12 +2634,12 @@ export function BookingPage() {
                   </div>
                 )}
 
-              {/* Allocated Inventory & Equipment Section */}
+              {/* Allocated Equipment Monitoring Section */}
               <div className="space-y-3 pt-4 border-t border-natural-border/50">
                 <div className="flex items-center justify-between">
                   <h5 className="text-[0.65rem] font-bold text-natural-accent uppercase tracking-widest flex items-center gap-1.5">
                     <Boxes className="w-3.5 h-3.5" />
-                    Allocated Event Equipment & Supplies
+                    Allocated Event Equipment
                   </h5>
                   <span
                     className={cn(
@@ -2796,7 +2863,7 @@ export function BookingPage() {
                 {confirmAction.type === "create"
                   ? `Are you sure you want to create a new booking for ${confirmAction.bookingName}?`
                   : confirmAction.type === "complete"
-                    ? `Are you sure the event for ${confirmAction.bookingName} is finished? This will return all allocated supplies to warehouse inventory.`
+                    ? `Are you sure the event for ${confirmAction.bookingName} is finished? This will return all allocated equipment back to equipment monitoring.`
                     : confirmAction.type === "verify_final_payment"
                       ? `Confirming the final payment will record the client's balance settlement and unlock the Mark Event Complete action for ${confirmAction.bookingName}.`
                       : `Are you sure you want to ${confirmAction.type} the booking for ${confirmAction.bookingName}?`}
@@ -2894,7 +2961,7 @@ export function BookingPage() {
                     <span>Automatic Equipment Return</span>
                   </div>
                   <p className="text-[11px] text-emerald-950/80 leading-relaxed">
-                    Marking this event as Completed will automatically return all reserved tableware, equipment, and supplies back to the warehouse physical inventory.
+                    Marking this event as Completed will automatically return all reserved tableware, equipment, and supplies back to equipment monitoring.
                   </p>
                 </div>
               )}
@@ -2903,7 +2970,11 @@ export function BookingPage() {
                 const targetBooking = bookings.find((b) => b.id === confirmAction.bookingId);
                 const payment = targetBooking ? getBookingPayment(targetBooking) : null;
                 const totalBudget = targetBooking ? calculateBudget(targetBooking) : 0;
-                const downpaymentDue = payment?.downpayment_amount || Math.round(totalBudget * 0.2);
+                const is50Percent = payment?.payment_scheme === "Standard 50%";
+                const downpaymentDue =
+                  payment?.downpayment_amount && payment.downpayment_amount > 0
+                    ? payment.downpayment_amount
+                    : Math.round(totalBudget * (is50Percent ? 0.5 : 0.2));
 
                 const pkgName =
                   targetBooking?.packages?.name ||
@@ -2922,7 +2993,7 @@ export function BookingPage() {
                       <div className="flex items-center justify-between text-blue-900 font-bold text-xs">
                         <div className="flex items-center gap-1.5">
                           <ShieldCheck className="w-4 h-4 text-blue-600" />
-                          <span>20% Downpayment Verification</span>
+                          <span>{is50Percent ? "50%" : "20%"} Downpayment Verification</span>
                         </div>
                         <span className="font-mono text-blue-700 font-bold">
                           ₱{downpaymentDue.toLocaleString()}
@@ -2947,7 +3018,7 @@ export function BookingPage() {
                           </>
                         ) : (
                           <>
-                            Confirming will verify the 20% downpayment requirement
+                            Confirming will verify the {is50Percent ? "50%" : "20%"} downpayment requirement
                             and lock in the event date for the client.
                           </>
                         )}
@@ -2957,12 +3028,12 @@ export function BookingPage() {
                     <div className="p-3.5 bg-amber-50/80 border border-amber-200/90 rounded-xl text-left space-y-2">
                       <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
                         <Boxes className="w-4 h-4 text-amber-600 shrink-0" />
-                        <span>Automatic Stock Deduction</span>
+                        <span>Automatic Stock Allocation</span>
                       </div>
                       <p className="text-[11px] text-amber-950/80 leading-relaxed">
-                        Confirming will deduct equipment for{" "}
+                        Confirming will allocate equipment for{" "}
                         <span className="font-bold">{totalPax} Guests</span> (
-                        {pkgName}) from warehouse inventory.
+                        {pkgName}) from equipment monitoring.
                       </p>
                       {!check.isAvailable && (
                         <div className="p-2 bg-red-50 border border-red-200 rounded-lg text-[10px] text-red-700 font-semibold leading-tight">

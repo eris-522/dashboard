@@ -4,7 +4,6 @@ import {
   Plus,
   Filter,
   PackageSearch,
-  AlertTriangle,
   ArrowUpRight,
   Warehouse,
   X,
@@ -14,23 +13,12 @@ import {
   ArrowUp,
   ArrowDown,
   Boxes,
-  ClipboardList,
-  History,
-  Settings2,
   RefreshCw,
-  Printer,
   Calendar,
   AlertCircle,
-  Sliders,
-  Sparkles,
-  CheckSquare,
-  Square,
-  Users,
-  Utensils,
   Eye,
-  Check,
-  Trash2,
-  Save,
+  Settings2,
+  Sliders,
   RotateCcw,
 } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -38,8 +26,7 @@ import {
   useInventory,
   InventoryItem,
   StockMovement,
-  PackageEquipmentRule,
-  deriveDynamicPackageRules,
+  normalizeStockStatus,
 } from "../context/InventoryContext";
 import { useBooking } from "../context/BookingContext";
 import { supabase } from "../utils/supabase";
@@ -54,31 +41,21 @@ const categories = [
 ];
 const units = ["pcs", "sets", "boxes", "packs", "kg", "g", "lbs", "L", "ml"];
 
-type TabType = "stock" | "rules" | "movements" | "packing";
-
 export function InventoryPage() {
   const {
     items,
     isLoading,
-    stockMovements,
     deductionRecords,
     addItem,
     updateStock,
     archiveItem,
     updateItem,
-    calculatePackageEquipment,
-    checkInventoryAvailability,
     getAllocatedStock,
-    getPackageRules,
-    savePackageRules,
     refreshItems,
     reconcileCompletedEvents,
   } = useInventory();
 
   const { bookings } = useBooking();
-
-  // Active Tab
-  const [activeTab, setActiveTab] = useState<TabType>("stock");
 
   // Reconcile status state
   const [isReconciling, setIsReconciling] = useState(false);
@@ -89,9 +66,9 @@ export function InventoryPage() {
     try {
       const count = await reconcileCompletedEvents(bookings);
       if (count > 0) {
-        setReconcileMsg(`Successfully returned supplies from ${count} completed event(s) back into inventory!`);
+        setReconcileMsg(`Successfully returned equipment from ${count} completed event(s) back into equipment monitoring!`);
       } else {
-        setReconcileMsg("All inventory equipment is up-to-date with active event schedules.");
+        setReconcileMsg("All equipment monitoring records are up-to-date with active event schedules.");
       }
       setTimeout(() => setReconcileMsg(null), 4000);
     } catch (e) {
@@ -136,122 +113,7 @@ export function InventoryPage() {
     unit: "pcs",
   });
 
-  // Dynamic Packages List from Supabase
-  const [packageList, setPackageList] = useState<{ id: string | number; name: string }[]>([]);
-  const [selectedPackageForSim, setSelectedPackageForSim] = useState<string>("Basic Wedding Package");
-  const [simulatedPax, setSimulatedPax] = useState<number>(50);
 
-  useEffect(() => {
-    const fetchPackages = async () => {
-      const { data } = await supabase
-        .from("packages")
-        .select("id, name")
-        .neq("status", "Archived")
-        .order("name", { ascending: true });
-
-      if (data && data.length > 0) {
-        setPackageList(data);
-        if (!data.some((p) => p.name === selectedPackageForSim)) {
-          setSelectedPackageForSim(data[0].name);
-        }
-      }
-    };
-    fetchPackages();
-  }, []);
-
-  // Editable rules state for the currently selected package
-  const [activePackageRules, setActivePackageRules] = useState<PackageEquipmentRule[]>([]);
-  const [isRuleEditMode, setIsRuleEditMode] = useState(false);
-  const [isAddRuleModalOpen, setIsAddRuleModalOpen] = useState(false);
-  const [ruleSuccessMsg, setRuleSuccessMsg] = useState<string | null>(null);
-
-  const [newRule, setNewRule] = useState<{
-    itemName: string;
-    category: string;
-    type: "per_pax" | "fixed";
-    ratio: number;
-    fixedCount: number;
-    unit: string;
-  }>({
-    itemName: "",
-    category: "Tableware",
-    type: "per_pax",
-    ratio: 1.0,
-    fixedCount: 1,
-    unit: "pcs",
-  });
-
-  useEffect(() => {
-    if (selectedPackageForSim) {
-      setActivePackageRules(getPackageRules(selectedPackageForSim));
-    }
-  }, [selectedPackageForSim, items]);
-
-  const handleSaveRules = () => {
-    savePackageRules(selectedPackageForSim, activePackageRules);
-    setRuleSuccessMsg(`Equipment rules saved for "${selectedPackageForSim}"!`);
-    setIsRuleEditMode(false);
-    setTimeout(() => setRuleSuccessMsg(null), 4000);
-  };
-
-  const handleResetToAutoRules = () => {
-    // Reset to dynamically derived rules from warehouse items
-    const derived = deriveDynamicPackageRules(items);
-    setActivePackageRules(derived);
-    savePackageRules(selectedPackageForSim, derived);
-    setRuleSuccessMsg(`Reset rules to warehouse auto-detection for "${selectedPackageForSim}"!`);
-    setTimeout(() => setRuleSuccessMsg(null), 4000);
-  };
-
-  const handleDeleteRule = (index: number) => {
-    const updated = activePackageRules.filter((_, idx) => idx !== index);
-    setActivePackageRules(updated);
-    savePackageRules(selectedPackageForSim, updated);
-  };
-
-  const handleAddRuleToPackage = () => {
-    if (!newRule.itemName) return;
-    const selectedInvItem = items.find((i) => i.name === newRule.itemName);
-    const addedRule: PackageEquipmentRule = {
-      itemName: newRule.itemName,
-      category: selectedInvItem?.category || newRule.category,
-      type: newRule.type,
-      ratio: newRule.type === "per_pax" ? Number(newRule.ratio) || 1.0 : undefined,
-      fixedCount: newRule.type === "fixed" ? Number(newRule.fixedCount) || 1 : undefined,
-      unit: selectedInvItem?.unit || newRule.unit || "pcs",
-    };
-
-    const updated = [...activePackageRules.filter((r) => r.itemName.toLowerCase() !== newRule.itemName.toLowerCase()), addedRule];
-    setActivePackageRules(updated);
-    savePackageRules(selectedPackageForSim, updated);
-    setIsAddRuleModalOpen(false);
-    setNewRule({
-      itemName: "",
-      category: "Tableware",
-      type: "per_pax",
-      ratio: 1.0,
-      fixedCount: 1,
-      unit: "pcs",
-    });
-    setRuleSuccessMsg(`Added "${newRule.itemName}" to "${selectedPackageForSim}" rules!`);
-    setTimeout(() => setRuleSuccessMsg(null), 3000);
-  };
-
-  // Event Packing Checklist State
-  const confirmedBookings = useMemo(() => {
-    return bookings.filter(
-      (b) => (b.status || "Pending") === "Confirmed"
-    );
-  }, [bookings]);
-
-  const [selectedBookingForPacking, setSelectedBookingForPacking] = useState<number | string>(
-    confirmedBookings[0]?.id || ""
-  );
-  const [packedItemsMap, setPackedItemsMap] = useState<Record<string, boolean>>({});
-
-  // Movement Log Filter
-  const [movementFilterType, setMovementFilterType] = useState<string>("All");
-  const [movementSearch, setMovementSearch] = useState<string>("");
 
   // Handler: Add Item
   const handleAddItem = async () => {
@@ -278,10 +140,10 @@ export function InventoryPage() {
     });
 
     await logAuditAction({
-      action: "Added Inventory Item",
+      action: "Added Equipment Item",
       target: newItem.name.trim(),
       type: "Create",
-      details: `Added new item to ${newItem.category} with initial stock of ${newItem.stock} ${newItem.unit || "pcs"}`,
+      details: `Added new equipment item ${newItem.name.trim()} (${newItem.category}) with initial stock of ${newItem.stock} ${newItem.unit || "pcs"}`,
     });
 
     setIsAddModalOpen(false);
@@ -309,7 +171,7 @@ export function InventoryPage() {
     await updateStock(selectedItem.id, effectiveChange, restockReason, adjustmentType);
 
     await logAuditAction({
-      action: adjustmentType === "Restock" ? "Restocked Inventory" : "Adjusted Stock",
+      action: adjustmentType === "Restock" ? "Restocked Equipment" : "Adjusted Equipment Stock",
       target: selectedItem.name,
       type: "Update",
       details: `${adjustmentType}: ${effectiveChange > 0 ? "+" : ""}${effectiveChange} ${selectedItem.unit} (${restockReason})`,
@@ -346,7 +208,7 @@ export function InventoryPage() {
     });
 
     await logAuditAction({
-      action: "Updated Inventory Item",
+      action: "Updated Equipment Item",
       target: editFormData.name,
       type: "Update",
       details: `Modified details for ${editFormData.name} in category ${editFormData.category}`,
@@ -357,7 +219,7 @@ export function InventoryPage() {
     setFormError(null);
   };
 
-  // Filtered Inventory Items
+  // Filtered Equipment Items
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
       const matchesSearch =
@@ -370,8 +232,11 @@ export function InventoryPage() {
       const isArchived =
         item.status === "Archived" || item.status?.toLowerCase() === "archived";
       const matchesArchiveStatus = showArchived ? isArchived : !isArchived;
+      const normStatus = normalizeStockStatus(item.status);
       const matchesStatusFilter =
-        filterStatus === "All" || item.status === filterStatus;
+        filterStatus === "All" ||
+        normStatus === filterStatus ||
+        item.status === filterStatus;
 
       return (
         matchesSearch &&
@@ -386,13 +251,16 @@ export function InventoryPage() {
     if (!sortStatus) return filteredItems;
     return [...filteredItems].sort((a, b) => {
       const statusOrder: Record<string, number> = {
+        Low: 1,
+        Normal: 2,
+        High: 3,
+        Archived: 4,
         Critical: 1,
         "Low Stock": 2,
         Healthy: 3,
-        Archived: 4,
       };
-      const valA = statusOrder[a.status] || 5;
-      const valB = statusOrder[b.status] || 5;
+      const valA = statusOrder[normalizeStockStatus(a.status)] || 5;
+      const valB = statusOrder[normalizeStockStatus(b.status)] || 5;
       if (valA < valB) return sortStatus === "asc" ? -1 : 1;
       if (valA > valB) return sortStatus === "asc" ? 1 : -1;
       return 0;
@@ -406,7 +274,7 @@ export function InventoryPage() {
   }, [items]);
 
   const lowStockItems = useMemo(() => {
-    return activeItems.filter((i) => i.status !== "Healthy");
+    return activeItems.filter((i) => normalizeStockStatus(i.status) === "Low");
   }, [activeItems]);
 
   const stats = useMemo(() => {
@@ -420,34 +288,7 @@ export function InventoryPage() {
     };
   }, [activeItems, lowStockItems, getAllocatedStock]);
 
-  // Selected Booking details for packing sheet
-  const selectedBookingDetails = useMemo(() => {
-    return bookings.find((b) => String(b.id) === String(selectedBookingForPacking));
-  }, [bookings, selectedBookingForPacking]);
 
-  const packingList = useMemo(() => {
-    if (!selectedBookingDetails) return [];
-    const pkgName = selectedBookingDetails.package || "Basic Wedding Package";
-    const totalPax = (selectedBookingDetails.guestCount || 50) + (selectedBookingDetails.additionalPax || 0);
-
-    return calculatePackageEquipment(
-      pkgName,
-      totalPax
-    );
-  }, [selectedBookingDetails, calculatePackageEquipment]);
-
-  // Filtered Stock Movements
-  const filteredMovements = useMemo(() => {
-    return stockMovements.filter((m) => {
-      const matchesType =
-        movementFilterType === "All" || m.type === movementFilterType;
-      const matchesSearch =
-        m.itemName.toLowerCase().includes(movementSearch.toLowerCase()) ||
-        m.reason.toLowerCase().includes(movementSearch.toLowerCase()) ||
-        (m.bookingName || "").toLowerCase().includes(movementSearch.toLowerCase());
-      return matchesType && matchesSearch;
-    });
-  }, [stockMovements, movementFilterType, movementSearch]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-12">
@@ -455,10 +296,10 @@ export function InventoryPage() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-serif font-bold text-natural-text-main">
-            Inventory & Supply Management
+            Equipment Tracking & Allocation
           </h2>
           <p className="text-natural-text-light text-[0.8rem] font-medium uppercase tracking-wider">
-            Connected warehouse tracking, package deductions, and event logistics
+            Real-time equipment status, event allocations, and return logistics
           </p>
         </div>
 
@@ -509,7 +350,7 @@ export function InventoryPage() {
       )}
 
       {/* KPI Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="glass-card p-5 bg-white flex items-center gap-4">
           <div className="p-3 bg-natural-bg rounded-xl border border-natural-border">
             <Warehouse className="w-5 h-5 text-natural-accent" />
@@ -520,20 +361,6 @@ export function InventoryPage() {
             </p>
             <h4 className="text-2xl font-bold font-serif text-natural-text-main">
               {stats.totalTypes}
-            </h4>
-          </div>
-        </div>
-
-        <div className="glass-card p-5 bg-white flex items-center gap-4 border-l-4 border-natural-accent">
-          <div className="p-3 bg-amber-50 rounded-xl border border-amber-200">
-            <AlertTriangle className="w-5 h-5 text-amber-600" />
-          </div>
-          <div>
-            <p className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
-              Restock Needed
-            </p>
-            <h4 className="text-2xl font-bold font-serif text-natural-accent">
-              {stats.lowStockCount} Items
             </h4>
           </div>
         </div>
@@ -568,7 +395,7 @@ export function InventoryPage() {
       </div>
 
       {/* Low Stock Replenishment Alert Bar (If any) */}
-      {lowStockItems.length > 0 && !showArchived && activeTab === "stock" && (
+      {lowStockItems.length > 0 && !showArchived && (
         <div className="p-4 bg-amber-50/90 border border-amber-200/90 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xs animate-in slide-in-from-top-2 duration-300">
           <div className="flex items-start gap-3">
             <div className="p-2 bg-amber-100 rounded-lg text-amber-800 shrink-0 mt-0.5">
@@ -579,7 +406,7 @@ export function InventoryPage() {
                 Stock Attention Required ({lowStockItems.length} items low)
               </h4>
               <p className="text-xs text-amber-900/80 mt-0.5">
-                The following supplies are near or below minimum requirement:{" "}
+                The following equipment items are near or below minimum requirement:{" "}
                 <span className="font-semibold">
                   {lowStockItems.map((i) => i.name).slice(0, 5).join(", ")}
                   {lowStockItems.length > 5 ? ` and ${lowStockItems.length - 5} more` : ""}
@@ -606,49 +433,15 @@ export function InventoryPage() {
         </div>
       )}
 
-      {/* Main Tab Navigation */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-natural-border pb-1">
-        {[
-          { id: "stock", label: "Stock Control", icon: Warehouse },
-          { id: "rules", label: "Package Equipment Rules & Simulator", icon: Sliders },
-          { id: "movements", label: "Stock Movement History", icon: History },
-          { id: "packing", label: "Event Prep & Packing Sheet", icon: ClipboardList },
-        ].map((t) => {
-          const Icon = t.icon;
-          const isActive = activeTab === t.id;
-          return (
-            <button
-              key={t.id}
-              onClick={() => setActiveTab(t.id as TabType)}
-              className={cn(
-                "flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest transition-all cursor-pointer",
-                isActive
-                  ? "bg-natural-accent text-white shadow-sm"
-                  : "bg-white border border-natural-border text-natural-text-light hover:text-natural-text-main hover:bg-natural-bg/50"
-              )}
-            >
-              <Icon className="w-4 h-4" />
-              {t.label}
-              {t.id === "movements" && stockMovements.length > 0 && (
-                <span className={cn("px-1.5 py-0.2 rounded-full text-[9px]", isActive ? "bg-white/20 text-white" : "bg-natural-bg text-natural-text-main")}>
-                  {stockMovements.length}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* TAB 1: STOCK CONTROL & OVERVIEW */}
-      {activeTab === "stock" && (
-        <div className="glass-card bg-white overflow-hidden space-y-4">
+      {/* Equipment Stock Table */}
+      <div className="glass-card bg-white overflow-hidden space-y-4">
           <div className="p-4 border-b border-natural-border flex flex-col md:flex-row gap-4 items-center justify-between">
             <div className="relative w-full md:w-80">
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search supplies, furniture, tableware..."
+                placeholder="Search equipment, furniture, tableware..."
                 className="w-full pl-9 pr-4 py-2 bg-natural-bg/50 border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white transition-all shadow-xs"
               />
               <Search className="absolute left-3 top-2.5 w-4 h-4 text-natural-text-light" />
@@ -703,9 +496,9 @@ export function InventoryPage() {
                 className="px-3 py-2 border border-natural-border rounded-lg text-xs font-bold text-natural-text-main bg-white outline-none cursor-pointer uppercase tracking-wider"
               >
                 <option value="All">All Statuses</option>
-                <option value="Healthy">Healthy</option>
-                <option value="Low Stock">Low Stock</option>
-                <option value="Critical">Critical</option>
+                <option value="High">High</option>
+                <option value="Normal">Normal</option>
+                <option value="Low">Low</option>
               </select>
             </div>
           </div>
@@ -714,14 +507,14 @@ export function InventoryPage() {
             {isLoading ? (
               <div className="flex flex-col items-center justify-center py-20 text-natural-text-light">
                 <div className="w-8 h-8 border-4 border-natural-accent border-t-transparent rounded-full animate-spin mb-4" />
-                <p className="font-serif italic">Loading warehouse inventory...</p>
+                <p className="font-serif italic">Loading equipment monitoring data...</p>
               </div>
             ) : sortedItems.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-natural-text-light">
                 <PackageSearch className="w-12 h-12 mb-4 opacity-20" />
-                <p className="font-serif italic">No inventory items found</p>
+                <p className="font-serif italic">No equipment items found</p>
                 <p className="text-[0.7rem] uppercase tracking-widest mt-1">
-                  Adjust filters or add new supplies to your stock
+                  Adjust filters or add new equipment items to your monitoring list
                 </p>
               </div>
             ) : (
@@ -749,7 +542,7 @@ export function InventoryPage() {
                       }
                     >
                       <div className="flex items-center gap-1.5">
-                        Stock Health
+                        Stock Status
                         {sortStatus === "asc" ? (
                           <ArrowUp className="w-3 h-3 text-natural-accent" />
                         ) : sortStatus === "desc" ? (
@@ -805,19 +598,24 @@ export function InventoryPage() {
                               </span>
                             </div>
                             <div className="h-[6px] w-full bg-natural-bg border border-natural-border rounded-full overflow-hidden">
-                              <div
-                                className={cn(
-                                  "h-full transition-all duration-700",
-                                  item.status === "Healthy"
-                                    ? "bg-[#6b8e23]"
-                                    : item.status === "Low Stock"
-                                      ? "bg-orange-400"
-                                      : item.status === "Archived"
-                                        ? "bg-gray-400"
-                                        : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.4)]"
-                                )}
-                                style={{ width: `${stockPercentage}%` }}
-                              />
+                              {(() => {
+                                const s = normalizeStockStatus(item.status);
+                                return (
+                                  <div
+                                    className={cn(
+                                      "h-full transition-all duration-700",
+                                      s === "High"
+                                        ? "bg-[#6b8e23]"
+                                        : s === "Normal"
+                                          ? "bg-amber-400"
+                                          : s === "Archived"
+                                            ? "bg-gray-400"
+                                            : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.4)]"
+                                    )}
+                                    style={{ width: `${stockPercentage}%` }}
+                                  />
+                                );
+                              })()}
                             </div>
                           </div>
                         </td>
@@ -839,34 +637,39 @@ export function InventoryPage() {
                           </p>
                         </td>
                         <td className="px-6 py-4 border-b border-natural-border/50">
-                          <div className="flex items-center gap-2">
-                            <div
-                              className={cn(
-                                "w-2 h-2 rounded-full",
-                                item.status === "Healthy"
-                                  ? "bg-[#6b8e23]"
-                                  : item.status === "Low Stock"
-                                    ? "bg-orange-400"
-                                    : item.status === "Archived"
-                                      ? "bg-gray-400"
-                                      : "bg-red-500"
-                              )}
-                            />
-                            <span
-                              className={cn(
-                                "text-[0.65rem] font-bold uppercase tracking-widest",
-                                item.status === "Healthy"
-                                  ? "text-[#6b8e23]"
-                                  : item.status === "Low Stock"
-                                    ? "text-orange-500"
-                                    : item.status === "Archived"
-                                      ? "text-gray-500"
-                                      : "text-red-500"
-                              )}
-                            >
-                              {item.status}
-                            </span>
-                          </div>
+                          {(() => {
+                            const s = normalizeStockStatus(item.status);
+                            return (
+                              <div className="flex items-center gap-2">
+                                <div
+                                  className={cn(
+                                    "w-2 h-2 rounded-full",
+                                    s === "High"
+                                      ? "bg-[#6b8e23]"
+                                      : s === "Normal"
+                                        ? "bg-amber-400"
+                                        : s === "Archived"
+                                          ? "bg-gray-400"
+                                          : "bg-red-500"
+                                  )}
+                                />
+                                <span
+                                  className={cn(
+                                    "text-[0.65rem] font-bold uppercase tracking-widest",
+                                    s === "High"
+                                      ? "text-[#6b8e23]"
+                                      : s === "Normal"
+                                        ? "text-amber-600"
+                                        : s === "Archived"
+                                          ? "text-gray-500"
+                                          : "text-red-500"
+                                  )}
+                                >
+                                  {s}
+                                </span>
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="px-6 py-4 border-b border-natural-border/50 text-right">
                           <div className="flex justify-end items-center gap-2">
@@ -881,11 +684,11 @@ export function InventoryPage() {
                                     setFormError(null);
                                     setIsRestockModalOpen(true);
                                   }}
-                                  className="flex items-center gap-1 px-2.5 py-1.5 bg-natural-accent/10 hover:bg-natural-accent text-natural-accent hover:text-white rounded-lg text-xs font-bold transition-all cursor-pointer"
-                                  title="Quick Restock"
+                                  className="flex items-center gap-1.5 px-2.5 py-1.5 bg-natural-accent/10 hover:bg-natural-accent text-natural-accent hover:text-white rounded-lg text-xs font-bold transition-all cursor-pointer"
+                                  title="Stock Adjustment"
                                 >
-                                  <Plus className="w-3.5 h-3.5" />
-                                  <span>Restock</span>
+                                  <Sliders className="w-3.5 h-3.5" />
+                                  <span>Stock Adjustment</span>
                                 </button>
                                 <button
                                   onClick={() => {
@@ -927,526 +730,6 @@ export function InventoryPage() {
             )}
           </div>
         </div>
-      )}
-
-      {/* TAB 2: PACKAGE EQUIPMENT RULES & SIMULATOR */}
-      {activeTab === "rules" && (
-        <div className="space-y-6">
-          <div className="glass-card p-6 bg-white space-y-6">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-natural-border pb-4">
-              <div>
-                <h3 className="text-lg font-serif font-bold text-natural-text-main flex items-center gap-2">
-                  <Sliders className="w-5 h-5 text-natural-accent" />
-                  Dynamic Package Equipment Manager & Simulator
-                </h3>
-                <p className="text-xs text-natural-text-light mt-0.5">
-                  Calculates and manages required inventory supplies for any existing or future catering package.
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
-                    Package:
-                  </span>
-                  <select
-                    value={selectedPackageForSim}
-                    onChange={(e) => setSelectedPackageForSim(e.target.value)}
-                    className="px-4 py-2 border border-natural-border rounded-xl text-xs font-bold text-natural-text-main bg-white outline-none cursor-pointer uppercase tracking-wider hover:bg-natural-bg/40 transition-colors shadow-xs"
-                  >
-                    {packageList.length > 0 ? (
-                      packageList.map((pkg) => (
-                        <option key={pkg.id} value={pkg.name}>
-                          {pkg.name}
-                        </option>
-                      ))
-                    ) : (
-                      <>
-                        <option value="Basic Wedding Package">Basic Wedding Package</option>
-                        <option value="Classic Wedding Package">Classic Wedding Package</option>
-                        <option value="Premium Wedding Package">Premium Wedding Package</option>
-                        <option value="Standard Event Package">Standard Event Package</option>
-                      </>
-                    )}
-                  </select>
-                </div>
-
-                <button
-                  onClick={() => setIsAddRuleModalOpen(true)}
-                  className="flex items-center gap-1.5 px-3.5 py-2 bg-natural-accent text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-natural-accent/90 transition-all shadow-xs cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Add Equipment Item
-                </button>
-
-                <button
-                  onClick={handleResetToAutoRules}
-                  className="flex items-center gap-1.5 px-3.5 py-2 border border-natural-border text-natural-text-main hover:bg-natural-bg rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer"
-                  title="Reset to warehouse dynamic detection"
-                >
-                  <RotateCcw className="w-3.5 h-3.5 text-natural-text-light" />
-                  Auto-Detect
-                </button>
-              </div>
-            </div>
-
-            {ruleSuccessMsg && (
-              <div className="p-3 bg-green-50 border border-green-200 rounded-xl flex items-center gap-2 animate-in fade-in duration-300">
-                <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
-                <p className="text-xs font-bold text-green-800">{ruleSuccessMsg}</p>
-              </div>
-            )}
-
-            {/* Interactive Pax Simulator Slider */}
-            <div className="p-6 bg-natural-bg/30 border border-natural-border rounded-2xl space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Users className="w-4 h-4 text-natural-accent" />
-                  <span className="text-xs font-bold uppercase tracking-wider text-natural-text-main">
-                    Simulate Event Guest Count (Pax):
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl font-serif font-bold text-natural-accent">
-                    {simulatedPax}
-                  </span>
-                  <span className="text-xs text-natural-text-light uppercase font-bold">
-                    Guests
-                  </span>
-                </div>
-              </div>
-
-              <input
-                type="range"
-                min={20}
-                max={350}
-                step={5}
-                value={simulatedPax}
-                onChange={(e) => setSimulatedPax(Number(e.target.value))}
-                className="w-full accent-natural-accent h-2 bg-natural-border rounded-lg cursor-pointer"
-              />
-
-              <div className="flex justify-between text-[10px] text-natural-text-light font-bold uppercase tracking-widest">
-                <span>20 Pax (Intimate)</span>
-                <span>100 Pax (Classic)</span>
-                <span>200 Pax (Grand)</span>
-                <span>350 Pax (Large Scale)</span>
-              </div>
-            </div>
-
-            {/* Live Calculation Grid */}
-            {(() => {
-              const check = checkInventoryAvailability(selectedPackageForSim, simulatedPax);
-              return (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-bold uppercase tracking-widest text-natural-text-main">
-                      Dynamic Equipment Requirements for "{selectedPackageForSim}" ({check.requirements.length} Items):
-                    </h4>
-                    <span
-                      className={cn(
-                        "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest border",
-                        check.isAvailable
-                          ? "bg-green-50 text-green-700 border-green-200"
-                          : "bg-red-50 text-red-700 border-red-200"
-                      )}
-                    >
-                      {check.isAvailable
-                        ? "✓ Fully Available in Warehouse"
-                        : "⚠️ Insufficient Stock Alert"}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {check.requirements.map((req, idx) => (
-                      <div
-                        key={idx}
-                        className={cn(
-                          "p-4 rounded-xl border transition-all flex flex-col justify-between group",
-                          req.isAvailable
-                            ? "bg-white border-natural-border/70 shadow-xs"
-                            : "bg-red-50/50 border-red-200 shadow-xs"
-                        )}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <p className="text-sm font-bold text-natural-text-main">
-                              {req.itemName}
-                            </p>
-                            <span className="text-[10px] text-natural-text-light font-bold uppercase tracking-wider">
-                              {req.category} • {req.type === "per_pax" ? "Per Guest Ratio" : "Fixed Setup"}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <span
-                              className={cn(
-                                "text-[10px] font-bold px-2 py-0.5 rounded",
-                                req.isAvailable
-                                  ? "bg-green-100 text-green-700"
-                                  : "bg-red-100 text-red-700"
-                              )}
-                            >
-                              {req.isAvailable ? "OK" : `Short -${req.deficit}`}
-                            </span>
-                            <button
-                              onClick={() => handleDeleteRule(idx)}
-                              className="opacity-0 group-hover:opacity-100 p-1 text-natural-text-light hover:text-red-500 hover:bg-red-50 rounded transition-all cursor-pointer"
-                              title="Remove item from package"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="mt-4 pt-3 border-t border-natural-border/40 flex items-center justify-between text-xs">
-                          <div>
-                            <span className="text-[10px] text-natural-text-light uppercase font-bold block">
-                              Required for {simulatedPax} Pax
-                            </span>
-                            <span className="text-sm font-bold text-natural-accent">
-                              {req.quantity} {req.unit}
-                            </span>
-                          </div>
-                          <div className="text-right">
-                            <span className="text-[10px] text-natural-text-light uppercase font-bold block">
-                              Warehouse Stock
-                            </span>
-                            <span className="text-sm font-semibold text-natural-text-main">
-                              {req.availableStock} {req.unit}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-        </div>
-      )}
-
-      {/* TAB 3: STOCK MOVEMENT HISTORY */}
-      {activeTab === "movements" && (
-        <div className="glass-card bg-white overflow-hidden space-y-4">
-          <div className="p-4 border-b border-natural-border flex flex-col md:flex-row gap-4 items-center justify-between">
-            <div className="relative w-full md:w-80">
-              <input
-                type="text"
-                value={movementSearch}
-                onChange={(e) => setMovementSearch(e.target.value)}
-                placeholder="Search history by item, client, reason..."
-                className="w-full pl-9 pr-4 py-2 bg-natural-bg/50 border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white transition-all shadow-xs"
-              />
-              <Search className="absolute left-3 top-2.5 w-4 h-4 text-natural-text-light" />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-widest text-natural-text-light">
-                Type Filter:
-              </span>
-              <select
-                value={movementFilterType}
-                onChange={(e) => setMovementFilterType(e.target.value)}
-                className="px-3 py-2 border border-natural-border rounded-lg text-xs font-bold text-natural-text-main bg-white outline-none cursor-pointer uppercase tracking-wider"
-              >
-                <option value="All">All Types</option>
-                <option value="Booking Deduction">Booking Deductions</option>
-                <option value="Booking Return">Booking Returns</option>
-                <option value="Restock">Restocks</option>
-                <option value="Manual Adjustment">Adjustments</option>
-                <option value="Damaged/Loss">Damaged / Loss</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="overflow-x-auto min-h-[300px]">
-            {filteredMovements.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 text-natural-text-light">
-                <History className="w-12 h-12 mb-4 opacity-20" />
-                <p className="font-serif italic">No movement records recorded yet</p>
-                <p className="text-[0.7rem] uppercase tracking-widest mt-1">
-                  Automatic deductions and restocks will appear here in chronological order
-                </p>
-              </div>
-            ) : (
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-natural-bg/30">
-                    <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border">
-                      Timestamp
-                    </th>
-                    <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border">
-                      Type
-                    </th>
-                    <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border">
-                      Item Name
-                    </th>
-                    <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border text-center">
-                      Quantity Change
-                    </th>
-                    <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border">
-                      Stock After
-                    </th>
-                    <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border">
-                      Reason / Notes
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredMovements.map((mov) => (
-                    <tr key={mov.id} className="hover:bg-natural-bg/20 transition-colors">
-                      <td className="px-6 py-4 border-b border-natural-border/50 text-xs text-natural-text-main font-medium">
-                        {new Date(mov.timestamp).toLocaleString(undefined, {
-                          year: "numeric",
-                          month: "short",
-                          day: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </td>
-                      <td className="px-6 py-4 border-b border-natural-border/50">
-                        <span
-                          className={cn(
-                            "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border",
-                            mov.type === "Booking Deduction"
-                              ? "bg-red-50 text-red-700 border-red-200"
-                              : mov.type === "Booking Return"
-                                ? "bg-green-50 text-green-700 border-green-200"
-                                : mov.type === "Restock"
-                                  ? "bg-blue-50 text-blue-700 border-blue-200"
-                                  : "bg-gray-50 text-gray-700 border-gray-200"
-                          )}
-                        >
-                          {mov.type}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 border-b border-natural-border/50 text-sm font-bold text-natural-text-main">
-                        {mov.itemName}
-                      </td>
-                      <td className="px-6 py-4 border-b border-natural-border/50 text-center">
-                        <span
-                          className={cn(
-                            "text-sm font-bold font-serif",
-                            mov.change > 0 ? "text-green-600" : "text-red-600"
-                          )}
-                        >
-                          {mov.change > 0 ? `+${mov.change}` : mov.change}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 border-b border-natural-border/50 text-xs font-semibold text-natural-text-light">
-                        {mov.newStock}
-                      </td>
-                      <td className="px-6 py-4 border-b border-natural-border/50 text-xs text-natural-text-main/80">
-                        <p>{mov.reason}</p>
-                        {mov.bookingName && (
-                          <span className="text-[10px] text-natural-accent font-bold uppercase tracking-wider block mt-0.5">
-                            Client: {mov.bookingName}
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* TAB 4: EVENT PREPARATION & PACKING SHEET */}
-      {activeTab === "packing" && (
-        <div className="space-y-6">
-          <div className="glass-card p-6 bg-white space-y-6">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-natural-border pb-4">
-              <div>
-                <h3 className="text-lg font-serif font-bold text-natural-text-main flex items-center gap-2">
-                  <ClipboardList className="w-5 h-5 text-natural-accent" />
-                  Warehouse Equipment Preparation & Packing Sheet
-                </h3>
-                <p className="text-xs text-natural-text-light mt-0.5">
-                  Select a confirmed event to generate an interactive warehouse packing checklist.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <select
-                  value={selectedBookingForPacking}
-                  onChange={(e) => {
-                    setSelectedBookingForPacking(e.target.value);
-                    setPackedItemsMap({});
-                  }}
-                  className="px-4 py-2 border border-natural-border rounded-xl text-xs font-bold text-natural-text-main bg-white outline-none cursor-pointer uppercase tracking-wider"
-                >
-                  {confirmedBookings.length === 0 ? (
-                    <option value="">No confirmed bookings</option>
-                  ) : (
-                    confirmedBookings.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.customerName || `Booking #${b.id}`} - {b.package || "Event"} ({b.date || "Scheduled"})
-                      </option>
-                    ))
-                  )}
-                </select>
-
-                <button
-                  onClick={() => window.print()}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-natural-bg hover:bg-natural-border/50 border border-natural-border rounded-xl text-xs font-bold text-natural-text-main uppercase tracking-wider transition-all"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  Print Sheet
-                </button>
-              </div>
-            </div>
-
-            {selectedBookingDetails ? (
-              <div className="space-y-6">
-                {/* Event Summary Box */}
-                <div className="p-6 bg-natural-bg/30 border border-natural-border rounded-2xl grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div>
-                    <span className="text-[10px] text-natural-text-light font-bold uppercase tracking-widest block">
-                      Client Name
-                    </span>
-                    <span className="text-base font-serif font-bold text-natural-text-main">
-                      {selectedBookingDetails.customerName || "Client"}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-natural-text-light font-bold uppercase tracking-widest block">
-                      Event Package
-                    </span>
-                    <span className="text-sm font-bold text-natural-accent">
-                      {selectedBookingDetails.package || "Standard Package"}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-natural-text-light font-bold uppercase tracking-widest block">
-                      Guest Count
-                    </span>
-                    <span className="text-sm font-bold text-natural-text-main">
-                      {selectedBookingDetails.guestCount || 50} Pax
-                      {(selectedBookingDetails.additionalPax || 0) > 0 &&
-                        ` (+${selectedBookingDetails.additionalPax} extra)`}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-natural-text-light font-bold uppercase tracking-widest block">
-                      Event Date & Venue
-                    </span>
-                    <span className="text-xs font-semibold text-natural-text-main block">
-                      {selectedBookingDetails.date || "Scheduled Date"}
-                    </span>
-                    <span className="text-[10px] text-natural-text-light truncate block">
-                      {selectedBookingDetails.venueName || "Venue"}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Checklist Control */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold uppercase tracking-widest text-natural-text-main">
-                      Packing Checklist ({packingList.length} Items):
-                    </span>
-                    <span className="text-[10px] font-bold text-natural-text-light bg-natural-bg px-2 py-0.5 rounded">
-                      {Object.values(packedItemsMap).filter(Boolean).length} / {packingList.length} Packed
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        const allPacked: Record<string, boolean> = {};
-                        packingList.forEach((item) => {
-                          allPacked[item.itemName] = true;
-                        });
-                        setPackedItemsMap(allPacked);
-                      }}
-                      className="text-[11px] font-bold text-natural-accent hover:underline uppercase tracking-wider"
-                    >
-                      Check All
-                    </button>
-                    <span className="text-natural-border">•</span>
-                    <button
-                      onClick={() => setPackedItemsMap({})}
-                      className="text-[11px] font-bold text-natural-text-light hover:underline uppercase tracking-wider"
-                    >
-                      Reset
-                    </button>
-                  </div>
-                </div>
-
-                {/* Checklist Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {packingList.map((item, i) => {
-                    const isChecked = !!packedItemsMap[item.itemName];
-                    return (
-                      <div
-                        key={i}
-                        onClick={() =>
-                          setPackedItemsMap((prev) => ({
-                            ...prev,
-                            [item.itemName]: !prev[item.itemName],
-                          }))
-                        }
-                        className={cn(
-                          "p-4 rounded-xl border transition-all cursor-pointer select-none flex items-center justify-between",
-                          isChecked
-                            ? "bg-green-50/80 border-green-200 shadow-xs"
-                            : "bg-white border-natural-border hover:border-natural-accent/40 shadow-xs"
-                        )}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div
-                            className={cn(
-                              "w-5 h-5 rounded flex items-center justify-center transition-all",
-                              isChecked
-                                ? "bg-green-600 text-white"
-                                : "border border-natural-border bg-natural-bg text-transparent"
-                            )}
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                          </div>
-                          <div>
-                            <p
-                              className={cn(
-                                "text-sm font-bold tracking-tight",
-                                isChecked
-                                  ? "line-through text-green-900/60"
-                                  : "text-natural-text-main"
-                              )}
-                            >
-                              {item.itemName}
-                            </p>
-                            <span className="text-[10px] text-natural-text-light uppercase font-semibold">
-                              {item.category}
-                            </span>
-                          </div>
-                        </div>
-
-                        <span
-                          className={cn(
-                            "text-sm font-bold font-serif px-2.5 py-1 rounded-lg",
-                            isChecked
-                              ? "bg-green-100 text-green-800"
-                              : "bg-natural-bg text-natural-accent"
-                          )}
-                        >
-                          {item.quantity} {item.unit}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : (
-              <div className="p-12 text-center text-natural-text-light italic">
-                No confirmed event bookings found. Confirm an event in the Bookings tab to generate a prep sheet.
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* MODAL: ADD ITEM */}
       {isAddModalOpen && (
@@ -1454,7 +737,7 @@ export function InventoryPage() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-natural-border flex items-center justify-between">
               <h3 className="text-xl font-serif font-bold text-natural-text-main">
-                Add New Inventory Supply
+                Add New Equipment Item
               </h3>
               <button
                 onClick={() => {
@@ -1627,11 +910,10 @@ export function InventoryPage() {
                 <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
                   Adjustment Type
                 </label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   {[
                     { type: "Restock", label: "Restock (+)" },
                     { type: "Damaged/Loss", label: "Damage / Loss (-)" },
-                    { type: "Manual Adjustment", label: "Audit / Other" },
                   ].map((btn) => (
                     <button
                       key={btn.type}
@@ -1640,10 +922,9 @@ export function InventoryPage() {
                         setAdjustmentType(btn.type as StockMovement["type"]);
                         if (btn.type === "Restock") setRestockReason("Supplier delivery / Purchase");
                         if (btn.type === "Damaged/Loss") setRestockReason("Broken during event");
-                        if (btn.type === "Manual Adjustment") setRestockReason("Physical inventory recount");
                       }}
                       className={cn(
-                        "py-2 px-1 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border",
+                        "py-2.5 px-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all border",
                         adjustmentType === btn.type
                           ? "bg-natural-accent text-white border-natural-accent shadow-xs"
                           : "bg-natural-bg/50 border-natural-border text-natural-text-main hover:bg-white"
@@ -1886,7 +1167,7 @@ export function InventoryPage() {
                 <span className="font-bold text-natural-text-main">
                   {items.find((i) => String(i.id) === String(itemToArchive))?.name}
                 </span>
-                ? It will be hidden from active inventory views.
+                ? It will be hidden from active equipment monitoring views.
               </p>
 
               <div className="flex flex-col gap-3">
@@ -1897,10 +1178,10 @@ export function InventoryPage() {
                       await archiveItem(itemToArchive);
                       if (item) {
                         await logAuditAction({
-                          action: "Archived Inventory Item",
+                          action: "Archived Equipment Item",
                           target: item.name,
                           type: "Delete",
-                          details: `Moved inventory item to archives`,
+                          details: `Moved equipment item to archives`,
                         });
                       }
                     }
@@ -1922,146 +1203,9 @@ export function InventoryPage() {
         </div>
       )}
 
-      {/* MODAL: ADD EQUIPMENT RULE TO PACKAGE */}
-      {isAddRuleModalOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="p-6 border-b border-natural-border flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-serif font-bold text-natural-text-main">
-                  Link Equipment to Package
-                </h3>
-                <p className="text-xs text-natural-text-light font-medium mt-0.5">
-                  Package: <span className="font-bold text-natural-accent">{selectedPackageForSim}</span>
-                </p>
-              </div>
-              <button
-                onClick={() => setIsAddRuleModalOpen(false)}
-                className="p-1 hover:bg-natural-bg rounded-lg text-natural-text-light hover:text-natural-text-main cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
 
-            <div className="p-6 space-y-4">
-              <div className="space-y-1">
-                <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
-                  Warehouse Inventory Supply
-                </label>
-                <select
-                  value={newRule.itemName}
-                  onChange={(e) => {
-                    const item = items.find((i) => i.name === e.target.value);
-                    setNewRule({
-                      ...newRule,
-                      itemName: e.target.value,
-                      category: item?.category || newRule.category,
-                      unit: item?.unit || newRule.unit,
-                      type: item?.category === "Tableware" || item?.name.toLowerCase().includes("chair") ? "per_pax" : newRule.type,
-                      ratio: item?.name.toLowerCase().includes("table") ? 0.1 : 1.0,
-                    });
-                  }}
-                  className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm font-semibold focus:bg-white cursor-pointer outline-none"
-                >
-                  <option value="">Select an inventory item...</option>
-                  {items
-                    .filter((i) => i.status !== "Archived")
-                    .map((item) => (
-                      <option key={item.id} value={item.name}>
-                        {item.name} ({item.category} • Stock: {item.stock} {item.unit})
-                      </option>
-                    ))}
-                </select>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
-                  Deduction Calculation Method
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setNewRule({ ...newRule, type: "per_pax" })}
-                    className={cn(
-                      "p-3 rounded-xl border text-xs font-bold transition-all text-left cursor-pointer",
-                      newRule.type === "per_pax"
-                        ? "border-natural-accent bg-natural-accent/10 text-natural-accent"
-                        : "border-natural-border bg-white text-natural-text-light hover:bg-natural-bg/40"
-                    )}
-                  >
-                    <p className="font-bold">Per Guest Ratio</p>
-                    <span className="text-[10px] opacity-75 font-normal">e.g. 1 plate / guest</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setNewRule({ ...newRule, type: "fixed" })}
-                    className={cn(
-                      "p-3 rounded-xl border text-xs font-bold transition-all text-left cursor-pointer",
-                      newRule.type === "fixed"
-                        ? "border-natural-accent bg-natural-accent/10 text-natural-accent"
-                        : "border-natural-border bg-white text-natural-text-light hover:bg-natural-bg/40"
-                    )}
-                  >
-                    <p className="font-bold">Fixed Setup Count</p>
-                    <span className="text-[10px] opacity-75 font-normal">e.g. 2 buffet tables</span>
-                  </button>
-                </div>
-              </div>
-
-              {newRule.type === "per_pax" ? (
-                <div className="space-y-1">
-                  <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
-                    Ratio per Guest (e.g. 1 = 1 unit per pax, 0.1 = 1 per 10 pax)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.05"
-                    min="0.01"
-                    value={newRule.ratio}
-                    onChange={(e) => setNewRule({ ...newRule, ratio: Number(e.target.value) })}
-                    className="w-full px-4 py-2 bg-natural-bg/50 border border-natural-border rounded-xl text-sm font-semibold focus:bg-white outline-none"
-                    placeholder="e.g. 1.0"
-                  />
-                </div>
-              ) : (
-                <div className="space-y-1">
-                  <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
-                    Fixed Units to Deduct per Event
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={newRule.fixedCount}
-                    onChange={(e) => setNewRule({ ...newRule, fixedCount: Number(e.target.value) })}
-                    className="w-full px-4 py-2 bg-natural-bg/50 border border-natural-border rounded-xl text-sm font-semibold focus:bg-white outline-none"
-                    placeholder="e.g. 2"
-                  />
-                </div>
-              )}
-            </div>
-
-            <div className="p-6 bg-natural-bg/30 border-t border-natural-border flex gap-3">
-              <button
-                type="button"
-                onClick={() => setIsAddRuleModalOpen(false)}
-                className="flex-1 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest border border-natural-border text-natural-text-light hover:bg-white cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={!newRule.itemName}
-                onClick={handleAddRuleToPackage}
-                className="flex-1 bg-natural-accent text-white py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 disabled:opacity-50 transition-all cursor-pointer"
-              >
-                Link to Package
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
+export const EquipmentMonitoringPage = InventoryPage;
