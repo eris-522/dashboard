@@ -567,20 +567,7 @@ export async function saveCMSSection<K extends keyof FullCMSData>(
     console.warn("Primary cms_content table save notice:", err?.message);
   }
 
-  // 5. Always ALSO save to `inclusions` table under '__CMS_<sectionKey>' for guaranteed cross-device persistence
-  try {
-    const fallbackCategory = `__CMS_${String(sectionKey)}`;
-    // Delete existing fallback row for this section then insert fresh
-    await supabase.from("inclusions").delete().eq("category", fallbackCategory);
-    await supabase.from("inclusions").insert({
-      category: fallbackCategory,
-      items: JSON.stringify(data),
-    });
-  } catch (err: any) {
-    console.warn("Inclusions fallback save error:", err?.message);
-  }
-
-  // 6. Audit log
+  // 5. Audit log
   try {
     await logAuditAction({
       action: `Updated CMS: ${String(sectionKey).toUpperCase()}`,

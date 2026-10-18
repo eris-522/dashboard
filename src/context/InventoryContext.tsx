@@ -415,8 +415,6 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refreshItems();
 
-    const intervalId = setInterval(() => refreshItems(true), 10000);
-
     const channel = supabase
       .channel("inventory-channel-context")
       .on(
@@ -429,7 +427,6 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       .subscribe();
 
     return () => {
-      clearInterval(intervalId);
       supabase.removeChannel(channel);
     };
   }, []);
@@ -662,7 +659,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     if (!currentBookings || currentBookings.length === 0) {
       const { data } = await supabase
         .from('bookings')
-        .select('id, status, event_date, event_time, event_location, profiles(name, full_name)');
+        .select('id, status, event_date, event_time, event_location, profiles(name)');
       currentBookings = data || [];
     }
 
@@ -741,7 +738,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       if (deductionRecords.length > 0) {
         reconcileCompletedEvents();
       }
-    }, 20000); // Check every 20 seconds
+    }, 600000); // Check once every 10 minutes (events conclude over hours/days, not seconds)
 
     return () => clearInterval(interval);
   }, [isLoading, items.length, deductionRecords.length]);

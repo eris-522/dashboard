@@ -110,7 +110,10 @@ export function PackagePage() {
   };
 
   const fetchInclusions = async () => {
-    const { data, error } = await supabase.from("inclusions").select("*");
+    const { data, error } = await supabase
+      .from("inclusions")
+      .select("id, category, items")
+      .not("category", "like", "__CMS_%");
     if (error) {
       console.error("Error fetching inclusions:", error);
       return;

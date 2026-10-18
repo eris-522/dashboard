@@ -92,9 +92,9 @@ async function tryUploadToSupabase(file: File): Promise<string | null> {
     const fileName = `img_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
     const filePath = `cms/${fileName}`;
 
-    for (const bucket of ["cms", "public", "images"]) {
+    for (const bucket of ["cms", "public", "images", "receipts"]) {
       const { data, error } = await supabase.storage.from(bucket).upload(filePath, file, {
-        cacheControl: "3600",
+        cacheControl: "31536000",
         upsert: true,
       });
       if (!error && data) {

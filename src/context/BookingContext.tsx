@@ -76,13 +76,16 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch bookings on mount and set up real-time listener
+  // Fetch bookings on mount and set up real-time listener and polling
   useEffect(() => {
     refreshBookings();
 
     // Fallback polling: Refresh bookings silently every 10 seconds
-    // in case real-time WebSockets fail or drop.
     const intervalId = setInterval(() => refreshBookings(true), 10000);
+
+    // Cross-component event listener for immediate synchronization
+    const handleSync = () => refreshBookings(true);
+    window.addEventListener("bookingsUpdated", handleSync);
 
     // Subscribe to real-time changes on the bookings table
     const channel = supabase
@@ -90,8 +93,11 @@ export function BookingProvider({ children }: { children: ReactNode }) {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "bookings" },
-        (payload) => {
+        (payload: any) => {
           console.log("Booking change detected in context:", payload);
+          if (payload.eventType === "DELETE" && payload.old?.id) {
+            setBookings((prev) => prev.filter((b) => String(b.id) !== String(payload.old.id)));
+          }
           refreshBookings(true); // Refresh data silently when any booking changes
         },
       )
@@ -100,6 +106,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     // Cleanup subscription on unmount
     return () => {
       clearInterval(intervalId);
+      window.removeEventListener("bookingsUpdated", handleSync);
       supabase.removeChannel(channel);
     };
   }, []);

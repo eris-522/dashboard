@@ -71,9 +71,9 @@ export function UserPage() {
   }, []);
 
   const fetchUsers = async () => {
-    // Use select('*') so we don't break the listing if the schema/column names
-    // differ slightly (e.g. name vs full_name vs fullName).
-    const { data, error } = await supabase.from("profiles").select("*");
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*");
 
     if (error) {
       console.error("Error fetching users:", error.message);

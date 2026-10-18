@@ -210,11 +210,11 @@ export function CMSPage() {
     setProcessForm(data.process);
     setFaqsForm(data.faqs);
 
-    // Also load live packages from Supabase packages table
+    // Also load live packages from Supabase packages table (pruned columns)
     try {
       const { data: pkgs } = await supabase
         .from("packages")
-        .select("*")
+        .select("id, name, tag, price, pax, image_url")
         .neq("status", "Archived");
       if (pkgs && pkgs.length > 0) {
         setDbPackages(pkgs);
@@ -223,11 +223,11 @@ export function CMSPage() {
       console.warn("Error fetching db packages for CMS:", e);
     }
 
-    // Also load live menu items from Supabase menu_items table
+    // Also load live menu items from Supabase menu_items table (pruned columns)
     try {
       const { data: dishes } = await supabase
         .from("menu_items")
-        .select("*")
+        .select("id, name, category, sub_category, image_url")
         .neq("status", "Archived");
       if (dishes && dishes.length > 0) {
         setDbMenuItems(dishes);

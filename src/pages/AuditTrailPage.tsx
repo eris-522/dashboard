@@ -21,20 +21,36 @@ import { supabase } from "../utils/supabase";
 export function AuditTrailPage() {
   const [logs, setLogs] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 40;
+
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedModule, setSelectedModule] = useState<string>("all");
   const [selectedType, setSelectedType] = useState<string>("all");
 
   useEffect(() => {
-    fetchLogs();
+    fetchLogs(0, false);
 
     const channel = supabase
       .channel("audit-logs-channel")
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "audit_logs" },
-        () => {
-          fetchLogs();
+        { event: "INSERT", schema: "public", table: "audit_logs" },
+        (payload: any) => {
+          if (payload.new) {
+            setLogs((prev) => [payload.new, ...prev.filter((l) => l.id !== payload.new.id)]);
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "audit_logs" },
+        (payload: any) => {
+          if (payload.old) {
+            setLogs((prev) => prev.filter((l) => l.id !== payload.old.id));
+          }
         },
       )
       .subscribe();
@@ -44,23 +60,42 @@ export function AuditTrailPage() {
     };
   }, []);
 
-  const fetchLogs = async () => {
-    setIsLoading(true);
+  const fetchLogs = async (pageNumber = 0, append = false) => {
+    if (pageNumber === 0) setIsLoading(true);
+    else setIsLoadingMore(true);
+
     try {
+      const from = pageNumber * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+
       const { data, error } = await supabase
         .from("audit_logs")
         .select("*")
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .range(from, to);
 
       if (error) {
         console.error("Error fetching audit logs:", error);
       } else if (data) {
-        setLogs(data);
+        if (data.length < PAGE_SIZE) {
+          setHasMore(false);
+        } else {
+          setHasMore(true);
+        }
+        setLogs((prev) => (append ? [...prev, ...data] : data));
+        setPage(pageNumber);
       }
     } catch (e) {
       console.error(e);
     } finally {
       setIsLoading(false);
+      setIsLoadingMore(false);
+    }
+  };
+
+  const handleLoadMore = () => {
+    if (!isLoadingMore && hasMore) {
+      fetchLogs(page + 1, true);
     }
   };
 
@@ -210,7 +245,7 @@ export function AuditTrailPage() {
 
         <div className="flex flex-wrap items-center gap-3">
           <button
-            onClick={fetchLogs}
+            onClick={() => fetchLogs(0, false)}
             disabled={isLoading}
             className="flex items-center gap-2 px-3.5 py-2.5 border border-natural-border rounded-lg text-xs font-bold text-natural-text-main hover:bg-natural-bg transition-all uppercase tracking-widest cursor-pointer"
             title="Refresh logs"
@@ -435,10 +470,14 @@ export function AuditTrailPage() {
           )}
         </div>
 
-        {logs.length > 0 && (
+        {hasMore && logs.length > 0 && (
           <div className="p-4 bg-natural-bg/10 text-center">
-            <button className="text-[0.7rem] font-bold text-natural-text-light uppercase tracking-[0.2em] hover:text-natural-accent transition-colors">
-              Load Historical Entries
+            <button
+              onClick={handleLoadMore}
+              disabled={isLoadingMore}
+              className="text-[0.7rem] font-bold text-natural-text-light uppercase tracking-[0.2em] hover:text-natural-accent transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              {isLoadingMore ? "Loading Historical Entries..." : "Load Historical Entries"}
             </button>
           </div>
         )}

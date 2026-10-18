@@ -14,13 +14,15 @@ interface NotificationCenterProps {
 }
 
 export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBooking, dismissedIds = [], onDismiss }: NotificationCenterProps) {
-  const { bookings } = useBooking();
+  const { bookings, refreshBookings } = useBooking();
   const [expandedId, setExpandedId] = React.useState<number | null>(null);
   const [showAll, setShowAll] = React.useState(false);
   const [readDuringSession, setReadDuringSession] = React.useState<string[]>([]);
 
   React.useEffect(() => {
-    if (!isOpen) {
+    if (isOpen) {
+      refreshBookings(true);
+    } else {
       setTimeout(() => {
         setShowAll(false);
         setReadDuringSession([]);

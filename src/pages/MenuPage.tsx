@@ -67,8 +67,6 @@ export function MenuPage() {
   useEffect(() => {
     fetchMenuItems();
 
-    const intervalId = setInterval(() => fetchMenuItems(), 10000);
-
     const channel = supabase
       .channel("admin-menu-items")
       .on(
@@ -81,14 +79,15 @@ export function MenuPage() {
       .subscribe();
 
     return () => {
-      clearInterval(intervalId);
       supabase.removeChannel(channel);
     };
   }, []);
 
   // Queries the 'menu_items' table in Supabase and updates the local state
   const fetchMenuItems = async () => {
-    const { data, error } = await supabase.from("menu_items").select("*");
+    const { data, error } = await supabase
+      .from("menu_items")
+      .select("id, name, category, sub_category, status, image_url");
     if (error) {
       console.error("Error fetching menu items:", error.message);
     } else if (data) {

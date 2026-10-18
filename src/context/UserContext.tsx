@@ -95,10 +95,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    // Fallback polling: Refresh users silently every 10 seconds 
-    // in case real-time WebSockets fail or drop.
-    const intervalId = setInterval(() => refreshUsers(true), 10000);
-
     // Subscribe to real-time changes on the profiles table so Dashboard metrics stay synced
     const channel = supabase
       .channel("users-channel-context")
@@ -112,7 +108,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
       .subscribe();
 
     return () => {
-      clearInterval(intervalId);
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
