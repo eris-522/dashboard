@@ -64,6 +64,11 @@
   --font-sans: "Montserrat", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Playfair Display", ui-serif, Georgia, serif;
 
+  --tracking-normal: 0.02em;
+  --tracking-wide: 0.04em;
+  --tracking-wider: 0.06em;
+  --tracking-widest: 0.12em;
+
   --color-natural-bg: var(--color-natural-bg);
   --color-natural-sidebar: var(--color-natural-sidebar);
   --color-natural-accent: var(--color-natural-accent);
@@ -82,12 +87,18 @@
     background-color: var(--color-natural-bg);
     color: var(--color-natural-text-main);
     font-family: var(--font-sans);
+    letter-spacing: 0.02em;
     -webkit-font-smoothing: antialiased;
     transition: background-color 0.25s ease, color 0.25s ease;
   }
   
-  h1, h2, h3, h4, .font-serif {
+  input, button, select, textarea, table {
+    letter-spacing: inherit;
+  }
+
+  h1, h2, h3, h4, h5, h6, .font-serif {
     font-family: var(--font-serif);
+    letter-spacing: 0.015em;
   }
 }
 

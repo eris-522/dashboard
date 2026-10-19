@@ -251,7 +251,7 @@ export function AnalyticsPage() {
           <h2 className="text-2xl font-serif font-bold text-natural-text-main">
             Business Analytics & Intelligence ({timeRange === "all" ? "All Time" : `Year ${timeRange}`})
           </h2>
-          <p className="text-natural-text-light text-[0.8rem] font-medium uppercase tracking-wider">
+          <p className="text-natural-text-light text-xs font-medium uppercase tracking-wider">
             Real-time catering financial performance, event metrics, and logistics utilization
           </p>
         </div>
@@ -288,59 +288,59 @@ export function AnalyticsPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         <div className="glass-card p-5 bg-white border-l-4 border-natural-accent">
           <div className="flex items-center justify-between text-natural-text-light mb-2">
-            <span className="text-[0.65rem] font-bold uppercase tracking-widest">Total Revenue</span>
+            <span className="text-xs font-bold uppercase tracking-wider">Total Revenue</span>
             <DollarSign className="w-4 h-4 text-natural-accent" />
           </div>
           <h4 className="text-xl font-bold font-serif text-natural-text-main">
             ₱{totalRevenue.toLocaleString()}
           </h4>
-          <span className="text-[10px] font-bold text-natural-accent block mt-1">
+          <span className="text-xs font-bold text-natural-accent block mt-1">
             {confirmedBookings.length} Confirmed Events
           </span>
         </div>
 
         <div className="glass-card p-5 bg-white">
           <div className="flex items-center justify-between text-natural-text-light mb-2">
-            <span className="text-[0.65rem] font-bold uppercase tracking-widest">Avg. Event Value</span>
+            <span className="text-xs font-bold uppercase tracking-wider">Avg. Event Value</span>
             <TrendingUp className="w-4 h-4 text-[#6b8e23]" />
           </div>
           <h4 className="text-xl font-bold font-serif text-natural-text-main">
             ₱{Math.round(avgEventValue).toLocaleString()}
           </h4>
-          <span className="text-[10px] font-bold text-natural-text-light block mt-1">
+          <span className="text-xs font-bold text-natural-text-light block mt-1">
             Per booking average
           </span>
         </div>
 
         <div className="glass-card p-5 bg-white">
           <div className="flex items-center justify-between text-natural-text-light mb-2">
-            <span className="text-[0.65rem] font-bold uppercase tracking-widest">Total Guests (Pax)</span>
+            <span className="text-xs font-bold uppercase tracking-wider">Total Guests (Pax)</span>
             <Users className="w-4 h-4 text-blue-600" />
           </div>
           <h4 className="text-xl font-bold font-serif text-natural-text-main">
             {totalPaxServed.toLocaleString()}
           </h4>
-          <span className="text-[10px] font-bold text-blue-700 block mt-1">
+          <span className="text-xs font-bold text-blue-700 block mt-1">
             Catered attendees
           </span>
         </div>
 
         <div className="glass-card p-5 bg-white">
           <div className="flex items-center justify-between text-natural-text-light mb-2">
-            <span className="text-[0.65rem] font-bold uppercase tracking-widest">Equipment Reserved</span>
+            <span className="text-xs font-bold uppercase tracking-wider">Equipment Reserved</span>
             <Boxes className="w-4 h-4 text-purple-600" />
           </div>
           <h4 className="text-xl font-bold font-serif text-natural-text-main">
             {totalAllocatedEquipment.toLocaleString()}
           </h4>
-          <span className="text-[10px] font-bold text-purple-700 block mt-1">
+          <span className="text-xs font-bold text-purple-700 block mt-1">
             Units allocated to events
           </span>
         </div>
 
         <div className="glass-card p-5 bg-white">
           <div className="flex items-center justify-between text-natural-text-light mb-2">
-            <span className="text-[0.65rem] font-bold uppercase tracking-widest">Equipment Monitoring Status</span>
+            <span className="text-xs font-bold uppercase tracking-wider">Equipment Monitoring Status</span>
             <Package className="w-4 h-4 text-amber-600" />
           </div>
           <h4 className="text-xl font-bold font-serif text-natural-text-main">
@@ -348,7 +348,7 @@ export function AnalyticsPage() {
           </h4>
           <span
             className={cn(
-              "text-[10px] font-bold block mt-1",
+              "text-xs font-bold block mt-1",
               lowStockCount > 0 ? "text-amber-700" : "text-[#6b8e23]"
             )}
           >
@@ -504,7 +504,7 @@ export function AnalyticsPage() {
                         <div className="w-3 h-3 rounded-full" style={{ backgroundColor: pkg.color }} />
                         <div>
                           <p className="text-xs font-bold text-natural-text-main">{pkg.name}</p>
-                          <span className="text-[10px] text-natural-text-light font-semibold">
+                          <span className="text-xs text-natural-text-light font-medium">
                             {pkg.count} {pkg.count === 1 ? "Booking" : "Bookings"} • {pkg.percent.toFixed(1)}% Share
                           </span>
                         </div>
@@ -544,7 +544,7 @@ export function AnalyticsPage() {
                   <div key={i} className="flex items-center justify-between p-3 bg-natural-bg/30 rounded-xl border border-natural-border">
                     <div>
                       <p className="text-xs font-bold text-natural-text-main">{ev.type}</p>
-                      <span className="text-[10px] text-natural-text-light font-semibold">
+                      <span className="text-xs text-natural-text-light font-medium">
                         {ev.count} {ev.count === 1 ? "Event" : "Events"} confirmed
                       </span>
                     </div>
@@ -576,31 +576,31 @@ export function AnalyticsPage() {
                 <span className="text-xl font-serif font-bold text-natural-text-main block">
                   {activeItems.length}
                 </span>
-                <span className="text-[9px] font-bold text-natural-text-light uppercase tracking-wider">
+                <span className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                   Item Types
                 </span>
               </div>
-              <div className="p-3 bg-green-50 border border-green-200 rounded-xl">
-                <span className="text-xl font-serif font-bold text-green-700 block">
+              <div className="p-3 bg-green-50 dark:bg-emerald-950/40 border border-green-200 dark:border-emerald-800/60 rounded-xl">
+                <span className="text-xl font-serif font-bold text-green-700 dark:text-emerald-300 block">
                   {activeItems.filter((i) => normalizeStockStatus(i.status) === "High").length}
                 </span>
-                <span className="text-[9px] font-bold text-green-800 uppercase tracking-wider">
+                <span className="text-xs font-bold text-green-800 dark:text-emerald-400 uppercase tracking-wider">
                   High
                 </span>
               </div>
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl">
-                <span className="text-xl font-serif font-bold text-amber-700 block">
+              <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-xl">
+                <span className="text-xl font-serif font-bold text-amber-700 dark:text-amber-300 block">
                   {activeItems.filter((i) => normalizeStockStatus(i.status) === "Normal").length}
                 </span>
-                <span className="text-[9px] font-bold text-amber-800 uppercase tracking-wider">
+                <span className="text-xs font-bold text-amber-800 dark:text-amber-400 uppercase tracking-wider">
                   Normal
                 </span>
               </div>
-              <div className="p-3 bg-red-50 border border-red-200 rounded-xl">
-                <span className="text-xl font-serif font-bold text-red-700 block">
+              <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 rounded-xl">
+                <span className="text-xl font-serif font-bold text-red-700 dark:text-red-300 block">
                   {activeItems.filter((i) => normalizeStockStatus(i.status) === "Low").length}
                 </span>
-                <span className="text-[9px] font-bold text-red-800 uppercase tracking-wider">
+                <span className="text-xs font-bold text-red-800 dark:text-red-400 uppercase tracking-wider">
                   Low
                 </span>
               </div>

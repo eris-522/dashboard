@@ -141,10 +141,10 @@ export function EventCalendar({ bookings = [], detailedView = false }: EventCale
                   {dayEvents.map((e, i) => (
                     <div key={i} className={cn(
                       "text-[0.55rem] px-1.5 py-1.5 rounded-md border flex flex-col gap-0.5",
-                      e.status === 'Confirmed' ? 'bg-green-50 text-green-700 border-green-200' :
-                      e.status === 'Completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                      e.status === 'Pending' || e.status === 'Inquiry' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                      'bg-gray-50 text-gray-700 border-gray-200'
+                      e.status === 'Confirmed' ? 'bg-green-50 text-green-700 border-green-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60' :
+                      e.status === 'Completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60' :
+                      e.status === 'Pending' || e.status === 'Inquiry' ? 'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60' :
+                      'bg-gray-50 text-gray-700 border-gray-200 dark:bg-natural-bg/40 dark:text-natural-text-light dark:border-natural-border/60'
                     )} title={`${e.time} - ${e.title}`}>
                       <div className="font-bold flex justify-between items-start gap-1">
                         <span className="truncate">{e.title.split(' - ')[0]}</span>
@@ -158,10 +158,10 @@ export function EventCalendar({ bookings = [], detailedView = false }: EventCale
                         {e.status && (
                           <span className={cn(
                             "font-bold uppercase tracking-widest px-1 py-0.5 rounded border w-full text-center mt-0.5",
-                            e.status === 'Confirmed' ? 'bg-green-100 text-green-800 border-green-300' :
-                            e.status === 'Completed' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
-                            e.status === 'Pending' || e.status === 'Inquiry' ? 'bg-orange-100 text-orange-800 border-orange-300' :
-                            'bg-gray-200 text-gray-800 border-gray-300'
+                            e.status === 'Confirmed' ? 'bg-green-100 text-green-800 border-green-300 dark:bg-emerald-950/70 dark:text-emerald-200 dark:border-emerald-700/60' :
+                            e.status === 'Completed' ? 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-200 dark:border-emerald-700/60' :
+                            e.status === 'Pending' || e.status === 'Inquiry' ? 'bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-950/70 dark:text-orange-200 dark:border-orange-700/60' :
+                            'bg-gray-200 text-gray-800 border-gray-300 dark:bg-natural-bg/60 dark:text-natural-text-light dark:border-natural-border/60'
                           )}>
                             {e.status}
                           </span>
@@ -192,31 +192,32 @@ export function EventCalendar({ bookings = [], detailedView = false }: EventCale
                     'bg-gray-400'
                   )} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-[0.75rem] font-bold text-natural-text-main tracking-tight">{event.title}</p>
+                    <p className="text-sm font-bold text-natural-text-main">{event.title}</p>
                     <div className="flex items-center gap-2 mt-0.5">
-                      <p className="text-[9px] text-natural-text-light font-bold uppercase tracking-wider">{format(event.date, 'MMM d')}</p>
-                      <span className="text-[8px] text-natural-text-light">•</span>
-                      <p className="text-[9px] text-natural-text-light font-bold uppercase tracking-wider">{event.time}</p>
+                      <p className="text-xs text-natural-text-light font-bold uppercase tracking-wider">{format(event.date, 'MMM d')}</p>
+                      <span className="text-xs text-natural-text-light">•</span>
+                      <p className="text-xs text-natural-text-light font-bold uppercase tracking-wider">{event.time}</p>
                     </div>
-                    <p className="text-[9px] text-natural-accent font-medium mt-0.5 italic truncate">{event.venue}</p>
+                    <p className="text-xs text-natural-accent font-medium mt-0.5 italic truncate">{event.venue}</p>
                     
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 pt-1.5 border-t border-natural-border/50">
                       {event.package && (
-                        <p className="text-[9px] text-natural-text-main">
+                        <p className="text-xs text-natural-text-main">
                           <span className="text-natural-text-light font-medium">Pkg:</span> {event.package}
                         </p>
                       )}
                       {event.guestCount ? (
-                        <p className="text-[9px] text-natural-text-main">
+                        <p className="text-xs text-natural-text-main">
                           <span className="text-natural-text-light font-medium">Pax:</span> {event.guestCount}
                         </p>
                       ) : null}
                       {event.status && (
                         <span className={cn(
-                          "text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded border",
-                          event.status === 'Confirmed' ? 'bg-green-50 text-green-700 border-green-200' :
-                          event.status === 'Pending' || event.status === 'Inquiry' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                          'bg-gray-50 text-gray-700 border-gray-200'
+                          "text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded border",
+                          event.status === 'Confirmed' ? 'bg-green-50 text-green-700 border-green-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60' :
+                          event.status === 'Completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60' :
+                          event.status === 'Pending' || event.status === 'Inquiry' ? 'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60' :
+                          'bg-gray-50 text-gray-700 border-gray-200 dark:bg-natural-bg/40 dark:text-natural-text-light dark:border-natural-border/60'
                         )}>
                           {event.status}
                         </span>

@@ -118,7 +118,7 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
                       key={booking.id} 
                       className={cn(
                         "p-4 hover:bg-natural-bg/30 transition-all cursor-pointer group",
-                        isUnreadNotif && (booking.status === "Cancelled" ? "bg-red-50/50" : "bg-natural-accent/5")
+                        isUnreadNotif && (booking.status === "Cancelled" ? "bg-red-50/50 dark:bg-red-950/30" : "bg-natural-accent/5")
                       )}
                       onClick={() => {
                         setExpandedId(isExpanded ? null : booking.id);
@@ -130,7 +130,7 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
                     >
                       <div className="flex justify-between items-start">
                         <div>
-                          <p className={cn("text-xs font-bold flex items-center gap-2", booking.status === "Cancelled" ? "text-red-600" : "text-natural-text-main")}>
+                          <p className={cn("text-xs font-bold flex items-center gap-2", booking.status === "Cancelled" ? "text-red-600 dark:text-red-400" : "text-natural-text-main")}>
                             {booking.status === "Cancelled" && <AlertTriangle className="w-3.5 h-3.5" />}
                             {booking.status === "Cancelled" ? "Cancelled Booking" : `${booking.eventType || "Event"} Booking`}
                             {isUnreadNotif && (
@@ -144,7 +144,7 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
                             {booking.status === "Cancelled" ? "Cancelled on" : booking.status === "Confirmed" ? "Confirmed on" : "Updated on"}: {booking.updated_at ? new Date(booking.updated_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : (booking.created_at ? new Date(booking.created_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : "Recently")}
                           </p>
                           {booking.status === "Cancelled" && !isExpanded && (
-                            <p className="text-[10px] text-red-800/70 mt-1 italic truncate max-w-[180px]">
+                            <p className="text-[10px] text-red-800/70 dark:text-red-300/80 mt-1 italic truncate max-w-[180px]">
                               Reason: {booking.cancellation_reason && booking.cancellation_reason.trim() !== "" ? booking.cancellation_reason : "No reason provided"}
                             </p>
                           )}
@@ -159,7 +159,7 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
                                   onDismiss(notifKey);
                                 }
                               }}
-                              className="opacity-0 group-hover:opacity-100 p-1 text-natural-text-light hover:text-green-600 hover:bg-green-50 rounded transition-all"
+                              className="opacity-0 group-hover:opacity-100 p-1 text-natural-text-light hover:text-green-600 hover:bg-green-50 dark:hover:text-emerald-400 dark:hover:bg-emerald-950/40 rounded transition-all"
                               title="Mark as read"
                             >
                               <CheckCircle className="w-3.5 h-3.5" />
@@ -174,9 +174,9 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
                       {isExpanded && (
                         <div className="mt-3 pt-3 border-t border-natural-border/50 animate-in slide-in-from-top-1 fade-in duration-200">
                           {booking.status === "Cancelled" && (
-                            <div className="mb-3 p-2.5 bg-red-50 border border-red-100 rounded-lg">
-                              <p className="text-[9px] font-bold text-red-800 uppercase tracking-widest mb-1">Reason for Cancellation</p>
-                              <p className="text-[11px] text-red-900 italic">"{booking.cancellation_reason && booking.cancellation_reason.trim() !== "" ? booking.cancellation_reason : "No reason provided"}"</p>
+                            <div className="mb-3 p-2.5 bg-red-50 border border-red-100 dark:bg-red-950/40 dark:border-red-900/60 rounded-lg">
+                              <p className="text-[9px] font-bold text-red-800 dark:text-red-300 uppercase tracking-widest mb-1">Reason for Cancellation</p>
+                              <p className="text-[11px] text-red-900 dark:text-red-200 italic">"{booking.cancellation_reason && booking.cancellation_reason.trim() !== "" ? booking.cancellation_reason : "No reason provided"}"</p>
                             </div>
                           )}
                           <p className="text-[11px] text-natural-text-main mb-1">
@@ -225,7 +225,6 @@ export function NotificationCenter({ isOpen, onClose, onViewAllLogs, onManageBoo
                   }}
                   className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest hover:text-natural-accent transition-colors"
                 >
-                  Manage Bookings
                   View All Bookings
                 </button>
               )}

@@ -32,8 +32,8 @@ export interface ImageUploadFieldProps {
  */
 async function processImageFile(
   file: File,
-  maxDimension = 1600,
-  quality = 0.85
+  maxDimension = 1000,
+  quality = 0.72
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     // For vector SVG or animated GIF, keep original encoding
@@ -400,7 +400,7 @@ export function ImageUploadField({
               </span>
               <span
                 className={cn(
-                  "text-[9px] font-bold px-2 py-0.5 rounded-full uppercase",
+                  "text-[9px] font-bold px-2.5 py-0.5 rounded-full uppercase whitespace-nowrap inline-flex items-center justify-center text-center",
                   isDataUrl
                     ? "bg-purple-100 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200"
                     : "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200"

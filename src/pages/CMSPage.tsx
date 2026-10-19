@@ -731,7 +731,7 @@ export function CMSPage() {
                       )}
                     />
                     <div>
-                      <p className="text-xs font-bold tracking-tight">
+                      <p className="text-xs font-bold tracking-wide">
                         {tab.label}
                       </p>
                       <p

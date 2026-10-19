@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   Search,
   Plus,
@@ -20,6 +20,7 @@ import {
   Settings2,
   Sliders,
   RotateCcw,
+  GripVertical,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import {
@@ -41,42 +42,49 @@ const categories = [
 ];
 const units = ["pcs", "sets", "boxes", "packs", "kg", "g", "lbs", "L", "ml"];
 
+type MiddleColumnId = "physicalStock" | "inUse" | "minStock" | "stockStatus";
+
+const DEFAULT_COLUMN_ORDER: MiddleColumnId[] = [
+  "physicalStock",
+  "inUse",
+  "minStock",
+  "stockStatus",
+];
+
+// Widths are percentages of the space between the fixed Item and Actions columns.
+// They always sum to 100 so the table fits its container and no column can be pushed out of view.
+const DEFAULT_COLUMN_WIDTHS: Record<MiddleColumnId, number> = {
+  physicalStock: 31,
+  inUse: 23,
+  minStock: 23,
+  stockStatus: 23,
+};
+
+const MIN_COLUMN_PERCENT = 18;
+const COL_WIDTHS_STORAGE_KEY = "inventory_monitoring_col_widths_pct_v3";
+
 export function InventoryPage() {
   const {
     items,
     isLoading,
-    deductionRecords,
     addItem,
     updateStock,
     archiveItem,
     updateItem,
     getAllocatedStock,
+    getOutsourcedStock,
     refreshItems,
     reconcileCompletedEvents,
   } = useInventory();
 
   const { bookings } = useBooking();
 
-  // Reconcile status state
-  const [isReconciling, setIsReconciling] = useState(false);
-  const [reconcileMsg, setReconcileMsg] = useState<string | null>(null);
-
-  const handleReconcile = async () => {
-    setIsReconciling(true);
-    try {
-      const count = await reconcileCompletedEvents(bookings);
-      if (count > 0) {
-        setReconcileMsg(`Successfully returned equipment from ${count} completed event(s) back into equipment monitoring!`);
-      } else {
-        setReconcileMsg("All equipment monitoring records are up-to-date with active event schedules.");
-      }
-      setTimeout(() => setReconcileMsg(null), 4000);
-    } catch (e) {
-      console.error("Reconciliation error:", e);
-    } finally {
-      setIsReconciling(false);
+  // Automatically sync active confirmed bookings on page load
+  useEffect(() => {
+    if (bookings && bookings.length > 0) {
+      reconcileCompletedEvents(bookings);
     }
-  };
+  }, [bookings]);
 
   // Filter & Search
   const [searchQuery, setSearchQuery] = useState("");
@@ -85,12 +93,168 @@ export function InventoryPage() {
   const [showArchived, setShowArchived] = useState(false);
   const [sortStatus, setSortStatus] = useState<"asc" | "desc" | null>(null);
 
+  // Dynamic Adjustable Columns (monitoring table only)
+  const [columnOrder, setColumnOrder] = useState<MiddleColumnId[]>(() => {
+    try {
+      const saved = localStorage.getItem("inventory_monitoring_col_order");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length === 4) return parsed;
+      }
+    } catch {}
+    return DEFAULT_COLUMN_ORDER;
+  });
+
+  const [columnWidths, setColumnWidths] = useState<Record<MiddleColumnId, number>>(() => {
+    try {
+      const saved = localStorage.getItem(COL_WIDTHS_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === "object") {
+          const merged = { ...DEFAULT_COLUMN_WIDTHS, ...parsed };
+          const total = DEFAULT_COLUMN_ORDER.reduce((acc, id) => acc + (Number(merged[id]) || 0), 0);
+          const allAboveMin = DEFAULT_COLUMN_ORDER.every((id) => Number(merged[id]) >= MIN_COLUMN_PERCENT);
+          if (Math.abs(total - 100) < 0.5 && allAboveMin) return merged;
+        }
+      }
+    } catch {}
+    return DEFAULT_COLUMN_WIDTHS;
+  });
+
+  const [draggedCol, setDraggedCol] = useState<MiddleColumnId | null>(null);
+  const [dragOverCol, setDragOverCol] = useState<MiddleColumnId | null>(null);
+  const resizingColRef = useRef<{
+    colId: MiddleColumnId;
+    neighborId: MiddleColumnId;
+    startX: number;
+    startWidth: number;
+    startNeighborWidth: number;
+    pxPerPercent: number;
+  } | null>(null);
+
+  const resetColumns = () => {
+    setColumnOrder(DEFAULT_COLUMN_ORDER);
+    setColumnWidths(DEFAULT_COLUMN_WIDTHS);
+    try {
+      localStorage.removeItem("inventory_monitoring_col_order");
+      localStorage.removeItem("inventory_monitoring_col_widths");
+      localStorage.removeItem(COL_WIDTHS_STORAGE_KEY);
+    } catch {}
+  };
+
+  const handleDragStart = (e: React.DragEvent, colId: MiddleColumnId) => {
+    setDraggedCol(colId);
+    e.dataTransfer.setData("text/plain", colId);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e: React.DragEvent, targetColId: MiddleColumnId) => {
+    e.preventDefault();
+    if (draggedCol && draggedCol !== targetColId) {
+      setDragOverCol(targetColId);
+    }
+  };
+
+  const handleDragLeave = () => {
+    setDragOverCol(null);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetColId: MiddleColumnId) => {
+    e.preventDefault();
+    if (!draggedCol || draggedCol === targetColId) {
+      setDraggedCol(null);
+      setDragOverCol(null);
+      return;
+    }
+    setColumnOrder((prev) => {
+      const fromIndex = prev.indexOf(draggedCol);
+      const toIndex = prev.indexOf(targetColId);
+      if (fromIndex === -1 || toIndex === -1) return prev;
+      const newOrder = [...prev];
+      newOrder.splice(fromIndex, 1);
+      newOrder.splice(toIndex, 0, draggedCol);
+      try {
+        localStorage.setItem("inventory_monitoring_col_order", JSON.stringify(newOrder));
+      } catch {}
+      return newOrder;
+    });
+    setDraggedCol(null);
+    setDragOverCol(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedCol(null);
+    setDragOverCol(null);
+  };
+
+  const handleResizeMouseDown = (e: React.MouseEvent, colId: MiddleColumnId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const idx = columnOrder.indexOf(colId);
+    const neighborId = columnOrder[idx + 1];
+    if (!neighborId) return;
+
+    const th = (e.currentTarget as HTMLElement).closest("th");
+    const thWidthPx = th?.getBoundingClientRect().width ?? 0;
+    const pxPerPercent = thWidthPx > 0 ? thWidthPx / columnWidths[colId] : 7.5;
+
+    resizingColRef.current = {
+      colId,
+      neighborId,
+      startX: e.clientX,
+      startWidth: columnWidths[colId],
+      startNeighborWidth: columnWidths[neighborId],
+      pxPerPercent,
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const r = resizingColRef.current;
+      if (!r) return;
+      const pair = r.startWidth + r.startNeighborWidth;
+      const deltaPct = (moveEvent.clientX - r.startX) / r.pxPerPercent;
+      // ~136px guarantees the longest single word ("REQUIRED" / "STATUS ↑↓") + grip icon + left padding
+      // still has ~20px of right clearance before the resizer bar so they never overlap.
+      const minPct = Math.min(
+        pair / 2,
+        Math.max(MIN_COLUMN_PERCENT, Math.min(22, 136 / r.pxPerPercent))
+      );
+      const newWidth = Math.max(
+        minPct,
+        Math.min(pair - minPct, r.startWidth + deltaPct)
+      );
+      setColumnWidths((prev) => ({
+        ...prev,
+        [r.colId]: newWidth,
+        [r.neighborId]: pair - newWidth,
+      }));
+    };
+
+    const handleMouseUp = () => {
+      resizingColRef.current = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      setColumnWidths((prev) => {
+        try {
+          localStorage.setItem(COL_WIDTHS_STORAGE_KEY, JSON.stringify(prev));
+        } catch {}
+        return prev;
+      });
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
+
   // Modals & States
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isRestockModalOpen, setIsRestockModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
-  const [restockAmount, setRestockAmount] = useState<number>(10);
+  const [restockAmount, setRestockAmount] = useState<number | string>(10);
   const [restockReason, setRestockReason] = useState<string>("Supplier delivery / Purchase");
   const [adjustmentType, setAdjustmentType] = useState<StockMovement["type"]>("Restock");
   const [formError, setFormError] = useState<string | null>(null);
@@ -106,7 +270,12 @@ export function InventoryPage() {
   });
 
   // Edit Item State
-  const [editFormData, setEditFormData] = useState({
+  const [editFormData, setEditFormData] = useState<{
+    name: string;
+    category: string;
+    minStock: number | string;
+    unit: string;
+  }>({
     name: "",
     category: "Event Equipment",
     minStock: 10,
@@ -128,6 +297,11 @@ export function InventoryPage() {
     const nameRegex = /^[a-zA-Z\sñÑ\-']+$/;
     if (!nameRegex.test(newItem.name)) {
       setFormError("Item name cannot contain numbers or special characters.");
+      return;
+    }
+
+    if (Number(newItem.stock) > 100000 || Number(newItem.minStock) > 100000) {
+      setFormError("Stock values cannot exceed 100,000.");
       return;
     }
 
@@ -161,12 +335,18 @@ export function InventoryPage() {
   const handleApplyRestockOrAdjustment = async () => {
     if (!selectedItem) return;
 
-    if (restockAmount === 0) {
+    const numAmount = Number(restockAmount) || 0;
+    if (numAmount === 0) {
       setFormError("Please enter a non-zero adjustment amount.");
       return;
     }
 
-    const effectiveChange = adjustmentType === "Damaged/Loss" ? -Math.abs(restockAmount) : (adjustmentType === "Restock" ? Math.abs(restockAmount) : restockAmount);
+    if (numAmount > 100000) {
+      setFormError("Adjustment quantity cannot exceed 100,000.");
+      return;
+    }
+
+    const effectiveChange = adjustmentType === "Damaged/Loss" ? -Math.abs(numAmount) : (adjustmentType === "Restock" ? Math.abs(numAmount) : numAmount);
 
     await updateStock(selectedItem.id, effectiveChange, restockReason, adjustmentType);
 
@@ -200,10 +380,15 @@ export function InventoryPage() {
       return;
     }
 
+    if (Number(editFormData.minStock) > 100000) {
+      setFormError("Min. required stock cannot exceed 100,000.");
+      return;
+    }
+
     await updateItem(selectedItem.id, {
       name: editFormData.name.trim(),
       category: editFormData.category,
-      minStock: editFormData.minStock,
+      minStock: Number(editFormData.minStock) || 0,
       unit: editFormData.unit,
     });
 
@@ -280,15 +465,245 @@ export function InventoryPage() {
   const stats = useMemo(() => {
     const totalUnits = activeItems.reduce((acc, i) => acc + i.stock, 0);
     const totalAllocated = activeItems.reduce((acc, i) => acc + getAllocatedStock(i.id), 0);
+    const totalOutsourced = activeItems.reduce((acc, i) => acc + getOutsourcedStock(i.id), 0);
     return {
       totalTypes: activeItems.length,
       lowStockCount: lowStockItems.length,
       totalUnits,
       totalAllocated,
+      totalOutsourced,
     };
-  }, [activeItems, lowStockItems, getAllocatedStock]);
+  }, [activeItems, lowStockItems, getAllocatedStock, getOutsourcedStock]);
 
+  const renderMiddleHeader = (colId: MiddleColumnId) => {
+    const isDragging = draggedCol === colId;
+    const isDragOver = dragOverCol === colId;
+    const isLast = columnOrder[columnOrder.length - 1] === colId;
 
+    return (
+      <th
+        key={colId}
+        draggable
+        onDragStart={(e) => handleDragStart(e, colId)}
+        onDragOver={(e) => handleDragOver(e, colId)}
+        onDragLeave={handleDragLeave}
+        onDrop={(e) => handleDrop(e, colId)}
+        onDragEnd={handleDragEnd}
+        className={cn(
+          "pl-3 pr-5 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border relative select-none transition-all group/th bg-transparent break-normal",
+          isDragging && "opacity-40 bg-natural-accent/10",
+          isDragOver && "bg-natural-accent/15",
+          colId === "stockStatus" && "cursor-pointer hover:text-natural-accent"
+        )}
+        onClick={
+          colId === "stockStatus"
+            ? () => {
+                setSortStatus((prev) =>
+                  prev === "asc" ? "desc" : prev === "desc" ? null : "asc"
+                );
+              }
+            : undefined
+        }
+      >
+        <div className="flex items-center gap-1.5">
+          <span title="Drag to rearrange column order" className="shrink-0 inline-flex">
+            <GripVertical className="w-3.5 h-3.5 text-natural-text-light/40 group-hover/th:text-natural-text-light cursor-grab active:cursor-grabbing" />
+          </span>
+          {colId === "physicalStock" && (
+            <span className="whitespace-normal break-normal leading-tight">Physical Stock</span>
+          )}
+          {colId === "inUse" && (
+            <span className="whitespace-normal break-normal leading-tight">In-Use (Events)</span>
+          )}
+          {colId === "minStock" && (
+            <span className="whitespace-normal break-normal leading-tight">Min. Required</span>
+          )}
+          {colId === "stockStatus" && (
+            <span className="whitespace-normal break-normal leading-tight">
+              Stock{" "}
+              <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                Status
+                {sortStatus === "asc" ? (
+                  <ArrowUp className="w-3.5 h-3.5 text-natural-accent shrink-0" />
+                ) : sortStatus === "desc" ? (
+                  <ArrowDown className="w-3.5 h-3.5 text-natural-accent shrink-0" />
+                ) : (
+                  <ArrowUpDown className="w-3.5 h-3.5 opacity-30 shrink-0" />
+                )}
+              </span>
+            </span>
+          )}
+        </div>
+
+        {/* Resizer handle on the right edge between adjustable middle columns (header row only) */}
+        {!isLast && (
+          <div
+            onMouseDown={(e) => handleResizeMouseDown(e, colId)}
+            onClick={(e) => e.stopPropagation()}
+            className="absolute right-0 top-0 bottom-0 w-3 cursor-col-resize hover:bg-natural-accent/25 flex items-center justify-center select-none group/resizer z-30 transition-colors"
+            title="Drag to resize column width"
+          >
+            <div className="w-[1.5px] h-5 bg-natural-border group-hover/resizer:bg-natural-accent transition-colors" />
+          </div>
+        )}
+      </th>
+    );
+  };
+
+  const renderMiddleCell = (colId: MiddleColumnId, item: InventoryItem) => {
+    const allocated = getAllocatedStock(item.id);
+    const outsourced = getOutsourcedStock(item.id);
+    const totalStock = item.stock + allocated;
+    const remainingPercent =
+      item.status === "Archived" || totalStock === 0
+        ? 0
+        : Math.min(Math.round((item.stock / totalStock) * 100), 100);
+    if (colId === "physicalStock") {
+      return (
+        <td
+          key="physicalStock"
+          className="px-4 py-5.5 border-b border-natural-border/50 transition-colors break-normal align-middle"
+        >
+          <div className="flex flex-col gap-1.5 min-w-0">
+            <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 w-full text-xs font-bold text-natural-text-main">
+              <span>
+                {totalStock.toLocaleString()} {item.unit} Total
+              </span>
+              <span
+                className={cn(
+                  "text-xs font-bold",
+                  allocated > 0
+                    ? "text-red-500 dark:text-red-400"
+                    : "text-natural-text-light/50"
+                )}
+              >
+                {allocated > 0
+                  ? `-${allocated.toLocaleString()} Deducted`
+                  : "0 Deducted"}
+              </span>
+            </div>
+            <div className="h-[7px] w-full bg-natural-bg border border-natural-border rounded-full overflow-hidden">
+              {(() => {
+                const s = normalizeStockStatus(item.status);
+                return (
+                  <div
+                    className={cn(
+                      "h-full transition-all duration-700",
+                      item.status === "Archived"
+                        ? "bg-gray-400"
+                        : item.stock === 0
+                          ? "bg-gray-300 dark:bg-gray-700"
+                          : remainingPercent > 50
+                            ? "bg-[#6b8e23]"
+                            : remainingPercent > 20
+                              ? "bg-amber-400"
+                              : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.4)]"
+                    )}
+                    style={{ width: `${remainingPercent}%` }}
+                  />
+                );
+              })()}
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[11px] text-natural-text-light font-medium">
+              <span>
+                Available:{" "}
+                <strong className="text-natural-text-main font-semibold">
+                  {item.stock.toLocaleString()} {item.unit}
+                </strong>
+              </span>
+              <span className="text-[10px] opacity-75">
+                {remainingPercent}% on-hand
+              </span>
+            </div>
+          </div>
+        </td>
+      );
+    }
+
+    if (colId === "inUse") {
+      return (
+        <td
+          key="inUse"
+          className="px-4 py-5.5 border-b border-natural-border/50 transition-colors break-normal align-middle"
+        >
+          <div className="flex flex-col items-start gap-1">
+            {allocated > 0 ? (
+              <span className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-700 dark:text-blue-300">
+                <Boxes className="w-3.5 h-3.5" />
+                {allocated.toLocaleString()} {item.unit} In-use
+              </span>
+            ) : (
+              <span className="text-xs text-natural-text-light/50 font-medium">
+                0 {item.unit} In-use
+              </span>
+            )}
+            {outsourced > 0 && (
+              <span
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-50 text-orange-700 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-800/60"
+                title="Rent from external supplier to cover shortage — not part of warehouse stock"
+              >
+                <ArrowUpRight className="w-3 h-3" />+{outsourced.toLocaleString()} to outsource
+              </span>
+            )}
+          </div>
+        </td>
+      );
+    }
+
+    if (colId === "minStock") {
+      return (
+        <td
+          key="minStock"
+          className="px-4 py-5.5 border-b border-natural-border/50 transition-colors break-normal align-middle"
+        >
+          <p className="text-sm font-semibold text-natural-text-main">
+            {item.minStock} {item.unit}
+          </p>
+        </td>
+      );
+    }
+
+    if (colId === "stockStatus") {
+      const s = normalizeStockStatus(item.status);
+      return (
+        <td
+          key="stockStatus"
+          className="px-4 py-5.5 border-b border-natural-border/50 transition-colors break-normal align-middle"
+        >
+          <div className="flex items-center gap-2">
+            <div
+              className={cn(
+                "w-2.5 h-2.5 rounded-full",
+                s === "High"
+                  ? "bg-[#6b8e23]"
+                  : s === "Normal"
+                    ? "bg-amber-400"
+                    : s === "Archived"
+                      ? "bg-gray-400"
+                      : "bg-red-500"
+              )}
+            />
+            <span
+              className={cn(
+                "text-xs font-bold uppercase tracking-wider",
+                s === "High"
+                  ? "text-[#6b8e23]"
+                  : s === "Normal"
+                    ? "text-amber-600"
+                    : s === "Archived"
+                      ? "text-gray-500"
+                      : "text-red-500"
+              )}
+            >
+              {s}
+            </span>
+          </div>
+        </td>
+      );
+    }
+
+    return null;
+  };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-12">
@@ -298,26 +713,12 @@ export function InventoryPage() {
           <h2 className="text-2xl font-serif font-bold text-natural-text-main">
             Equipment Tracking & Allocation
           </h2>
-          <p className="text-natural-text-light text-[0.8rem] font-medium uppercase tracking-wider">
+          <p className="text-natural-text-light text-xs font-medium uppercase tracking-wider">
             Real-time equipment status, event allocations, and return logistics
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={handleReconcile}
-            disabled={isReconciling}
-            title="Reconcile Completed Events & Return Equipment"
-            className="flex items-center gap-2 px-3.5 py-2.5 border border-natural-border bg-white rounded-lg text-xs font-bold text-natural-text-main hover:bg-natural-bg transition-all shadow-xs cursor-pointer disabled:opacity-50"
-          >
-            <RotateCcw className={cn("w-3.5 h-3.5 text-natural-accent", isReconciling && "animate-spin")} />
-            <span>Auto-Return Check</span>
-            {deductionRecords.length > 0 && (
-              <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-natural-accent/10 text-natural-accent font-bold">
-                {deductionRecords.length} Active Events
-              </span>
-            )}
-          </button>
           <button
             onClick={() => refreshItems()}
             title="Refresh Stock Data"
@@ -338,25 +739,14 @@ export function InventoryPage() {
         </div>
       </div>
 
-      {reconcileMsg && (
-        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-3 animate-in slide-in-from-top-2 duration-300 shadow-xs">
-          <div className="p-2 bg-emerald-100 rounded-lg text-emerald-800 shrink-0">
-            <CheckCircle2 className="w-5 h-5" />
-          </div>
-          <p className="text-xs font-bold text-emerald-950 font-serif">
-            {reconcileMsg}
-          </p>
-        </div>
-      )}
-
       {/* KPI Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="glass-card p-5 bg-white flex items-center gap-4">
-          <div className="p-3 bg-natural-bg rounded-xl border border-natural-border">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <div className="glass-card p-5 bg-white dark:bg-natural-card flex items-center gap-4">
+          <div className="p-3 bg-natural-bg dark:bg-natural-bg/40 rounded-xl border border-natural-border">
             <Warehouse className="w-5 h-5 text-natural-accent" />
           </div>
           <div>
-            <p className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+            <p className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
               Total Item Types
             </p>
             <h4 className="text-2xl font-bold font-serif text-natural-text-main">
@@ -365,12 +755,12 @@ export function InventoryPage() {
           </div>
         </div>
 
-        <div className="glass-card p-5 bg-white flex items-center gap-4">
-          <div className="p-3 bg-blue-50 rounded-xl border border-blue-200">
-            <Boxes className="w-5 h-5 text-blue-600" />
+        <div className="glass-card p-5 bg-white dark:bg-natural-card flex items-center gap-4">
+          <div className="p-3 bg-blue-50 dark:bg-blue-950/40 rounded-xl border border-blue-200 dark:border-blue-800/60">
+            <Boxes className="w-5 h-5 text-blue-600 dark:text-blue-400" />
           </div>
           <div>
-            <p className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+            <p className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
               Total Units In Stock
             </p>
             <h4 className="text-2xl font-bold font-serif text-natural-text-main">
@@ -379,60 +769,40 @@ export function InventoryPage() {
           </div>
         </div>
 
-        <div className="glass-card p-5 bg-white flex items-center gap-4">
-          <div className="p-3 bg-green-50 rounded-xl border border-green-200">
-            <CheckCircle2 className="w-5 h-5 text-green-600" />
+        <div className="glass-card p-5 bg-white dark:bg-natural-card flex items-center gap-4">
+          <div className="p-3 bg-green-50 dark:bg-emerald-950/50 rounded-xl border border-green-200 dark:border-emerald-800/60">
+            <CheckCircle2 className="w-5 h-5 text-green-600 dark:text-emerald-400" />
           </div>
           <div>
-            <p className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
-              Allocated to Events
+            <p className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
+              In-Use (Events)
             </p>
-            <h4 className="text-2xl font-bold font-serif text-green-700">
+            <h4 className="text-2xl font-bold font-serif text-green-700 dark:text-emerald-400">
               {stats.totalAllocated.toLocaleString()} Units
             </h4>
           </div>
         </div>
-      </div>
 
-      {/* Low Stock Replenishment Alert Bar (If any) */}
-      {lowStockItems.length > 0 && !showArchived && (
-        <div className="p-4 bg-amber-50/90 border border-amber-200/90 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xs animate-in slide-in-from-top-2 duration-300">
-          <div className="flex items-start gap-3">
-            <div className="p-2 bg-amber-100 rounded-lg text-amber-800 shrink-0 mt-0.5">
-              <AlertCircle className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-sm font-bold text-amber-950 font-serif">
-                Stock Attention Required ({lowStockItems.length} items low)
-              </h4>
-              <p className="text-xs text-amber-900/80 mt-0.5">
-                The following equipment items are near or below minimum requirement:{" "}
-                <span className="font-semibold">
-                  {lowStockItems.map((i) => i.name).slice(0, 5).join(", ")}
-                  {lowStockItems.length > 5 ? ` and ${lowStockItems.length - 5} more` : ""}
-                </span>
-              </p>
-            </div>
+        <div className="glass-card p-5 bg-white dark:bg-natural-card flex items-center gap-4">
+          <div className="p-3 bg-orange-50 dark:bg-orange-950/40 rounded-xl border border-orange-200 dark:border-orange-800/60">
+            <ArrowUpRight className="w-5 h-5 text-orange-600 dark:text-orange-400" />
           </div>
-          <div className="flex items-center gap-2 shrink-0 w-full md:w-auto">
-            <button
-              onClick={() => {
-                if (lowStockItems[0]) {
-                  setSelectedItem(lowStockItems[0]);
-                  setRestockAmount(Math.max(10, lowStockItems[0].minStock * 2 - lowStockItems[0].stock));
-                  setAdjustmentType("Restock");
-                  setRestockReason("Replenish low stock");
-                  setIsRestockModalOpen(true);
-                }
-              }}
-              className="w-full md:w-auto px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-all shadow-xs"
-            >
-              Quick Restock Priority
-            </button>
+          <div>
+            <p className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
+              To Outsource (Rent)
+            </p>
+            <h4 className="text-2xl font-bold font-serif text-orange-700 dark:text-orange-400">
+              {stats.totalOutsourced.toLocaleString()} Units
+            </h4>
+            <p className="text-[10px] text-natural-text-light font-medium">
+              Not counted in warehouse stock
+            </p>
           </div>
         </div>
-      )}
+      </div>
 
+
+      {/* Low Stock Replenishment Alert Bar (If any) */}
       {/* Equipment Stock Table */}
       <div className="glass-card bg-white overflow-hidden space-y-4">
           <div className="p-4 border-b border-natural-border flex flex-col md:flex-row gap-4 items-center justify-between">
@@ -500,6 +870,16 @@ export function InventoryPage() {
                 <option value="Normal">Normal</option>
                 <option value="Low">Low</option>
               </select>
+
+              <button
+                type="button"
+                onClick={resetColumns}
+                className="flex items-center gap-1.5 px-3 py-2 border border-natural-border rounded-lg text-xs font-bold text-natural-text-light hover:text-natural-accent hover:bg-natural-bg transition-all cursor-pointer"
+                title="Reset column positions and widths to default"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reset Columns</span>
+              </button>
             </div>
           </div>
 
@@ -513,58 +893,35 @@ export function InventoryPage() {
               <div className="flex flex-col items-center justify-center py-20 text-natural-text-light">
                 <PackageSearch className="w-12 h-12 mb-4 opacity-20" />
                 <p className="font-serif italic">No equipment items found</p>
-                <p className="text-[0.7rem] uppercase tracking-widest mt-1">
+                <p className="text-xs uppercase tracking-wider mt-1">
                   Adjust filters or add new equipment items to your monitoring list
                 </p>
               </div>
             ) : (
-              <table className="w-full text-left border-collapse">
+              <table className="w-full min-w-[1000px] table-fixed text-left border-collapse">
+                {/* Item (left) and Actions (right) have fixed shares and never move.
+                    Middle columns split the remaining space by their adjustable percentages,
+                    so the table always fits the container and no column can be hidden. */}
+                <colgroup>
+                  <col style={{ width: "18%" }} />
+                  {columnOrder.map((colId) => (
+                    <col key={colId} style={{ width: `${(columnWidths[colId] * 58) / 100}%` }} />
+                  ))}
+                  <col style={{ width: "24%" }} />
+                </colgroup>
                 <thead>
                   <tr className="bg-natural-bg/30">
-                    <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border">
+                    <th className="px-4 sm:px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border select-none break-normal">
                       Item & Category
                     </th>
-                    <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border text-center">
-                      Physical Stock
-                    </th>
-                    <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border text-center">
-                      Allocated (Events)
-                    </th>
-                    <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border">
-                      Min. Required
-                    </th>
-                    <th
-                      className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
-                      onClick={() =>
-                        setSortStatus((prev) =>
-                          prev === "asc" ? "desc" : prev === "desc" ? null : "asc"
-                        )
-                      }
-                    >
-                      <div className="flex items-center gap-1.5">
-                        Stock Status
-                        {sortStatus === "asc" ? (
-                          <ArrowUp className="w-3 h-3 text-natural-accent" />
-                        ) : sortStatus === "desc" ? (
-                          <ArrowDown className="w-3 h-3 text-natural-accent" />
-                        ) : (
-                          <ArrowUpDown className="w-3 h-3 opacity-30" />
-                        )}
-                      </div>
-                    </th>
-                    <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border text-right">
+                    {columnOrder.map((colId) => renderMiddleHeader(colId))}
+                    <th className="px-4 sm:px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border select-none text-right break-normal">
                       Actions
                     </th>
                   </tr>
                 </thead>
                 <tbody>
                   {sortedItems.map((item) => {
-                    const allocated = getAllocatedStock(item.id);
-                    const stockPercentage =
-                      item.status === "Archived"
-                        ? 0
-                        : Math.min((item.stock / Math.max(1, item.minStock * 2)) * 100, 100);
-
                     return (
                       <tr
                         key={item.id}
@@ -575,104 +932,21 @@ export function InventoryPage() {
                             : "hover:bg-natural-bg/20"
                         )}
                       >
-                        <td className="px-6 py-4 border-b border-natural-border/50">
-                          <div>
-                            <p className="text-sm font-bold text-natural-text-main tracking-tight">
+                        <td className="px-4 sm:px-6 py-5.5 border-b border-natural-border/50 transition-colors break-normal align-middle">
+                          <div className="min-w-0">
+                            <p className="text-base font-bold text-natural-text-main tracking-normal leading-snug">
                               {item.name}
                             </p>
-                            <span className="inline-block text-[0.65rem] text-natural-text-light font-bold uppercase tracking-widest mt-0.5 px-2 py-0.5 bg-natural-bg rounded">
+                            <span className="inline-block max-w-full text-xs text-natural-text-light font-bold uppercase tracking-wider mt-1 px-2.5 py-0.5 bg-natural-bg rounded break-normal">
                               {item.category}
                             </span>
                           </div>
                         </td>
-                        <td className="px-6 py-4 border-b border-natural-border/50">
-                          <div className="flex flex-col items-center gap-1.5 min-w-[130px]">
-                            <div className="flex justify-between w-full text-[0.7rem] font-bold text-natural-text-main">
-                              <span>
-                                {item.stock} {item.unit}
-                              </span>
-                              <span className="opacity-40 text-[10px]">
-                                {item.minStock > 0
-                                  ? `${Math.round((item.stock / item.minStock) * 100)}%`
-                                  : "100%"}
-                              </span>
-                            </div>
-                            <div className="h-[6px] w-full bg-natural-bg border border-natural-border rounded-full overflow-hidden">
-                              {(() => {
-                                const s = normalizeStockStatus(item.status);
-                                return (
-                                  <div
-                                    className={cn(
-                                      "h-full transition-all duration-700",
-                                      s === "High"
-                                        ? "bg-[#6b8e23]"
-                                        : s === "Normal"
-                                          ? "bg-amber-400"
-                                          : s === "Archived"
-                                            ? "bg-gray-400"
-                                            : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.4)]"
-                                    )}
-                                    style={{ width: `${stockPercentage}%` }}
-                                  />
-                                );
-                              })()}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 border-b border-natural-border/50 text-center">
-                          {allocated > 0 ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                              <Boxes className="w-3 h-3" />
-                              {allocated} {item.unit}
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-natural-text-light/50 font-medium">
-                              0 {item.unit}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 border-b border-natural-border/50">
-                          <p className="text-xs font-semibold text-natural-text-light">
-                            {item.minStock} {item.unit}
-                          </p>
-                        </td>
-                        <td className="px-6 py-4 border-b border-natural-border/50">
-                          {(() => {
-                            const s = normalizeStockStatus(item.status);
-                            return (
-                              <div className="flex items-center gap-2">
-                                <div
-                                  className={cn(
-                                    "w-2 h-2 rounded-full",
-                                    s === "High"
-                                      ? "bg-[#6b8e23]"
-                                      : s === "Normal"
-                                        ? "bg-amber-400"
-                                        : s === "Archived"
-                                          ? "bg-gray-400"
-                                          : "bg-red-500"
-                                  )}
-                                />
-                                <span
-                                  className={cn(
-                                    "text-[0.65rem] font-bold uppercase tracking-widest",
-                                    s === "High"
-                                      ? "text-[#6b8e23]"
-                                      : s === "Normal"
-                                        ? "text-amber-600"
-                                        : s === "Archived"
-                                          ? "text-gray-500"
-                                          : "text-red-500"
-                                  )}
-                                >
-                                  {s}
-                                </span>
-                              </div>
-                            );
-                          })()}
-                        </td>
-                        <td className="px-6 py-4 border-b border-natural-border/50 text-right">
-                          <div className="flex justify-end items-center gap-2">
+
+                        {columnOrder.map((colId) => renderMiddleCell(colId, item))}
+
+                        <td className="px-4 py-5.5 border-b border-natural-border/50 text-right transition-colors align-middle">
+                          <div className="flex flex-nowrap justify-end items-center gap-1.5">
                             {item.status !== "Archived" ? (
                               <>
                                 <button
@@ -684,11 +958,13 @@ export function InventoryPage() {
                                     setFormError(null);
                                     setIsRestockModalOpen(true);
                                   }}
-                                  className="flex items-center gap-1.5 px-2.5 py-1.5 bg-natural-accent/10 hover:bg-natural-accent text-natural-accent hover:text-white rounded-lg text-xs font-bold transition-all cursor-pointer"
+                                  className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-natural-accent/10 hover:bg-natural-accent text-natural-accent hover:text-white rounded-lg text-xs font-bold transition-all cursor-pointer text-center"
                                   title="Stock Adjustment"
                                 >
-                                  <Sliders className="w-3.5 h-3.5" />
-                                  <span>Stock Adjustment</span>
+                                  <Sliders className="w-3.5 h-3.5 shrink-0" />
+                                  <span className="whitespace-normal break-normal leading-tight">
+                                    Stock Adjustment
+                                  </span>
                                 </button>
                                 <button
                                   onClick={() => {
@@ -702,21 +978,21 @@ export function InventoryPage() {
                                     setFormError(null);
                                     setIsEditModalOpen(true);
                                   }}
-                                  className="p-1.5 text-natural-text-light hover:text-natural-accent hover:bg-natural-bg rounded-lg transition-all"
+                                  className="p-2 shrink-0 text-natural-text-light hover:text-natural-accent hover:bg-natural-bg rounded-lg transition-all"
                                   title="Edit Item Details"
                                 >
                                   <Settings2 className="w-4 h-4" />
                                 </button>
                                 <button
                                   onClick={() => setItemToArchive(item.id)}
-                                  className="p-1.5 text-natural-text-light hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                                  className="p-2 shrink-0 text-natural-text-light hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg transition-all"
                                   title="Archive Item"
                                 >
                                   <Archive className="w-4 h-4" />
                                 </button>
                               </>
                             ) : (
-                              <span className="text-[0.6rem] font-bold text-natural-text-light/40 uppercase tracking-widest bg-natural-bg/50 px-2 py-1 rounded">
+                              <span className="text-xs font-bold text-natural-text-light/60 dark:text-natural-text-light uppercase tracking-wider bg-natural-bg/50 dark:bg-natural-bg/30 px-2.5 py-1 rounded border border-natural-border/40">
                                 Archived
                               </span>
                             )}
@@ -734,7 +1010,7 @@ export function InventoryPage() {
       {/* MODAL: ADD ITEM */}
       {isAddModalOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+          <div className="bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-natural-border flex items-center justify-between">
               <h3 className="text-xl font-serif font-bold text-natural-text-main">
                 Add New Equipment Item
@@ -752,12 +1028,12 @@ export function InventoryPage() {
 
             <div className="p-6 space-y-4">
               {formError && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-xl">
-                  <p className="text-xs font-bold text-red-600">{formError}</p>
+                <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 rounded-xl">
+                  <p className="text-xs font-bold text-red-600 dark:text-red-400">{formError}</p>
                 </div>
               )}
               <div className="space-y-1">
-                <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                   Item Name
                 </label>
                 <input
@@ -773,7 +1049,7 @@ export function InventoryPage() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                  <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                     Category
                   </label>
                   <select
@@ -791,7 +1067,7 @@ export function InventoryPage() {
                   </select>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                  <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                     Unit
                   </label>
                   <select
@@ -811,40 +1087,54 @@ export function InventoryPage() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                  <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                     Initial Stock
                   </label>
                   <input
                     type="number"
+                    min="0"
+                    max="100000"
                     value={newItem.stock ?? ""}
-                    onChange={(e) =>
-                      setNewItem({
-                        ...newItem,
-                        stock:
-                          e.target.value === ""
-                            ? undefined
-                            : Number(e.target.value),
-                      })
-                    }
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "") {
+                        setNewItem({ ...newItem, stock: undefined });
+                        return;
+                      }
+                      const num = Math.min(100000, Math.max(0, Number(val)));
+                      setNewItem({ ...newItem, stock: num });
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") {
+                        e.preventDefault();
+                      }
+                    }}
                     className="w-full px-4 py-2 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:bg-white"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                  <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                     Min. Required Stock
                   </label>
                   <input
                     type="number"
+                    min="0"
+                    max="100000"
                     value={newItem.minStock ?? ""}
-                    onChange={(e) =>
-                      setNewItem({
-                        ...newItem,
-                        minStock:
-                          e.target.value === ""
-                            ? undefined
-                            : Number(e.target.value),
-                      })
-                    }
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "") {
+                        setNewItem({ ...newItem, minStock: undefined });
+                        return;
+                      }
+                      const num = Math.min(100000, Math.max(0, Number(val)));
+                      setNewItem({ ...newItem, minStock: num });
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") {
+                        e.preventDefault();
+                      }
+                    }}
                     className="w-full px-4 py-2 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:bg-white"
                   />
                 </div>
@@ -876,7 +1166,7 @@ export function InventoryPage() {
       {/* MODAL: RESTOCK / ADJUST STOCK */}
       {isRestockModalOpen && selectedItem && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+          <div className="bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-natural-border flex items-center justify-between">
               <div>
                 <h3 className="text-xl font-serif font-bold text-natural-text-main">
@@ -900,14 +1190,14 @@ export function InventoryPage() {
 
             <div className="p-6 space-y-5">
               {formError && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-xl">
-                  <p className="text-xs font-bold text-red-600">{formError}</p>
+                <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 rounded-xl">
+                  <p className="text-xs font-bold text-red-600 dark:text-red-400">{formError}</p>
                 </div>
               )}
 
               {/* Action Type Selector */}
               <div className="space-y-1">
-                <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                   Adjustment Type
                 </label>
                 <div className="grid grid-cols-2 gap-2">
@@ -938,7 +1228,7 @@ export function InventoryPage() {
 
               {/* Amount Presets & Input */}
               <div className="space-y-2">
-                <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                   Quantity ({selectedItem.unit})
                 </label>
                 <div className="flex items-center gap-2">
@@ -960,8 +1250,34 @@ export function InventoryPage() {
                 </div>
                 <input
                   type="number"
+                  min="1"
+                  max="100000"
                   value={restockAmount}
-                  onChange={(e) => setRestockAmount(Number(e.target.value))}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === "") {
+                      setRestockAmount("");
+                      setFormError(null);
+                      return;
+                    }
+                    const num = Number(val);
+                    if (num > 100000) {
+                      setRestockAmount(100000);
+                      setFormError("Adjustment quantity cannot exceed 100,000.");
+                      return;
+                    }
+                    if (num < 0) {
+                      setRestockAmount(0);
+                      return;
+                    }
+                    setRestockAmount(num);
+                    setFormError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") {
+                      e.preventDefault();
+                    }
+                  }}
                   className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-center text-lg font-bold font-serif focus:bg-white focus:outline-none focus:ring-2 focus:ring-natural-accent/10"
                 />
               </div>
@@ -969,16 +1285,16 @@ export function InventoryPage() {
               {/* Stock Preview */}
               <div className="p-3 bg-natural-bg/40 border border-natural-border rounded-xl flex items-center justify-between text-xs">
                 <div>
-                  <span className="text-[10px] text-natural-text-light uppercase font-bold block">
+                  <span className="text-xs text-natural-text-light uppercase font-bold block">
                     Current Stock
                   </span>
                   <span className="font-bold text-natural-text-main">
-                    {selectedItem.stock} {selectedItem.unit}
+                    {selectedItem.stock.toLocaleString()} {selectedItem.unit}
                   </span>
                 </div>
                 <span className="text-natural-text-light font-bold text-sm">➔</span>
                 <div className="text-right">
-                  <span className="text-[10px] text-natural-text-light uppercase font-bold block">
+                  <span className="text-xs text-natural-text-light uppercase font-bold block">
                     New Stock After
                   </span>
                   <span className="font-bold text-natural-accent text-sm">
@@ -986,9 +1302,9 @@ export function InventoryPage() {
                       0,
                       selectedItem.stock +
                         (adjustmentType === "Damaged/Loss"
-                          ? -Math.abs(restockAmount)
-                          : restockAmount)
-                    )}{" "}
+                          ? -Math.abs(Number(restockAmount) || 0)
+                          : (Number(restockAmount) || 0))
+                    ).toLocaleString()}{" "}
                     {selectedItem.unit}
                   </span>
                 </div>
@@ -996,7 +1312,7 @@ export function InventoryPage() {
 
               {/* Reason Input */}
               <div className="space-y-1">
-                <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                   Reason / Memo Note
                 </label>
                 <input
@@ -1034,7 +1350,7 @@ export function InventoryPage() {
       {/* MODAL: EDIT ITEM DETAILS */}
       {isEditModalOpen && selectedItem && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+          <div className="bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-natural-border flex items-center justify-between">
               <h3 className="text-xl font-serif font-bold text-natural-text-main">
                 Edit Item Details
@@ -1053,12 +1369,12 @@ export function InventoryPage() {
 
             <div className="p-6 space-y-4">
               {formError && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-xl">
-                  <p className="text-xs font-bold text-red-600">{formError}</p>
+                <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 rounded-xl">
+                  <p className="text-xs font-bold text-red-600 dark:text-red-400">{formError}</p>
                 </div>
               )}
               <div className="space-y-1">
-                <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                   Item Name
                 </label>
                 <input
@@ -1073,7 +1389,7 @@ export function InventoryPage() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                  <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                     Category
                   </label>
                   <select
@@ -1091,7 +1407,7 @@ export function InventoryPage() {
                   </select>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                  <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                     Unit
                   </label>
                   <select
@@ -1110,18 +1426,51 @@ export function InventoryPage() {
                 </div>
               </div>
               <div className="space-y-1">
-                <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                   Min. Required Stock
                 </label>
                 <input
                   type="number"
+                  min="0"
+                  max="100000"
                   value={editFormData.minStock}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === "") {
+                      setEditFormData({
+                        ...editFormData,
+                        minStock: "",
+                      });
+                      setFormError(null);
+                      return;
+                    }
+                    const num = Number(val);
+                    if (num > 100000) {
+                      setEditFormData({
+                        ...editFormData,
+                        minStock: 100000,
+                      });
+                      setFormError("Min. required stock cannot exceed 100,000.");
+                      return;
+                    }
+                    if (num < 0) {
+                      setEditFormData({
+                        ...editFormData,
+                        minStock: 0,
+                      });
+                      return;
+                    }
                     setEditFormData({
                       ...editFormData,
-                      minStock: Number(e.target.value),
-                    })
-                  }
+                      minStock: num,
+                    });
+                    setFormError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") {
+                      e.preventDefault();
+                    }
+                  }}
                   className="w-full px-4 py-2 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:bg-white"
                 />
               </div>

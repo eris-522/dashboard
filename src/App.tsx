@@ -129,9 +129,9 @@ function AppContent() {
     <div className="flex bg-natural-bg min-h-screen">
       <Sidebar active={activeTab} setActive={setActiveTab} />
 
-      <main className="flex-1 ml-56 p-6 lg:p-8 min-w-0">
+      <main className="flex-1 ml-56 px-6 lg:px-8 pb-6 lg:pb-8 min-w-0">
         {/* Top Header */}
-        <header className="flex items-center justify-between mb-8 flex-wrap gap-4">
+        <header className="sticky top-0 z-40 bg-natural-bg/95 backdrop-blur-md -mx-6 lg:-mx-8 px-6 lg:px-8 pt-6 lg:pt-8 pb-4 mb-4 flex items-center justify-between flex-wrap gap-4 transition-colors duration-250">
           <div>
             <h2 className="text-2xl font-serif font-bold text-natural-text-main">
               {activeTab === "dashboard"

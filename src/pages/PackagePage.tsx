@@ -36,6 +36,22 @@ export interface CateringPackage {
   category_limits?: Record<string, number>;
 }
 
+export const formatNumberWithCommas = (val?: string | number) => {
+  if (val === undefined || val === null || val === "") return "";
+  const raw = String(val).replace(/,/g, "").replace(/[^0-9.]/g, "");
+  if (!raw) return "";
+  const parts = raw.split(".");
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return parts.slice(0, 2).join(".");
+};
+
+export const formatPrice = (price?: string | number) => {
+  if (price === undefined || price === null || price === "") return "₱0";
+  const formatted = formatNumberWithCommas(price);
+  if (!formatted) return "₱0";
+  return `₱${formatted}`;
+};
+
 export function PackagePage() {
   const { calculatePackageEquipment } = useInventory();
   // Feature: State management for database arrays and UI toggles
@@ -153,6 +169,10 @@ export function PackagePage() {
   const handleEditClick = (pkg: CateringPackage) => {
     setEditingPackage({
       ...pkg,
+      price: pkg.price ? formatNumberWithCommas(pkg.price) : "",
+      additional_pax_price: pkg.additional_pax_price
+        ? formatNumberWithCommas(pkg.additional_pax_price)
+        : "",
       status: pkg.status === "Active" ? "Available" : pkg.status || "Available",
       category_limits: pkg.category_limits || {},
     });
@@ -566,7 +586,7 @@ export function PackagePage() {
           <h2 className="text-2xl font-serif font-bold text-natural-text-main">
             Offerings Management
           </h2>
-          <p className="text-natural-text-light text-[0.8rem] font-medium uppercase tracking-wider">
+          <p className="text-natural-text-light text-xs font-medium uppercase tracking-wider">
             Configure event bundles
           </p>
         </div>
@@ -580,14 +600,14 @@ export function PackagePage() {
         </button>
       </div>
 
-      <div className="glass-card bg-white p-4 flex flex-col md:flex-row gap-4 items-center justify-between border border-natural-border/50 rounded-xl">
+      <div className="glass-card bg-white dark:bg-natural-card p-4 flex flex-col md:flex-row gap-4 items-center justify-between border border-natural-border/50 rounded-xl">
         <div className="relative w-full md:w-80">
           <input
             type="text"
             placeholder="Search packages by name, tag..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-natural-bg/50 border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white transition-all shadow-xs"
+            className="w-full pl-9 pr-4 py-2 bg-natural-bg/50 border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white dark:focus:bg-natural-card transition-all shadow-xs"
           />
           <Search className="absolute left-3 top-2.5 w-4 h-4 text-natural-text-light" />
         </div>
@@ -645,17 +665,17 @@ export function PackagePage() {
                   <div>
                     <div className="flex items-center gap-2">
                       {pkg.tag && pkg.tag !== "None" && (
-                        <span className="flex items-center gap-1 text-[9px] font-bold bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded uppercase tracking-tighter">
-                          <Sparkles className="w-2.5 h-2.5 fill-amber-600" />{" "}
+                        <span className="flex items-center gap-1 text-xs font-bold bg-amber-50 text-amber-600 border border-amber-200/60 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800/60 px-2 py-0.5 rounded uppercase tracking-wider shadow-2xs">
+                          <Sparkles className="w-3 h-3 fill-amber-600 dark:fill-amber-300 text-amber-600 dark:text-amber-300" />{" "}
                           {pkg.tag}
                         </span>
                       )}
                       <span
                         className={cn(
-                          "flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-tighter border",
+                          "flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded uppercase tracking-wider border shadow-2xs",
                           pkg.status === "Not Available"
-                            ? "bg-orange-50 text-orange-600 border-orange-100"
-                            : "bg-green-50 text-green-600 border-green-100",
+                            ? "bg-orange-50 text-orange-600 border-orange-100 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60"
+                            : "bg-green-50 text-green-600 border-green-100 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60",
                         )}
                       >
                         {pkg.status === "Not Available"
@@ -663,7 +683,7 @@ export function PackagePage() {
                           : "Available"}
                       </span>
                     </div>
-                    <h3 className="text-lg font-bold text-natural-text-main tracking-tight leading-tight">
+                    <h3 className="text-lg font-bold text-natural-text-main tracking-normal leading-snug mt-1">
                       {pkg.name}
                     </h3>
                   </div>
@@ -673,21 +693,21 @@ export function PackagePage() {
                     <>
                       <button
                         onClick={() => handleEditClick(pkg)}
-                        className="p-1.5 text-natural-text-light hover:text-natural-accent hover:bg-white hover:shadow-xs rounded-lg transition-all"
+                        className="p-2 text-natural-text-light hover:text-natural-accent hover:bg-white dark:hover:bg-natural-card hover:shadow-xs rounded-lg transition-all"
                         title="Edit Package"
                       >
                         <Edit3 className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => handleArchiveClick(pkg)}
-                        className="p-1.5 text-natural-text-light hover:text-red-500 hover:bg-white hover:shadow-xs rounded-lg transition-all"
+                        className="p-2 text-natural-text-light hover:text-red-500 hover:bg-white dark:hover:bg-natural-card hover:shadow-xs rounded-lg transition-all"
                         title="Archive Package"
                       >
                         <Archive className="w-4 h-4" />
                       </button>
                     </>
                   ) : (
-                    <span className="text-[0.6rem] font-bold text-natural-text-light/40 uppercase tracking-widest bg-natural-bg/50 px-2 py-1 rounded ml-1">
+                    <span className="text-xs font-bold text-natural-text-light/60 dark:text-natural-text-light uppercase tracking-wider bg-natural-bg/50 dark:bg-natural-bg/30 px-2.5 py-1 rounded ml-1 border border-natural-border/40">
                       Archived
                     </span>
                   )}
@@ -698,27 +718,27 @@ export function PackagePage() {
                 <div className="flex flex-col justify-center">
                   <div className="flex items-center gap-2">
                     <Users className="w-4 h-4 text-natural-text-light shrink-0" />
-                    <span className="text-xs font-semibold text-natural-text-main">
+                    <span className="text-sm font-semibold text-natural-text-main">
                       {pkg.pax} Guests
                     </span>
                   </div>
                   {pkg.additional_pax_price && (
-                    <span className="text-[9px] text-natural-text-light font-bold mt-1 uppercase tracking-wider ml-6">
-                      +₱{pkg.additional_pax_price} / extra
+                    <span className="text-xs text-natural-text-light font-medium mt-1 tracking-normal ml-6">
+                      +{formatPrice(pkg.additional_pax_price)} / extra
                     </span>
                   )}
                 </div>
                 <div className="flex items-center gap-2">
                   <UtensilsCrossed className="w-4 h-4 text-natural-text-light shrink-0" />
                   <span className="text-xs font-bold text-natural-accent font-serif italic text-lg leading-none">
-                    {pkg.price}
+                    {formatPrice(pkg.price)}
                   </span>
                 </div>
               </div>
             </div>
 
             <div className="p-6 flex-1 bg-natural-bg/5 space-y-4">
-              <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest">
+              <p className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                 Inclusions
               </p>
               {pkg.inclusions && pkg.inclusions.length > 0 ? (
@@ -731,7 +751,7 @@ export function PackagePage() {
                       if (selectedInThisCategory.length === 0) return null;
                       return (
                         <div key={cat} className="space-y-1.5">
-                          <p className="text-[0.65rem] font-bold text-natural-text-main/70 uppercase tracking-widest border-b border-natural-border/50 pb-1 mb-2">
+                          <p className="text-xs font-bold text-natural-text-main/70 uppercase tracking-wider border-b border-natural-border/50 pb-1 mb-2">
                             {cat}
                           </p>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
@@ -741,7 +761,7 @@ export function PackagePage() {
                                 className="flex items-start gap-2"
                               >
                                 <Check className="w-3.5 h-3.5 text-natural-accent shrink-0 mt-0.5" />
-                                <span className="text-[0.7rem] font-medium text-natural-text-main/80 leading-tight">
+                                <span className="text-xs font-medium text-natural-text-main leading-snug">
                                   {inc}
                                 </span>
                               </div>
@@ -761,7 +781,7 @@ export function PackagePage() {
                     if (uncategorized.length === 0) return null;
                     return (
                       <div className="space-y-1.5">
-                        <p className="text-[0.65rem] font-bold text-natural-text-main/70 uppercase tracking-widest border-b border-natural-border/50 pb-1 mb-2">
+                        <p className="text-xs font-bold text-natural-text-main/70 uppercase tracking-wider border-b border-natural-border/50 pb-1 mb-2">
                           Other
                         </p>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
@@ -771,7 +791,7 @@ export function PackagePage() {
                               className="flex items-start gap-2"
                             >
                               <Check className="w-3.5 h-3.5 text-natural-accent shrink-0 mt-0.5" />
-                              <span className="text-[0.7rem] font-medium text-natural-text-main/80 leading-tight">
+                              <span className="text-xs font-medium text-natural-text-main leading-snug">
                                 {inc}
                               </span>
                             </div>
@@ -782,19 +802,19 @@ export function PackagePage() {
                   })()}
                 </div>
               ) : (
-                <p className="text-[0.75rem] font-medium text-natural-text-light/80">
+                <p className="text-xs font-medium text-natural-text-light/80">
                   No inclusions specified.
                 </p>
               )}
             </div>
 
             {/* Equipment Monitoring Link Footer */}
-            <div className="px-6 py-2.5 bg-amber-50/50 border-t border-natural-border/40 flex items-center justify-between text-[10px]">
-              <div className="flex items-center gap-1.5 text-amber-900 font-bold">
-                <Boxes className="w-3.5 h-3.5 text-amber-700" />
+            <div className="px-6 py-2.5 bg-amber-50/50 dark:bg-amber-950/20 border-t border-natural-border/40 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-1.5 text-amber-900 dark:text-amber-300 font-bold">
+                <Boxes className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
                 <span>Equipment Monitoring:</span>
               </div>
-              <span className="font-semibold text-natural-text-main/80">
+              <span className="font-semibold text-natural-text-main/80 dark:text-natural-text-light">
                 {calculatePackageEquipment(pkg.name, Number(pkg.pax) || 50, pkg.inclusions).length} equipment connected
               </span>
             </div>
@@ -804,8 +824,8 @@ export function PackagePage() {
 
       {/* Package Modal */}
       {isModalOpen && editingPackage && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in duration-200 border border-natural-border">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6">
+          <div className="bg-white dark:bg-natural-card rounded-2xl shadow-xl w-full max-w-6xl xl:max-w-7xl max-h-[92vh] overflow-hidden flex flex-col animate-in zoom-in duration-200 border border-natural-border">
             <div className="p-6 border-b border-natural-border flex items-center justify-between shrink-0">
               <h3 className="text-lg font-serif font-bold text-natural-text-main">
                 {editingPackage.id ? "Edit Package" : "Create New Package"}
@@ -820,23 +840,23 @@ export function PackagePage() {
 
             <div className="p-6 space-y-4 overflow-y-auto flex-1">
               {formError && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-xl">
-                  <p className="text-xs font-bold text-red-600">{formError}</p>
+                <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 rounded-xl">
+                  <p className="text-xs font-bold text-red-600 dark:text-red-400">{formError}</p>
                 </div>
               )}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
                 {/* LEFT: input layout */}
-                <div className="space-y-4">
+                <div className="lg:col-span-7 space-y-4">
                   <div className="border border-natural-border/50 rounded-xl overflow-hidden">
                     <div className="p-4 bg-natural-bg/10 border-b border-natural-border/50">
-                      <p className="text-[0.7rem] font-bold text-natural-text-light uppercase tracking-widest">
+                      <p className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                         Package Details
                       </p>
                     </div>
 
                     <div className="p-4 space-y-3">
                       <div className="grid grid-cols-3 gap-3 items-center">
-                        <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest col-span-1">
+                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider col-span-1">
                           Package Name
                         </label>
                         <input
@@ -855,7 +875,7 @@ export function PackagePage() {
 
                       {/* Guest range (separate row) */}
                       <div className="grid grid-cols-3 gap-3 items-center">
-                        <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest col-span-1">
+                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider col-span-1">
                           Guest range
                         </label>
                         <input
@@ -874,7 +894,7 @@ export function PackagePage() {
 
                       {/* Price with ₱ prefix */}
                       <div className="grid grid-cols-3 gap-3 items-center">
-                        <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest col-span-1">
+                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider col-span-1">
                           Price
                         </label>
                         <div className="col-span-2 w-full relative">
@@ -885,19 +905,9 @@ export function PackagePage() {
                             type="text"
                             value={editingPackage.price || ""}
                             onChange={(e) => {
-                              let raw = e.target.value.replace(/,/g, "");
-                              raw = raw.replace(/[^0-9.]/g, "");
-                              const parts = raw.split(".");
-                              if (parts[0]) {
-                                parts[0] = parts[0].replace(
-                                  /\B(?=(\d{3})+(?!\d))/g,
-                                  ",",
-                                );
-                              }
-                              const formatted = parts.slice(0, 2).join(".");
                               setEditingPackage({
                                 ...editingPackage,
-                                price: formatted,
+                                price: formatNumberWithCommas(e.target.value),
                               });
                             }}
                             placeholder="99,000"
@@ -908,7 +918,7 @@ export function PackagePage() {
 
                       {/* Additional Pax Price with ₱ prefix */}
                       <div className="grid grid-cols-3 gap-3 items-center">
-                        <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest col-span-1">
+                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider col-span-1">
                           Add. Pax Price
                         </label>
                         <div className="col-span-2 w-full relative">
@@ -919,19 +929,11 @@ export function PackagePage() {
                             type="text"
                             value={editingPackage.additional_pax_price || ""}
                             onChange={(e) => {
-                              let raw = e.target.value.replace(/,/g, "");
-                              raw = raw.replace(/[^0-9.]/g, "");
-                              const parts = raw.split(".");
-                              if (parts[0]) {
-                                parts[0] = parts[0].replace(
-                                  /\B(?=(\d{3})+(?!\d))/g,
-                                  ",",
-                                );
-                              }
-                              const formatted = parts.slice(0, 2).join(".");
                               setEditingPackage({
                                 ...editingPackage,
-                                additional_pax_price: formatted,
+                                additional_pax_price: formatNumberWithCommas(
+                                  e.target.value,
+                                ),
                               });
                             }}
                             placeholder="e.g. 500"
@@ -942,7 +944,7 @@ export function PackagePage() {
 
                       {/* Status Tag dropdown */}
                       <div className="grid grid-cols-3 gap-3 items-center">
-                        <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest col-span-1">
+                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider col-span-1">
                           Status Tag
                         </label>
                         <select
@@ -968,7 +970,7 @@ export function PackagePage() {
                       </div>
 
                       <div className="grid grid-cols-3 gap-3 items-center">
-                        <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest col-span-1">
+                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider col-span-1">
                           Status
                         </label>
                         <select
@@ -1005,7 +1007,7 @@ export function PackagePage() {
 
                       {/* Category Limits */}
                       <div className="pt-3 border-t border-natural-border/50">
-                        <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest block mb-3">
+                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider block mb-3">
                           Menu Dish Limits (Customer Booking)
                         </label>
                         <div className="grid grid-cols-2 gap-2">
@@ -1021,9 +1023,9 @@ export function PackagePage() {
                           ].map((cat) => (
                             <div
                               key={cat}
-                              className="flex items-center justify-between gap-2 bg-white border border-natural-border p-1.5 rounded-lg shadow-xs"
+                              className="flex items-center justify-between gap-2 bg-white border border-natural-border p-2 rounded-lg shadow-xs"
                             >
-                              <span className="text-[0.65rem] font-bold text-natural-text-main">
+                              <span className="text-xs font-bold text-natural-text-main">
                                 {cat}
                               </span>
                               <input
@@ -1042,7 +1044,7 @@ export function PackagePage() {
                                     },
                                   }));
                                 }}
-                                className="w-12 px-1 py-1 text-center bg-natural-bg/50 border border-natural-border rounded text-xs focus:outline-none focus:ring-1 focus:ring-natural-accent/20"
+                                className="w-12 px-1 py-1 text-center bg-natural-bg/50 border border-natural-border rounded text-xs focus:outline-none focus:ring-1 focus:ring-natural-accent/20 font-bold"
                               />
                             </div>
                           ))}
@@ -1053,7 +1055,7 @@ export function PackagePage() {
 
                   <div className="border border-natural-border/50 rounded-xl overflow-hidden">
                     <div className="p-4 bg-natural-bg/10 border-b border-natural-border/50">
-                      <p className="text-[0.7rem] font-bold text-natural-text-light uppercase tracking-widest">
+                      <p className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                         Inclusions Checklist
                       </p>
                     </div>
@@ -1152,7 +1154,7 @@ export function PackagePage() {
                                         onClick={() =>
                                           handleAddNewItemToCategory(category)
                                         }
-                                        className="p-1 text-green-600 hover:bg-green-50 rounded-md"
+                                        className="p-1 text-green-600 dark:text-emerald-400 hover:bg-green-50 dark:hover:bg-emerald-950/40 rounded-md"
                                       >
                                         <Check className="w-4 h-4" />
                                       </button>
@@ -1160,7 +1162,7 @@ export function PackagePage() {
                                         onClick={() =>
                                           setAddingItemToCategory(null)
                                         }
-                                        className="p-1 text-red-600 hover:bg-red-50 rounded-md"
+                                        className="p-1 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-md"
                                       >
                                         <X className="w-4 h-4" />
                                       </button>
@@ -1228,9 +1230,9 @@ export function PackagePage() {
                 </div>
 
                 {/* RIGHT: preview panel */}
-                <div className="space-y-3">
+                <div className="lg:col-span-5 space-y-4">
                   <div className="p-4 border border-natural-border/50 rounded-xl bg-natural-bg/5">
-                    <p className="text-[0.7rem] font-bold text-natural-text-light uppercase tracking-widest mb-3">
+                    <p className="text-xs font-bold text-natural-text-light uppercase tracking-wider mb-3">
                       Package Preview
                     </p>
 
@@ -1250,54 +1252,56 @@ export function PackagePage() {
                       <div className="p-4 bg-natural-bg/5 border-b border-natural-border/50">
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest">
-                              {editingPackage.tag &&
-                              editingPackage.tag !== "None"
-                                ? editingPackage.tag
-                                : "Tag: —"}
-                            </p>
-                            <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest mt-1">
-                              Status:{" "}
+                            <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
+                              {editingPackage.tag && editingPackage.tag !== "None" ? (
+                                <span className="flex items-center gap-1 text-[11px] font-bold bg-amber-50 text-amber-600 border border-amber-200/60 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800/60 px-2 py-0.5 rounded uppercase tracking-wider shadow-2xs">
+                                  <Sparkles className="w-3 h-3 fill-amber-600 dark:fill-amber-300 text-amber-600 dark:text-amber-300" />{" "}
+                                  {editingPackage.tag}
+                                </span>
+                              ) : null}
                               <span
-                                className={
+                                className={cn(
+                                  "flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border shadow-2xs",
                                   editingPackage.status === "Not Available"
-                                    ? "text-orange-600"
-                                    : "text-green-600"
-                                }
+                                    ? "bg-orange-50 text-orange-600 border-orange-100 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60"
+                                    : "bg-green-50 text-green-600 border-green-100 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60",
+                                )}
                               >
                                 {editingPackage.status || "Available"}
                               </span>
-                            </p>
+                            </div>
                           </div>
 
                           <div className="text-right">
-                            <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest">
+                            <p className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                               Price
                             </p>
-                            <p className="text-lg font-bold text-natural-accent font-serif italic leading-none">
-                              {editingPackage.price || "—"}
+                            <p className="text-xl font-bold text-natural-accent font-serif italic leading-none mt-1">
+                              {editingPackage.price
+                                ? formatPrice(editingPackage.price)
+                                : "—"}
                             </p>
                           </div>
                         </div>
                       </div>
 
                       <div className="p-4">
-                        <h4 className="text-base font-bold text-natural-text-main tracking-tight leading-tight">
+                        <h4 className="text-lg font-bold text-natural-text-main tracking-normal leading-snug">
                           {editingPackage.name || "Package Name"}
                         </h4>
 
-                        <p className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest mt-1">
+                        <p className="text-xs font-bold text-natural-text-light uppercase tracking-wider mt-1.5">
                           Guests: {editingPackage.pax || "—"}
                         </p>
                         {editingPackage.additional_pax_price && (
-                          <p className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest mt-1">
-                            +₱{editingPackage.additional_pax_price} / extra pax
+                          <p className="text-xs font-bold text-natural-text-light uppercase tracking-wider mt-1">
+                            +{formatPrice(editingPackage.additional_pax_price)} / extra pax
                           </p>
                         )}
 
                         <div className="mt-4 border border-natural-border/50 rounded-lg overflow-hidden">
                           <div className="p-3 bg-natural-bg/10 border-b border-natural-border/50">
-                            <p className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                            <p className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                               Inclusions
                             </p>
                           </div>
@@ -1316,7 +1320,7 @@ export function PackagePage() {
                                       return null;
                                     return (
                                       <div key={cat} className="space-y-1.5">
-                                        <p className="text-[0.6rem] font-bold text-natural-text-main uppercase tracking-widest border-b border-natural-border/50 pb-1 mb-2">
+                                        <p className="text-xs font-bold text-natural-text-main/70 uppercase tracking-wider border-b border-natural-border/50 pb-1 mb-2">
                                           {cat}
                                         </p>
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
@@ -1327,7 +1331,7 @@ export function PackagePage() {
                                                 className="flex items-start gap-2"
                                               >
                                                 <Check className="w-3.5 h-3.5 text-natural-accent shrink-0 mt-0.5" />
-                                                <span className="text-[0.7rem] font-medium text-natural-text-main/80 leading-tight">
+                                                <span className="text-xs font-medium text-natural-text-main leading-snug">
                                                   {inc}
                                                 </span>
                                               </div>
@@ -1350,7 +1354,7 @@ export function PackagePage() {
                                   if (uncategorized.length === 0) return null;
                                   return (
                                     <div className="space-y-1.5">
-                                      <p className="text-[0.6rem] font-bold text-natural-text-main uppercase tracking-widest border-b border-natural-border/50 pb-1 mb-2">
+                                      <p className="text-xs font-bold text-natural-text-main/70 uppercase tracking-wider border-b border-natural-border/50 pb-1 mb-2">
                                         Other
                                       </p>
                                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
@@ -1360,7 +1364,7 @@ export function PackagePage() {
                                             className="flex items-start gap-2"
                                           >
                                             <Check className="w-3.5 h-3.5 text-natural-accent shrink-0 mt-0.5" />
-                                            <span className="text-[0.7rem] font-medium text-natural-text-main/80 leading-tight">
+                                            <span className="text-xs font-medium text-natural-text-main leading-snug">
                                               {inc}
                                             </span>
                                           </div>
@@ -1371,7 +1375,7 @@ export function PackagePage() {
                                 })()}
                               </div>
                             ) : (
-                              <p className="text-[0.75rem] font-medium text-natural-text-light/80">
+                              <p className="text-xs font-medium text-natural-text-light/80">
                                 Add inclusions to see them here.
                               </p>
                             )}
@@ -1426,7 +1430,7 @@ export function PackagePage() {
       {/* Confirmation Modal */}
       {confirmAction && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[90vh] overflow-y-auto animate-in zoom-in-95 duration-200 border border-natural-border relative">
+          <div className="bg-white dark:bg-natural-card rounded-2xl shadow-2xl w-full max-w-sm max-h-[90vh] overflow-y-auto animate-in zoom-in-95 duration-200 border border-natural-border relative">
             {(confirmAction.type === "create" ||
               confirmAction.type === "edit") && (
               <button
@@ -1511,7 +1515,7 @@ export function PackagePage() {
 
               <div className="flex flex-col gap-3">
                 {formError && (
-                  <p className="text-xs font-bold text-red-600 bg-red-50 border border-red-200 px-4 py-2 rounded-xl text-left">
+                  <p className="text-xs font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 px-4 py-2 rounded-xl text-left">
                     {formError}
                   </p>
                 )}

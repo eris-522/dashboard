@@ -278,7 +278,7 @@ export function UserPage() {
           <h2 className="text-2xl font-serif font-bold text-natural-text-main">
             User Management
           </h2>
-          <p className="text-natural-text-light text-[0.8rem] font-medium uppercase tracking-wider">
+          <p className="text-natural-text-light text-xs font-medium uppercase tracking-wider">
             Manage your clients
           </p>
         </div>
@@ -324,7 +324,7 @@ export function UserPage() {
             <thead>
               <tr className="bg-natural-bg/30">
                 <th
-                  className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
+                  className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
                   onClick={() => handleSort("name")}
                 >
                   <div className="flex items-center">
@@ -332,18 +332,18 @@ export function UserPage() {
                   </div>
                 </th>
                 <th
-                  className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
+                  className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
                   onClick={() => handleSort("role")}
                 >
                   <div className="flex items-center">
                     Role <SortIcon field="role" />
                   </div>
                 </th>
-                <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border">
+                <th className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border">
                   Contact
                 </th>
                 <th
-                  className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
+                  className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
                   onClick={() => handleSort("created_at")}
                 >
                   <div className="flex items-center">
@@ -351,14 +351,14 @@ export function UserPage() {
                   </div>
                 </th>
                 <th
-                  className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
+                  className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
                   onClick={() => handleSort("status")}
                 >
                   <div className="flex items-center">
                     Status <SortIcon field="status" />
                   </div>
                 </th>
-                <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border text-right">
+                <th className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border text-right">
                   Actions
                 </th>
               </tr>
@@ -374,9 +374,9 @@ export function UserPage() {
                       : "hover:bg-natural-bg/20",
                   )}
                 >
-                  <td className="px-6 py-4 border-b border-natural-border/50">
+                  <td className="px-6 py-5.5 border-b border-natural-border/50">
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-natural-accent/10 border border-natural-accent/20 flex items-center justify-center text-natural-accent font-bold text-xs uppercase shadow-sm">
+                      <div className="w-10 h-10 rounded-full bg-natural-accent/10 border border-natural-accent/20 flex items-center justify-center text-natural-accent font-bold text-sm uppercase shadow-sm shrink-0">
                         {user.name
                           ? user.name
                               .split(" ")
@@ -386,62 +386,64 @@ export function UserPage() {
                           : "U"}
                       </div>
                       <div>
-                        <p className="text-sm font-bold text-natural-text-main tracking-tight">
+                        <p className="text-base font-bold text-natural-text-main tracking-normal leading-snug">
                           {user.name ||
                             (user as any).full_name ||
                             (user as any).fullName ||
                             (user as any).fullname ||
                             "Unnamed User"}
                         </p>
-                        <p className="text-[0.7rem] text-natural-text-light font-medium flex items-center gap-1">
-                          <Mail className="w-3 h-3" />{" "}
-                          {censorEmail(user.email, !!visibleEmails[user.id])}
+                        <p className="text-xs text-natural-text-light font-medium flex items-center gap-1.5 mt-1 tracking-normal">
+                          <Mail className="w-3.5 h-3.5 text-natural-accent/70 shrink-0" />{" "}
+                          <span>{censorEmail(user.email, !!visibleEmails[user.id])}</span>
                         </p>
                       </div>
                     </div>
                   </td>
-                  <td className="px-6 py-4 border-b border-natural-border/50">
-                    <span className="text-[0.65rem] font-bold uppercase tracking-widest text-natural-sidebar px-2.5 py-1 bg-natural-sidebar/5 rounded-md">
+                  <td className="px-6 py-5.5 border-b border-natural-border/50">
+                    <span className="text-xs font-bold uppercase tracking-wider text-natural-sidebar px-3 py-1 bg-natural-sidebar/5 rounded-md inline-block">
                       {user.role || "Unassigned"}
                     </span>
                   </td>
-                  <td className="px-6 py-4 border-b border-natural-border/50">
+                  <td className="px-6 py-5.5 border-b border-natural-border/50">
                     <div className="space-y-1">
-                      <p className="text-[0.65rem] text-natural-text-light font-medium flex items-center gap-1.5 opacity-70">
-                        <Phone className="w-3.5 h-3.5" />{" "}
-                        {user.phone_number || user.phone || "No phone"}
+                      <p className="text-xs text-natural-text-light font-medium flex items-center gap-1.5 tracking-normal">
+                        <Phone className="w-3.5 h-3.5 text-natural-accent/70 shrink-0" />{" "}
+                        <span>{user.phone_number || user.phone || "No phone"}</span>
                       </p>
                     </div>
                   </td>
-                  <td className="px-6 py-4 border-b border-natural-border/50">
+                  <td className="px-6 py-5.5 border-b border-natural-border/50">
                     <div className="space-y-1">
-                      <p className="text-[0.65rem] text-natural-text-light font-medium flex items-center gap-1.5 opacity-70">
-                        <Calendar className="w-3.5 h-3.5" /> Joined{" "}
-                        {user.created_at
-                          ? new Date(user.created_at).toLocaleDateString()
-                          : "Unknown"}
+                      <p className="text-xs text-natural-text-light font-medium flex items-center gap-1.5 tracking-normal">
+                        <Calendar className="w-3.5 h-3.5 text-natural-accent/70 shrink-0" /> Joined{" "}
+                        <span>
+                          {user.created_at
+                            ? new Date(user.created_at).toLocaleDateString()
+                            : "Unknown"}
+                        </span>
                       </p>
                     </div>
                   </td>
-                  <td className="px-6 py-4 border-b border-natural-border/50">
+                  <td className="px-6 py-5.5 border-b border-natural-border/50">
                     <span
                       className={cn(
-                        "text-[0.6rem] font-bold uppercase tracking-widest px-2 py-0.5 rounded border",
+                        "text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-md border shadow-2xs inline-block",
                         user.status === "Active"
-                          ? "bg-green-50 text-green-700 border-green-200"
+                          ? "bg-green-50 text-green-700 border-green-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60"
                           : user.status === "Archived"
-                            ? "bg-red-50 text-red-700 border-red-200"
-                            : "bg-natural-text-light/5 text-natural-text-light border-natural-border",
+                            ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-800/60"
+                            : "bg-natural-text-light/5 text-natural-text-light border-natural-border dark:bg-natural-bg/40 dark:border-natural-border/60",
                       )}
                     >
                       {user.status || "Unknown"}
                     </span>
                   </td>
-                  <td className="px-6 py-4 border-b border-natural-border/50 text-right">
+                  <td className="px-6 py-5.5 border-b border-natural-border/50 text-right">
                     <div className="flex items-center justify-end gap-2 min-h-[32px]">
                       <button
                         onClick={() => toggleEmailVisibility(user.id)}
-                        className="p-1.5 text-natural-text-light hover:text-natural-text-main hover:bg-white hover:shadow-xs rounded-lg transition-all"
+                        className="p-2 text-natural-text-light hover:text-natural-text-main hover:bg-white hover:shadow-xs rounded-lg transition-all"
                         title={
                           visibleEmails[user.id] ? "Hide Email" : "Show Email"
                         }
@@ -456,7 +458,7 @@ export function UserPage() {
                         <>
                           <button
                             onClick={() => handleEditClick(user)}
-                            className="p-1.5 text-natural-text-light hover:text-natural-text-main hover:bg-white hover:shadow-xs rounded-lg transition-all"
+                            className="p-2 text-natural-text-light hover:text-natural-text-main hover:bg-white hover:shadow-xs rounded-lg transition-all"
                             title="Edit User"
                           >
                             <Edit3 className="w-4 h-4" />
@@ -466,7 +468,7 @@ export function UserPage() {
                               onClick={() =>
                                 handleArchiveClick(user.id, user.name || "User")
                               }
-                              className="p-1.5 text-natural-text-light hover:text-red-500 hover:bg-white hover:shadow-xs rounded-lg transition-all"
+                              className="p-2 text-natural-text-light hover:text-red-500 hover:bg-white hover:shadow-xs rounded-lg transition-all"
                               title="Archive User"
                             >
                               <Archive className="w-4 h-4" />
@@ -474,7 +476,7 @@ export function UserPage() {
                           )}
                         </>
                       ) : (
-                        <span className="text-[0.6rem] font-bold text-natural-text-light/40 uppercase tracking-widest bg-natural-bg/50 px-2 py-1 rounded">
+                        <span className="text-xs font-bold text-natural-text-light/60 uppercase tracking-wider bg-natural-bg/50 px-2.5 py-1 rounded">
                           Archived - Read Only
                         </span>
                       )}
@@ -511,7 +513,7 @@ export function UserPage() {
 
             <div className="p-6 space-y-5">
               <div className="space-y-1.5">
-                <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest pl-1">
+                <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider pl-1">
                   Full Name
                 </label>
                 <input
@@ -526,7 +528,7 @@ export function UserPage() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest pl-1">
+                <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider pl-1">
                   Email Address
                 </label>
                 <div className="relative">
@@ -546,7 +548,7 @@ export function UserPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest pl-1">
+                  <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider pl-1">
                     User Role
                   </label>
                   <select
@@ -563,7 +565,7 @@ export function UserPage() {
                   </select>
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest pl-1">
+                  <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider pl-1">
                     Status
                   </label>
                   <select

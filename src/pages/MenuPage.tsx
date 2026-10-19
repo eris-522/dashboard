@@ -325,7 +325,7 @@ export function MenuPage() {
             </button>
           </>
         ) : (
-          <span className="text-[0.6rem] font-bold text-natural-text-light/40 uppercase tracking-widest bg-natural-bg/50 px-2 py-1 rounded">
+          <span className="text-xs font-bold text-natural-text-light/50 uppercase tracking-wider bg-natural-bg/50 px-2.5 py-1 rounded">
             Archived
           </span>
         )}
@@ -346,26 +346,26 @@ export function MenuPage() {
       </div>
 
       <div className="mb-2">
-        <p className="text-[0.6rem] font-bold text-natural-accent uppercase tracking-[0.15em] mb-1">
+        <p className="text-xs font-bold text-natural-accent uppercase tracking-wider mb-1">
           {item.category}
         </p>
-        <h4 className="text-base font-bold text-natural-text-main tracking-tight leading-snug">
+        <h4 className="text-base font-bold text-natural-text-main tracking-normal leading-snug">
           {item.name}
         </h4>
       </div>
 
       <div className="mt-auto pt-6 flex items-center justify-between">
-        <span className="text-[0.65rem] font-bold text-natural-text-light/60 uppercase tracking-widest">
+        <span className="text-xs font-semibold text-natural-text-light/60 uppercase tracking-wider">
           ID: #{item.id.substring(0, 8)}
         </span>
         <span
           className={cn(
-            "text-[0.65rem] font-bold px-2 py-0.5 rounded border uppercase tracking-wider whitespace-nowrap",
+            "text-xs font-bold px-2.5 py-1 rounded-md border uppercase tracking-wider whitespace-nowrap shadow-2xs",
             item.status === "Archived"
-              ? "text-gray-500 bg-gray-50 border-gray-200"
+              ? "text-gray-500 bg-gray-50 border-gray-200 dark:bg-natural-bg/40 dark:text-natural-text-light dark:border-natural-border/60"
               : item.status === "Not Available"
-                ? "text-orange-600 bg-orange-50 border-orange-100"
-                : "text-green-600 bg-green-50 border-green-100",
+                ? "text-orange-600 bg-orange-50 border-orange-100 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60"
+                : "text-green-600 bg-green-50 border-green-100 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60",
           )}
         >
           {item.status === "Active" ? "Available" : item.status || "Available"}
@@ -381,7 +381,7 @@ export function MenuPage() {
           <h2 className="text-2xl font-serif font-bold text-natural-text-main">
             Menu Catalog
           </h2>
-          <p className="text-natural-text-light text-[0.8rem] font-medium uppercase tracking-wider">
+          <p className="text-natural-text-light text-xs font-medium uppercase tracking-wider">
             Design and manage your catering selections
           </p>
         </div>
@@ -405,7 +405,7 @@ export function MenuPage() {
                 setActiveCategory(cat);
               }}
               className={cn(
-                "px-4 py-1.5 rounded-full text-[0.7rem] font-bold uppercase tracking-widest transition-all whitespace-nowrap border",
+                "px-4.5 py-2 rounded-full text-xs font-bold uppercase tracking-wider transition-all whitespace-nowrap border",
                 activeCategory === cat
                   ? "bg-natural-accent text-white border-natural-accent shadow-sm"
                   : "bg-white text-natural-text-light border-natural-border hover:bg-natural-bg",
@@ -418,7 +418,7 @@ export function MenuPage() {
         <button
           onClick={() => setActiveCategory("Archived")}
           className={cn(
-            "flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[0.7rem] font-bold uppercase tracking-widest transition-all whitespace-nowrap border",
+            "flex items-center gap-1.5 px-4.5 py-2 rounded-full text-xs font-bold uppercase tracking-wider transition-all whitespace-nowrap border",
             activeCategory === "Archived"
               ? "bg-natural-text-main text-white border-natural-text-main shadow-sm"
               : "bg-white text-natural-text-light border-natural-border hover:bg-natural-bg",
@@ -443,7 +443,7 @@ export function MenuPage() {
           </div>
 
           <div className="flex items-center gap-3 w-full md:w-auto">
-            <span className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest">
+            <span className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
               {filteredItems.length} Dishes Found
             </span>
           </div>
@@ -633,7 +633,7 @@ export function MenuPage() {
                         <h3 className="font-serif font-bold text-natural-text-main text-lg">
                           {title}
                         </h3>
-                        <span className="px-2 py-0.5 rounded-full bg-natural-bg border border-natural-border text-[10px] font-bold text-natural-text-light">
+                        <span className="px-2.5 py-0.5 rounded-full bg-natural-bg border border-natural-border text-xs font-bold text-natural-text-light">
                           {sectionItems.length}
                         </span>
                       </div>
@@ -697,7 +697,7 @@ export function MenuPage() {
               )}
 
               <div className="space-y-2">
-                <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                   Dish Name
                 </label>
                 <input
@@ -713,7 +713,7 @@ export function MenuPage() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                   Category
                 </label>
                 <select
@@ -740,7 +740,7 @@ export function MenuPage() {
 
               {["Main Course", "Appetizers"].includes(formData.category) && (
                 <div className="space-y-2 animate-in fade-in duration-200">
-                  <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                  <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                     Sub Category
                   </label>
                   <select
@@ -775,7 +775,7 @@ export function MenuPage() {
 
               {editingItem && (
                 <div className="space-y-2 animate-in fade-in duration-200">
-                  <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                  <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                     Availability Status
                   </label>
                   <select
@@ -804,7 +804,7 @@ export function MenuPage() {
             <div className="p-6 bg-natural-bg/30 border-t border-natural-border flex items-center justify-end gap-3 shrink-0">
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="px-4 py-2.5 text-[0.65rem] font-bold text-natural-text-light uppercase tracking-[0.2em] hover:text-natural-text-main transition-colors mr-auto"
+                className="px-4 py-2.5 text-xs font-bold text-natural-text-light uppercase tracking-wider hover:text-natural-text-main transition-colors mr-auto"
               >
                 Cancel
               </button>
@@ -815,7 +815,7 @@ export function MenuPage() {
                   (["Main Course", "Appetizers"].includes(formData.category) &&
                     !formData.sub_category)
                 }
-                className="bg-natural-accent text-white px-6 py-2.5 rounded-xl text-[0.65rem] font-bold uppercase tracking-[0.2em] hover:bg-natural-accent/90 transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                className="bg-natural-accent text-white px-6 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-natural-accent/90 transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {editingItem ? "Save Changes" : "Add Dish"}
               </button>
@@ -912,13 +912,13 @@ export function MenuPage() {
                   <div className="flex gap-3">
                     <button
                       onClick={() => handleExecuteAction(false)}
-                      className="flex-1 py-3 rounded-xl text-[0.65rem] font-bold uppercase tracking-[0.1em] text-blue-600 bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-all shadow-sm active:scale-[0.98]"
+                      className="flex-1 py-3 rounded-xl text-xs font-bold uppercase tracking-wider text-blue-600 bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-all shadow-sm active:scale-[0.98]"
                     >
                       Confirm & Close
                     </button>
                     <button
                       onClick={() => handleExecuteAction(true)}
-                      className="flex-1 py-3 rounded-xl text-[0.65rem] font-bold uppercase tracking-[0.1em] text-white bg-blue-600 hover:bg-blue-700 transition-all shadow-md active:scale-[0.98]"
+                      className="flex-1 py-3 rounded-xl text-xs font-bold uppercase tracking-wider text-white bg-blue-600 hover:bg-blue-700 transition-all shadow-md active:scale-[0.98]"
                     >
                       Confirm & Add Another
                     </button>

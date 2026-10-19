@@ -238,7 +238,7 @@ export function AuditTrailPage() {
           <h2 className="text-2xl font-serif font-bold text-natural-text-main">
             System Audit Trail
           </h2>
-          <p className="text-natural-text-light text-[0.8rem] font-medium uppercase tracking-wider">
+          <p className="text-natural-text-light text-xs font-medium uppercase tracking-wider">
             Complete record of administrative and equipment logistics actions
           </p>
         </div>
@@ -287,7 +287,7 @@ export function AuditTrailPage() {
               key={tab.id}
               onClick={() => setSelectedModule(tab.id)}
               className={cn(
-                "flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest transition-all cursor-pointer",
+                "flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer",
                 isActive
                   ? "bg-natural-accent text-white shadow-sm"
                   : "bg-white border border-natural-border text-natural-text-light hover:text-natural-text-main hover:bg-natural-bg/50"
@@ -298,7 +298,7 @@ export function AuditTrailPage() {
               {tab.count > 0 && (
                 <span
                   className={cn(
-                    "px-1.5 py-0.2 rounded-full text-[9px]",
+                    "px-2 py-0.5 rounded-full text-xs font-bold",
                     isActive
                       ? "bg-white/20 text-white"
                       : "bg-natural-bg text-natural-text-main"
@@ -378,12 +378,12 @@ export function AuditTrailPage() {
                       className={cn(
                         "p-3 rounded-xl border",
                         log.type === "Update"
-                          ? "bg-blue-50 border-blue-100 text-blue-600"
+                          ? "bg-blue-50 border-blue-100 text-blue-600 dark:bg-blue-950/50 dark:border-blue-800/60 dark:text-blue-300"
                           : log.type === "Create"
-                            ? "bg-green-50 border-green-100 text-green-600"
+                            ? "bg-green-50 border-green-100 text-green-600 dark:bg-emerald-950/50 dark:border-emerald-800/60 dark:text-emerald-300"
                             : log.type === "Delete"
-                              ? "bg-red-50 border-red-100 text-red-600"
-                              : "bg-amber-50 border-amber-100 text-amber-600",
+                              ? "bg-red-50 border-red-100 text-red-600 dark:bg-red-950/50 dark:border-red-800/60 dark:text-red-300"
+                              : "bg-amber-50 border-amber-100 text-amber-600 dark:bg-amber-950/50 dark:border-amber-800/60 dark:text-amber-300",
                       )}
                     >
                       {isEquipmentLog(log) ? (
@@ -399,10 +399,10 @@ export function AuditTrailPage() {
                       )}
                     </div>
                     <div>
-                      <p className="text-xs font-bold text-natural-text-main uppercase tracking-widest leading-none mb-1">
+                      <p className="text-xs font-bold text-natural-text-main uppercase tracking-wider leading-none mb-1">
                         {log.type}
                       </p>
-                      <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest opacity-60">
+                      <p className="text-xs font-semibold text-natural-text-light uppercase tracking-wider">
                         ID: LOG-{log.id?.toString().padStart(5, "0")}
                       </p>
                     </div>
@@ -411,10 +411,10 @@ export function AuditTrailPage() {
                   <div className="flex-1">
                     <div className="flex items-start justify-between mb-2">
                       <div>
-                        <h4 className="text-sm font-bold text-natural-text-main tracking-tight leading-tight">
+                        <h4 className="text-base font-bold text-natural-text-main tracking-normal leading-snug">
                           {log.action?.replace(/inventory/gi, (m: string) => m[0] === 'I' ? 'Equipment' : 'equipment')}
                         </h4>
-                        <p className="text-xs text-natural-text-light font-medium mt-0.5">
+                        <p className="text-xs text-natural-text-light font-medium mt-1">
                           Target:{" "}
                           <span className="text-natural-text-main font-semibold">
                             {log.target?.replace(/inventory/gi, (m: string) => m[0] === 'I' ? 'Equipment' : 'equipment')}
@@ -422,22 +422,22 @@ export function AuditTrailPage() {
                         </p>
                       </div>
                       <div className="text-right">
-                        <p className="text-xs font-bold text-natural-text-main tracking-tighter">
-                          {format(logDate, "HH:mm a")}
+                        <p className="text-sm font-bold text-natural-text-main tracking-normal">
+                          {format(logDate, "hh:mm a")}
                         </p>
-                        <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest">
+                        <p className="text-xs font-medium text-natural-text-light tracking-normal mt-0.5">
                           {format(logDate, "MMM d, yyyy")}
                         </p>
                       </div>
                     </div>
 
                     <div className="bg-natural-bg border border-natural-border px-4 py-3 rounded-lg mt-3 flex items-start gap-3">
-                      <div className="w-1 h-8 bg-natural-border rounded-full" />
+                      <div className="w-1 h-8 bg-natural-border rounded-full shrink-0" />
                       <div>
-                        <p className="text-[0.7rem] font-bold text-natural-text-light uppercase tracking-widest mb-1">
+                        <p className="text-xs font-bold text-natural-text-light uppercase tracking-wider mb-1">
                           Administrative Changes
                         </p>
-                        <p className="text-xs font-medium text-natural-text-main italic">
+                        <p className="text-sm font-medium text-natural-text-main leading-relaxed">
                           "{log.details?.replace(/inventory/gi, (m: string) => m[0] === 'I' ? 'Equipment' : 'equipment')}"
                         </p>
                       </div>
@@ -447,14 +447,14 @@ export function AuditTrailPage() {
                   <div className="shrink-0 w-full md:w-48 pt-1 flex md:flex-col items-center md:items-end justify-between md:justify-start gap-3">
                     <div className="flex items-center gap-2 text-right">
                       <div className="text-right hidden md:block">
-                        <p className="text-xs font-bold text-natural-text-main leading-tight">
+                        <p className="text-sm font-bold text-natural-text-main leading-snug">
                           {logUser}
                         </p>
-                        <p className="text-[9px] font-bold text-natural-text-light uppercase tracking-wider">
+                        <p className="text-xs font-semibold text-natural-text-light uppercase tracking-wider mt-0.5">
                           Access Granted
                         </p>
                       </div>
-                      <div className="w-8 h-8 rounded-full bg-natural-sidebar text-[#f8f7f2] flex items-center justify-center text-[0.65rem] font-bold shrink-0">
+                      <div className="w-9 h-9 rounded-full bg-natural-sidebar text-[#f8f7f2] flex items-center justify-center text-xs font-bold shrink-0">
                         {logUser === "System"
                           ? "S"
                           : logUser
@@ -475,7 +475,7 @@ export function AuditTrailPage() {
             <button
               onClick={handleLoadMore}
               disabled={isLoadingMore}
-              className="text-[0.7rem] font-bold text-natural-text-light uppercase tracking-[0.2em] hover:text-natural-accent transition-colors disabled:opacity-50 cursor-pointer"
+              className="text-xs font-bold text-natural-text-light uppercase tracking-wider hover:text-natural-accent transition-colors disabled:opacity-50 cursor-pointer"
             >
               {isLoadingMore ? "Loading Historical Entries..." : "Load Historical Entries"}
             </button>

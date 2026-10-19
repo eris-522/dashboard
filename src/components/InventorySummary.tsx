@@ -6,7 +6,7 @@ import { useInventory, normalizeStockStatus } from '../context/InventoryContext'
  * Highlights items that require restocking based on their status.
  */
 export function InventorySummary({ onViewAll }: { onViewAll?: () => void }) {
-  const { items, getAllocatedStock } = useInventory();
+  const { items, getAllocatedStock, getOutsourcedStock } = useInventory();
   
   const activeItems = items.filter(item => item.status !== 'Archived' && item.status?.toLowerCase() !== 'archived');
   const displayItems = activeItems.slice(0, 5);
@@ -45,7 +45,12 @@ export function InventorySummary({ onViewAll }: { onViewAll?: () => void }) {
                     <span className="text-[0.8rem] font-medium text-natural-text-main">{item.name}</span>
                     {allocated > 0 && (
                       <span className="text-[9px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.2 rounded">
-                        {allocated} allocated
+                        {allocated} in-use
+                      </span>
+                    )}
+                    {getOutsourcedStock(item.id) > 0 && (
+                      <span className="text-[9px] font-bold text-orange-700 bg-orange-50 px-1.5 py-0.2 rounded">
+                        +{getOutsourcedStock(item.id)} to outsource
                       </span>
                     )}
                   </div>
@@ -82,7 +87,7 @@ export function InventorySummary({ onViewAll }: { onViewAll?: () => void }) {
         <div className="flex items-center gap-2 p-2.5 rounded-xl bg-natural-bg/50 border border-natural-border">
           <Boxes className="w-4 h-4 text-green-600 shrink-0" />
           <div>
-            <span className="text-[9px] font-bold text-natural-text-light uppercase tracking-wider block">Reserved</span>
+            <span className="text-[9px] font-bold text-natural-text-light uppercase tracking-wider block">In-Use</span>
             <span className="text-xs font-bold text-green-700">{totalAllocated} Units</span>
           </div>
         </div>

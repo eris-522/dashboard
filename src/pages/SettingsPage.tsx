@@ -202,7 +202,7 @@ export function SettingsPage() {
                   </div>
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-natural-text-main tracking-tight">
+                  <h3 className="text-lg font-bold text-natural-text-main tracking-wide">
                     {currentUser.name}
                   </h3>
                   <p className="text-xs text-natural-text-light font-medium uppercase tracking-wider mb-3">

@@ -11,6 +11,7 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  ArrowUpRight,
   X,
   Phone,
   Mail,
@@ -22,7 +23,6 @@ import {
   XCircle,
   Boxes,
   Warehouse,
-  RotateCcw,
   CheckCheck,
   PackageCheck,
   Eye,
@@ -149,6 +149,8 @@ const formatEventTime = (timeStr?: string) => {
 export function BookingPage() {
   const { currentUser } = useUser();
   const {
+    items,
+    deductionRecords,
     deductBookingInventory,
     restoreBookingInventory,
     calculatePackageEquipment,
@@ -201,7 +203,19 @@ export function BookingPage() {
     bookingName: string;
   } | null>(null);
 
-  const [newBooking, setNewBooking] = useState({
+  const [newBooking, setNewBooking] = useState<{
+    user_id: string;
+    event_type: string;
+    package_id: string;
+    date: string;
+    time: string;
+    guest_count: number | string;
+    additional_pax: number | string;
+    venueName: string;
+    venueAddress: string;
+    selected_menu_items: string[];
+    selected_add_ons: string[];
+  }>({
     user_id: "",
     event_type: "Wedding Reception",
     package_id: "",
@@ -221,6 +235,19 @@ export function BookingPage() {
     setCancelReason("");
     setCancelReasonError(false);
   }, [confirmAction]);
+
+  useEffect(() => {
+    if (selectedBooking && selectedBooking.status === "Confirmed") {
+      reconcileCompletedEvents([selectedBooking]);
+    }
+  }, [
+    selectedBooking?.id,
+    selectedBooking?.status,
+    selectedBooking?.guest_count,
+    selectedBooking?.guestCount,
+    selectedBooking?.additional_pax,
+    selectedBooking?.additionalPax,
+  ]);
 
   useEffect(() => {
     // Fetch initial data
@@ -626,6 +653,14 @@ export function BookingPage() {
         });
       }
     } else if (type === "complete" && bookingId) {
+      const targetBooking = bookings.find((b) => b.id === bookingId);
+      const payment = targetBooking ? getBookingPayment(targetBooking) : null;
+      if (payment && payment.final_balance_status !== "Verified") {
+        setFetchError("Cannot complete booking: The client's final balance payment has not been confirmed and verified yet.");
+        setConfirmAction(null);
+        return;
+      }
+
       const { error: completeErr } = await supabase
         .from("bookings")
         .update({ status: "Completed" })
@@ -934,7 +969,7 @@ export function BookingPage() {
           <h2 className="text-2xl font-serif font-bold text-natural-text-main">
             Booking Management
           </h2>
-          <p className="text-natural-text-light text-[0.8rem] font-medium uppercase tracking-wider">
+          <p className="text-natural-text-light text-xs font-medium uppercase tracking-wider">
             Track and coordinate your catering events
           </p>
         </div>
@@ -991,14 +1026,14 @@ export function BookingPage() {
           },
         ].map((s, i) => (
           <div key={i} className="glass-card p-4 bg-white">
-            <p className="text-[0.6rem] font-bold text-natural-text-light uppercase tracking-widest mb-1">
+            <p className="text-xs font-bold text-natural-text-light uppercase tracking-wider mb-1">
               {s.label}
             </p>
             <div className="flex items-baseline gap-2">
-              <span className="text-xl font-bold text-natural-text-main font-serif tracking-tight">
+              <span className="text-2xl font-bold text-natural-text-main font-serif tracking-normal">
                 {s.value}
               </span>
-              <span className="text-[0.6rem] text-natural-text-light font-medium">
+              <span className="text-xs text-natural-text-light font-medium">
                 {s.sub}
               </span>
             </div>
@@ -1038,7 +1073,7 @@ export function BookingPage() {
               <button
                 onClick={() => setViewMode("list")}
                 className={cn(
-                  "px-3 py-1 text-[0.65rem] font-bold uppercase rounded transition-all",
+                  "px-3.5 py-1.5 text-xs font-bold uppercase rounded transition-all",
                   viewMode === "list"
                     ? "bg-white shadow-xs text-natural-accent border border-natural-border"
                     : "text-natural-text-light hover:text-natural-text-main",
@@ -1049,7 +1084,7 @@ export function BookingPage() {
               <button
                 onClick={() => setViewMode("calendar")}
                 className={cn(
-                  "px-3 py-1 text-[0.65rem] font-bold uppercase rounded transition-all",
+                  "px-3.5 py-1.5 text-xs font-bold uppercase rounded transition-all",
                   viewMode === "calendar"
                     ? "bg-white shadow-xs text-natural-accent border border-natural-border"
                     : "text-natural-text-light hover:text-natural-text-main",
@@ -1067,97 +1102,97 @@ export function BookingPage() {
               <thead>
                 <tr className="bg-natural-bg/30">
                   <th
-                    className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
+                    className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
                     onClick={() => handleSort("customerName")}
                   >
                     <div className="flex items-center gap-1.5">
                       Customer
                       {sortConfig.field === "customerName" ? (
                         sortConfig.order === "asc" ? (
-                          <ArrowUp className="w-3 h-3 text-natural-accent" />
+                          <ArrowUp className="w-3.5 h-3.5 text-natural-accent" />
                         ) : (
-                          <ArrowDown className="w-3 h-3 text-natural-accent" />
+                          <ArrowDown className="w-3.5 h-3.5 text-natural-accent" />
                         )
                       ) : (
-                        <ArrowUpDown className="w-3 h-3 opacity-30" />
+                        <ArrowUpDown className="w-3.5 h-3.5 opacity-30" />
                       )}
                     </div>
                   </th>
-                  <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border">
+                  <th className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border">
                     Event Details
                   </th>
                   <th
-                    className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
+                    className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
                     onClick={() => handleSort("date")}
                   >
                     <div className="flex items-center gap-1.5">
                       Schedule
                       {sortConfig.field === "date" ? (
                         sortConfig.order === "asc" ? (
-                          <ArrowUp className="w-3 h-3 text-natural-accent" />
+                          <ArrowUp className="w-3.5 h-3.5 text-natural-accent" />
                         ) : (
-                          <ArrowDown className="w-3 h-3 text-natural-accent" />
+                          <ArrowDown className="w-3.5 h-3.5 text-natural-accent" />
                         )
                       ) : (
-                        <ArrowUpDown className="w-3 h-3 opacity-30" />
+                        <ArrowUpDown className="w-3.5 h-3.5 opacity-30" />
                       )}
                     </div>
                   </th>
                   <th
-                    className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
+                    className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
                     onClick={() => handleSort("created_at")}
                   >
                     <div className="flex items-center gap-1.5">
                       Applied On
                       {sortConfig.field === "created_at" ? (
                         sortConfig.order === "asc" ? (
-                          <ArrowUp className="w-3 h-3 text-natural-accent" />
+                          <ArrowUp className="w-3.5 h-3.5 text-natural-accent" />
                         ) : (
-                          <ArrowDown className="w-3 h-3 text-natural-accent" />
+                          <ArrowDown className="w-3.5 h-3.5 text-natural-accent" />
                         )
                       ) : (
-                        <ArrowUpDown className="w-3 h-3 opacity-30" />
+                        <ArrowUpDown className="w-3.5 h-3.5 opacity-30" />
                       )}
                     </div>
                   </th>
                   <th
-                    className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
+                    className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
                     onClick={() => handleSort("budget")}
                   >
                     <div className="flex items-center gap-1.5">
                       Budget
                       {sortConfig.field === "budget" ? (
                         sortConfig.order === "asc" ? (
-                          <ArrowUp className="w-3 h-3 text-natural-accent" />
+                          <ArrowUp className="w-3.5 h-3.5 text-natural-accent" />
                         ) : (
-                          <ArrowDown className="w-3 h-3 text-natural-accent" />
+                          <ArrowDown className="w-3.5 h-3.5 text-natural-accent" />
                         )
                       ) : (
-                        <ArrowUpDown className="w-3 h-3 opacity-30" />
+                        <ArrowUpDown className="w-3.5 h-3.5 opacity-30" />
                       )}
                     </div>
                   </th>
-                  <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border">
+                  <th className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border">
                     Downpayment
                   </th>
                   <th
-                    className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
+                    className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
                     onClick={() => handleSort("status")}
                   >
                     <div className="flex items-center gap-1.5">
                       Status
                       {sortConfig.field === "status" ? (
                         sortConfig.order === "asc" ? (
-                          <ArrowUp className="w-3 h-3 text-natural-accent" />
+                          <ArrowUp className="w-3.5 h-3.5 text-natural-accent" />
                         ) : (
-                          <ArrowDown className="w-3 h-3 text-natural-accent" />
+                          <ArrowDown className="w-3.5 h-3.5 text-natural-accent" />
                         )
                       ) : (
-                        <ArrowUpDown className="w-3 h-3 opacity-30" />
+                        <ArrowUpDown className="w-3.5 h-3.5 opacity-30" />
                       )}
                     </div>
                   </th>
-                  <th className="px-6 py-4 text-[0.7rem] font-bold uppercase tracking-widest text-natural-text-light border-b border-natural-border">
+                  <th className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border">
                     Actions
                   </th>
                 </tr>
@@ -1173,56 +1208,62 @@ export function BookingPage() {
                         : "hover:bg-natural-bg/20",
                     )}
                   >
-                    <td className="px-6 py-5 border-b border-natural-border/50">
+                    <td className="px-6 py-5.5 border-b border-natural-border/50">
                       <div>
-                        <p className="text-sm font-bold text-natural-text-main tracking-tight leading-tight">
+                        <p className="text-base font-bold text-natural-text-main tracking-normal leading-snug">
                           {booking.profiles?.name ||
                             booking.profiles?.full_name ||
                             "Unknown User"}
                         </p>
-                        <div className="flex flex-col gap-0.5 mt-1">
-                          <p className="text-[10px] text-natural-text-light flex items-center gap-1">
-                            <Mail className="w-2.5 h-2.5" />{" "}
-                            {booking.profiles?.email || "N/A"}
+                        <div className="flex flex-col gap-1.5 mt-1.5">
+                          <p className="text-xs text-natural-text-light flex items-center gap-1.5 tracking-normal">
+                            <Mail className="w-3.5 h-3.5 text-natural-accent/70 shrink-0" />{" "}
+                            <span>{booking.profiles?.email || "N/A"}</span>
                           </p>
-                          <p className="text-[10px] text-natural-text-light flex items-center gap-1">
-                            <Phone className="w-2.5 h-2.5" />{" "}
-                            {booking.profiles?.phone_number ||
-                              booking.profiles?.phone ||
-                              "N/A"}
+                          <p className="text-xs text-natural-text-light flex items-center gap-1.5 tracking-normal">
+                            <Phone className="w-3.5 h-3.5 text-natural-accent/70 shrink-0" />{" "}
+                            <span>
+                              {booking.profiles?.phone_number ||
+                                booking.profiles?.phone ||
+                                "N/A"}
+                            </span>
                           </p>
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-5 border-b border-natural-border/50">
+                    <td className="px-6 py-5.5 border-b border-natural-border/50">
                       <div>
-                        <p className="text-xs font-bold text-natural-text-main">
+                        <p className="text-sm font-bold text-natural-text-main tracking-normal">
                           {booking.event_type || "Event"}
                         </p>
-                        <p className="text-[10px] text-natural-accent font-bold uppercase tracking-wider mt-0.5">
-                          {booking.packages?.name || "Custom"} Package
+                        <p className="text-xs text-natural-accent font-semibold uppercase tracking-wider mt-1">
+                          {booking.packages?.name
+                            ? booking.packages.name.toLowerCase().includes("package")
+                              ? booking.packages.name
+                              : `${booking.packages.name} Package`
+                            : "Custom Package"}
                         </p>
-                        <p className="text-[10px] text-natural-text-light mt-1 flex items-center gap-1">
-                          <MapPin className="w-3 h-3" />{" "}
-                          {(booking.event_location || "").split(" - ")[0]}
-                        </p>
-                      </div>
-                    </td>
-                    <td className="px-6 py-5 border-b border-natural-border/50">
-                      <div className="flex flex-col gap-1">
-                        <p className="text-xs text-natural-text-main font-medium flex items-center gap-2">
-                          <Calendar className="w-3.5 h-3.5 text-natural-accent opacity-60" />{" "}
-                          {formatEventDate(booking.event_date)}
-                        </p>
-                        <p className="text-[10px] text-natural-text-light flex items-center gap-2">
-                          <Clock className="w-3 h-3" />{" "}
-                          {formatEventTime(booking.event_time)}
+                        <p className="text-xs text-natural-text-light mt-1.5 flex items-center gap-1.5 tracking-normal">
+                          <MapPin className="w-3.5 h-3.5 text-natural-text-light/80 shrink-0" />{" "}
+                          <span>{(booking.event_location || "").split(" - ")[0]}</span>
                         </p>
                       </div>
                     </td>
-                    <td className="px-6 py-5 border-b border-natural-border/50">
+                    <td className="px-6 py-5.5 border-b border-natural-border/50">
+                      <div className="flex flex-col gap-1.5">
+                        <p className="text-sm text-natural-text-main font-semibold flex items-center gap-2 tracking-normal">
+                          <Calendar className="w-4 h-4 text-natural-accent opacity-75 shrink-0" />{" "}
+                          <span>{formatEventDate(booking.event_date)}</span>
+                        </p>
+                        <p className="text-xs text-natural-text-light font-medium flex items-center gap-2 tracking-normal">
+                          <Clock className="w-3.5 h-3.5 shrink-0" />{" "}
+                          <span>{formatEventTime(booking.event_time)}</span>
+                        </p>
+                      </div>
+                    </td>
+                    <td className="px-6 py-5.5 border-b border-natural-border/50">
                       <div className="flex flex-col gap-1">
-                        <p className="text-xs text-natural-text-main font-medium">
+                        <p className="text-sm text-natural-text-main font-semibold tracking-normal">
                           {booking.created_at
                             ? new Date(booking.created_at).toLocaleDateString(
                                 undefined,
@@ -1234,7 +1275,7 @@ export function BookingPage() {
                               )
                             : "N/A"}
                         </p>
-                        <p className="text-[10px] text-natural-text-light">
+                        <p className="text-xs text-natural-text-light font-medium tracking-normal mt-0.5">
                           {booking.created_at
                             ? new Date(booking.created_at).toLocaleTimeString(
                                 undefined,
@@ -1244,17 +1285,17 @@ export function BookingPage() {
                         </p>
                       </div>
                     </td>
-                    <td className="px-6 py-5 border-b border-natural-border/50">
-                      <p className="text-xs font-bold text-natural-text-main">
+                    <td className="px-6 py-5.5 border-b border-natural-border/50">
+                      <p className="text-base font-bold text-natural-text-main font-serif tracking-normal">
                         ₱{calculateBudget(booking).toLocaleString()}
                       </p>
-                      <p className="text-[9px] text-natural-text-light uppercase font-bold">
+                      <p className="text-xs text-natural-text-light uppercase font-semibold mt-1 tracking-wider">
                         {booking.guest_count} Pax
                         {booking.additional_pax > 0 &&
                           ` (+${booking.additional_pax})`}
                       </p>
                     </td>
-                    <td className="px-6 py-5 border-b border-natural-border/50">
+                    <td className="px-6 py-5.5 border-b border-natural-border/50">
                       {(() => {
                         const payment = getBookingPayment(booking);
                         const estBudget = calculateBudget(booking);
@@ -1268,22 +1309,22 @@ export function BookingPage() {
                           (booking.status || "Pending") === "Confirmed";
 
                         return (
-                          <div className="flex flex-col gap-1.5 min-w-[130px]">
+                          <div className="flex flex-col gap-2 min-w-[140px]">
                             {/* Downpayment info & Scheme Badge */}
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <p className="text-xs font-bold text-natural-text-main">
+                              <p className="text-sm font-bold text-natural-text-main font-serif">
                                 ₱{downpaymentDue.toLocaleString()}
                               </p>
                             </div>
                             <div className="flex items-center gap-1.5">
                               <span
                                 className={cn(
-                                  "text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border",
+                                  "text-xs font-bold uppercase tracking-wider px-2.5 py-0.5 rounded border shadow-2xs",
                                   isVerified
-                                    ? "bg-green-50 text-green-700 border-green-200"
+                                    ? "bg-green-50 text-green-700 border-green-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60"
                                     : payment.receipt_url
-                                      ? "bg-amber-50 text-amber-700 border-amber-200"
-                                      : "bg-gray-50 text-gray-500 border-gray-200",
+                                      ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60"
+                                      : "bg-gray-50 text-gray-500 border-gray-200 dark:bg-natural-bg/40 dark:text-natural-text-light dark:border-natural-border/60",
                                 )}
                               >
                                 {isVerified
@@ -1311,17 +1352,17 @@ export function BookingPage() {
                                     title: "Initial Security Deposit",
                                   });
                                 }}
-                                className="inline-flex items-center gap-1 text-[10px] font-semibold text-natural-accent hover:underline cursor-pointer"
+                                className="inline-flex items-center gap-1.5 text-xs font-semibold text-natural-accent hover:underline cursor-pointer mt-0.5"
                               >
-                                <Receipt className="w-3 h-3" />
+                                <Receipt className="w-3.5 h-3.5" />
                                 View Deposit Slip
                               </button>
                             )}
 
                             {/* 15-Day Final Balance Settlement Row */}
                             {payment.final_balance_amount > 0 && (
-                              <div className="pt-1.5 mt-0.5 border-t border-natural-border/50 flex flex-col gap-1">
-                                <div className="flex items-center justify-between gap-1 text-[10px]">
+                              <div className="pt-2 mt-1 border-t border-natural-border/50 flex flex-col gap-1.5">
+                                <div className="flex items-center justify-between gap-1.5 text-xs">
                                   <span className="text-natural-text-light font-medium">15-Day Balance:</span>
                                   <span className="font-bold text-natural-text-main font-serif">
                                     ₱{payment.final_balance_amount.toLocaleString()}
@@ -1330,12 +1371,12 @@ export function BookingPage() {
                                 <div className="flex items-center gap-1">
                                   <span
                                     className={cn(
-                                      "text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border",
+                                      "text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded border",
                                       payment.final_balance_status === "Verified"
-                                        ? "bg-green-50 text-green-700 border-green-200"
+                                        ? "bg-green-50 text-green-700 border-green-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60"
                                         : payment.final_balance_status === "Pending Verification"
-                                          ? "bg-amber-50 text-amber-700 border-amber-200"
-                                          : "bg-gray-100 text-gray-600 border-gray-200",
+                                          ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60"
+                                          : "bg-gray-100 text-gray-600 border-gray-200 dark:bg-natural-bg/40 dark:text-natural-text-light dark:border-natural-border/60",
                                     )}
                                   >
                                     {payment.final_balance_status === "Verified"
@@ -1362,9 +1403,9 @@ export function BookingPage() {
                                         title: "Final Balance Settlement",
                                       });
                                     }}
-                                    className="inline-flex items-center gap-1 text-[10px] font-semibold text-natural-accent hover:underline cursor-pointer"
+                                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-natural-accent hover:underline cursor-pointer mt-0.5"
                                   >
-                                    <Receipt className="w-3 h-3" />
+                                    <Receipt className="w-3.5 h-3.5" />
                                     View Balance Slip
                                   </button>
                                 )}
@@ -1374,27 +1415,27 @@ export function BookingPage() {
                         );
                       })()}
                     </td>
-                    <td className="px-6 py-5 border-b border-natural-border/50">
+                    <td className="px-6 py-5.5 border-b border-natural-border/50">
                       <span
                         className={cn(
-                          "text-[0.6rem] font-bold uppercase tracking-widest px-2 py-1 rounded border",
+                          "text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-md border shadow-2xs inline-block text-center",
                           (booking.status || "Pending") === "Confirmed"
-                            ? "bg-green-50 text-green-700 border-green-200"
+                            ? "bg-green-50 text-green-700 border-green-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60"
                             : (booking.status || "Pending") === "Completed"
-                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60"
                               : (booking.status || "Pending") === "Pending"
-                                ? "bg-orange-50 text-orange-700 border-orange-200"
+                                ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60"
                                 : (booking.status || "Pending") === "Cancelled"
-                                  ? "bg-red-50 text-red-700 border-red-200"
+                                  ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-800/60"
                                   : (booking.status || "Pending") === "Archived"
-                                    ? "bg-gray-100 text-gray-600 border-gray-300"
-                                    : "bg-gray-50 text-gray-700 border-gray-200",
+                                    ? "bg-gray-100 text-gray-600 border-gray-300 dark:bg-natural-bg/40 dark:text-natural-text-light dark:border-natural-border/60"
+                                    : "bg-gray-50 text-gray-700 border-gray-200 dark:bg-natural-bg/30 dark:text-natural-text-light dark:border-natural-border/50",
                         )}
                       >
                         {booking.status || "Pending"}
                       </span>
                     </td>
-                    <td className="px-6 py-5 border-b border-natural-border/50">
+                    <td className="px-6 py-5.5 border-b border-natural-border/50">
                       <div className="flex items-center gap-2">
                         {(booking.status || "Pending") !== "Archived" && (
                           <>
@@ -1412,7 +1453,7 @@ export function BookingPage() {
                                         "Unknown User",
                                     })
                                   }
-                                  className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-all"
+                                  className="p-2 text-green-600 dark:text-emerald-400 hover:bg-green-50 dark:hover:bg-emerald-950/40 rounded-lg transition-all"
                                   title="Confirm Booking"
                                 >
                                   <CheckCircle2 className="w-4 h-4" />
@@ -1428,7 +1469,7 @@ export function BookingPage() {
                                         "Unknown User",
                                     })
                                   }
-                                  className="p-1.5 text-orange-600 hover:bg-orange-50 rounded-lg transition-all"
+                                  className="p-2 text-orange-700 dark:text-orange-300 hover:bg-orange-50 dark:hover:bg-orange-950/50 rounded-lg transition-all"
                                   title="Cancel Booking"
                                 >
                                   <XCircle className="w-4 h-4" />
@@ -1439,30 +1480,11 @@ export function BookingPage() {
                               const payment = getBookingPayment(booking);
                               const isFinalVerified = payment.final_balance_status === "Verified";
 
-                              if (!isFinalVerified) {
-                                return (
-                                  <button
-                                    onClick={() =>
-                                      setConfirmAction({
-                                        type: "verify_final_payment",
-                                        bookingId: booking.id,
-                                        bookingName:
-                                          booking.profiles?.name ||
-                                          booking.profiles?.full_name ||
-                                          "Unknown User",
-                                      })
-                                    }
-                                    className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
-                                    title="Confirm Final Client Payment (Required before completing event)"
-                                  >
-                                    <CheckCheck className="w-4 h-4" />
-                                  </button>
-                                );
-                              }
-
                               return (
                                 <button
-                                  onClick={() =>
+                                  disabled={!isFinalVerified}
+                                  onClick={() => {
+                                    if (!isFinalVerified) return;
                                     setConfirmAction({
                                       type: "complete",
                                       bookingId: booking.id,
@@ -1470,18 +1492,27 @@ export function BookingPage() {
                                         booking.profiles?.name ||
                                         booking.profiles?.full_name ||
                                         "Unknown User",
-                                    })
+                                    });
+                                  }}
+                                  className={cn(
+                                    "p-2 rounded-lg transition-all",
+                                    isFinalVerified
+                                      ? "text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 cursor-pointer"
+                                      : "text-natural-text-light/40 dark:text-natural-text-light/30 cursor-not-allowed opacity-50"
+                                  )}
+                                  title={
+                                    isFinalVerified
+                                      ? "Complete Event"
+                                      : "Final payment must be confirmed and verified before completing event"
                                   }
-                                  className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
-                                  title="Mark Event Completed & Return Equipment to Monitoring"
                                 >
-                                  <RotateCcw className="w-4 h-4" />
+                                  <CheckCheck className="w-4 h-4" />
                                 </button>
                               );
                             })()}
                             <button
                               onClick={() => setSelectedBooking(booking)}
-                              className="p-1.5 text-natural-text-light hover:text-natural-accent hover:bg-natural-accent/5 rounded-lg transition-all"
+                              className="p-2 text-natural-text-light hover:text-natural-accent hover:bg-natural-accent/5 rounded-lg transition-all"
                               title="View Details"
                             >
                               <AlertCircle className="w-4 h-4" />
@@ -1497,7 +1528,7 @@ export function BookingPage() {
                                     "Unknown User",
                                 })
                               }
-                              className="p-1.5 text-natural-text-light hover:text-natural-text-main hover:bg-natural-bg/50 rounded-lg transition-all"
+                              className="p-2 text-natural-text-light hover:text-natural-text-main hover:bg-natural-bg/50 rounded-lg transition-all"
                               title="Archive Booking"
                             >
                               <Archive className="w-4 h-4" />
@@ -1507,7 +1538,7 @@ export function BookingPage() {
                         {(booking.status || "Pending") === "Archived" && (
                           <button
                             onClick={() => setSelectedBooking(booking)}
-                            className="p-1.5 text-natural-text-light/50 hover:text-natural-text-main hover:bg-natural-bg/50 rounded-lg transition-all"
+                            className="p-2 text-natural-text-light/50 hover:text-natural-text-main hover:bg-natural-bg/50 rounded-lg transition-all"
                             title="View Archived Details"
                           >
                             <AlertCircle className="w-4 h-4" />
@@ -1570,12 +1601,12 @@ export function BookingPage() {
 
             <div className="flex-1 overflow-y-auto p-8 space-y-8">
               <section className="space-y-4">
-                <h4 className="text-[0.7rem] font-bold text-natural-accent uppercase tracking-[0.2em] border-b border-natural-accent/20 pb-2">
+                <h4 className="text-xs font-bold text-natural-accent uppercase tracking-wider border-b border-natural-accent/20 pb-2">
                   Registered Customer Link
                 </h4>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div className="space-y-1">
-                    <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                    <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                       Select Client
                     </label>
                     <select
@@ -1597,7 +1628,7 @@ export function BookingPage() {
                     </select>
                   </div>
                   <div className="space-y-1 opacity-50">
-                    <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                    <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                       Email (Auto-filled)
                     </label>
                     <input
@@ -1611,7 +1642,7 @@ export function BookingPage() {
                     />
                   </div>
                   <div className="space-y-1 opacity-50">
-                    <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                    <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                       Phone (Auto-filled)
                     </label>
                     <input
@@ -1628,12 +1659,12 @@ export function BookingPage() {
               </section>
 
               <section className="space-y-4">
-                <h4 className="text-[0.7rem] font-bold text-natural-accent uppercase tracking-[0.2em] border-b border-natural-accent/20 pb-2">
+                <h4 className="text-xs font-bold text-natural-accent uppercase tracking-wider border-b border-natural-accent/20 pb-2">
                   Event & Package Details
                 </h4>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                   <div className="space-y-1">
-                    <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                    <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                       Event Type
                     </label>
                     <input
@@ -1650,7 +1681,7 @@ export function BookingPage() {
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                    <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                       Package Selected
                     </label>
                     <select
@@ -1672,34 +1703,54 @@ export function BookingPage() {
                     </select>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                    <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                       Guest Count (Pax)
                     </label>
                     <input
                       type="number"
+                      min="1"
+                      max="100000"
                       value={newBooking.guest_count}
-                      onChange={(e) =>
-                        setNewBooking({
-                          ...newBooking,
-                          guest_count: Number(e.target.value),
-                        })
-                      }
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === "") {
+                          setNewBooking({ ...newBooking, guest_count: "" });
+                          return;
+                        }
+                        const num = Math.min(100000, Math.max(0, Number(val)));
+                        setNewBooking({ ...newBooking, guest_count: num });
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") {
+                          e.preventDefault();
+                        }
+                      }}
                       className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-natural-accent/20 transition-all"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                    <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                       Additional Pax
                     </label>
                     <input
                       type="number"
-                      value={newBooking.additional_pax || 0}
-                      onChange={(e) =>
-                        setNewBooking({
-                          ...newBooking,
-                          additional_pax: Number(e.target.value),
-                        })
-                      }
+                      min="0"
+                      max="100000"
+                      value={newBooking.additional_pax}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === "") {
+                          setNewBooking({ ...newBooking, additional_pax: "" });
+                          return;
+                        }
+                        const num = Math.min(100000, Math.max(0, Number(val)));
+                        setNewBooking({ ...newBooking, additional_pax: num });
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") {
+                          e.preventDefault();
+                        }
+                      }}
                       className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-natural-accent/20 transition-all"
                     />
                   </div>
@@ -1707,7 +1758,7 @@ export function BookingPage() {
 
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                   <div className="space-y-1">
-                    <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                    <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                       Event Date
                     </label>
                     <input
@@ -1720,7 +1771,7 @@ export function BookingPage() {
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                    <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                       Event Time
                     </label>
                     <input
@@ -1733,7 +1784,7 @@ export function BookingPage() {
                     />
                   </div>
                   <div className="md:col-span-2 space-y-1">
-                    <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                    <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                       Venue Name
                     </label>
                     <input
@@ -1751,7 +1802,7 @@ export function BookingPage() {
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
+                  <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                     Venue Full Address
                   </label>
                   <input
@@ -1771,7 +1822,7 @@ export function BookingPage() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                 <section className="space-y-4">
-                  <h4 className="text-[0.7rem] font-bold text-natural-accent uppercase tracking-[0.2em] border-b border-natural-accent/20 pb-2">
+                  <h4 className="text-xs font-bold text-natural-accent uppercase tracking-wider border-b border-natural-accent/20 pb-2">
                     Menu Selection
                   </h4>
                   <div className="grid grid-cols-1 gap-1 max-h-60 overflow-y-auto pr-2 scrollbar-thin">
@@ -1809,7 +1860,7 @@ export function BookingPage() {
                           <div className="flex flex-1 justify-between items-center">
                             <span className="text-xs font-medium text-natural-text-main group-hover:text-natural-accent transition-colors">
                               {item.name}{" "}
-                              <span className="text-[9px] text-gray-400">
+                              <span className="text-xs text-natural-text-light/80">
                                 ({item.category}
                                 {item.sub_category
                                   ? ` - ${item.sub_category}`
@@ -1818,7 +1869,7 @@ export function BookingPage() {
                               </span>
                             </span>
                             {isUnavailable && (
-                              <span className="text-[9px] font-bold text-orange-600 bg-orange-50 border border-orange-100 px-1.5 py-0.5 rounded uppercase tracking-widest">
+                              <span className="text-xs font-bold text-orange-600 bg-orange-50 border border-orange-100 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60 px-2 py-0.5 rounded uppercase tracking-wider">
                                 Not Available
                               </span>
                             )}
@@ -1830,7 +1881,7 @@ export function BookingPage() {
                 </section>
 
                 <section className="space-y-4">
-                  <h4 className="text-[0.7rem] font-bold text-natural-accent uppercase tracking-[0.2em] border-b border-natural-accent/20 pb-2">
+                  <h4 className="text-xs font-bold text-natural-accent uppercase tracking-wider border-b border-natural-accent/20 pb-2">
                     Additional Services
                   </h4>
                   <div className="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto pr-2 scrollbar-thin">
@@ -1866,7 +1917,7 @@ export function BookingPage() {
                           <p className="text-xs font-bold text-natural-text-main">
                             {service.name}
                           </p>
-                          <p className="text-[10px] text-natural-text-light/70 uppercase tracking-tighter">
+                          <p className="text-xs font-semibold text-natural-text-light/80 uppercase tracking-wider">
                             + ₱
                             {parseFloat(String(service.price)).toLocaleString()}
                           </p>
@@ -1903,104 +1954,180 @@ export function BookingPage() {
 
       {selectedBooking && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
-            <div className="p-6 border-b border-natural-border flex items-center justify-between shrink-0">
-              <h3 className="text-xl font-serif font-bold text-natural-text-main">
+          <div className="bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl w-full max-w-5xl lg:max-w-6xl xl:max-w-7xl 2xl:max-w-[1450px] max-h-[94vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="py-3.5 px-6 border-b border-natural-border flex items-center justify-between shrink-0">
+              <h3 className="text-lg font-serif font-bold text-natural-text-main">
                 Booking Overview
               </h3>
               <button
                 onClick={() => setSelectedBooking(null)}
-                className="p-1 hover:bg-natural-bg rounded-lg transition-colors"
+                className="p-1 hover:bg-natural-bg rounded-lg transition-colors cursor-pointer"
               >
-                <X className="w-6 h-6 text-natural-text-light" />
+                <X className="w-5 h-5 text-natural-text-light" />
               </button>
             </div>
 
-            <div className="p-8 space-y-6 overflow-y-auto flex-1">
-              <div className="flex items-start justify-between">
-                <div>
-                  <h4 className="text-2xl font-serif font-bold text-natural-text-main">
-                    {selectedBooking.profiles?.name ||
-                      selectedBooking.profiles?.full_name ||
-                      "Unknown User"}
-                  </h4>
-                  <p className="text-sm font-medium text-natural-text-light">
-                    {selectedBooking.event_type} •{" "}
-                    {selectedBooking.packages?.name} Package
-                    <br />
-                    <span className="text-[10px] uppercase tracking-widest mt-1 block opacity-70">
-                      Applied On:{" "}
-                      {selectedBooking.created_at
-                        ? new Date(selectedBooking.created_at).toLocaleString(
-                            undefined,
-                            {
-                              year: "numeric",
-                              month: "short",
-                              day: "numeric",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            },
-                          )
-                        : "N/A"}
-                    </span>
-                  </p>
-                </div>
-                <div className="flex flex-col items-end gap-1.5">
-                  <span
-                    className={cn(
-                      "text-[0.6rem] font-bold uppercase tracking-widest px-3 py-1.5 rounded-full border",
-                      (selectedBooking.status || "Pending") === "Confirmed"
-                        ? "bg-green-50 text-green-700 border-green-200"
-                        : (selectedBooking.status || "Pending") === "Cancelled"
-                          ? "bg-red-50 text-red-700 border-red-200"
-                          : (selectedBooking.status || "Pending") === "Archived"
-                            ? "bg-gray-100 text-gray-600 border-gray-300"
-                            : "bg-orange-50 text-orange-700 border-orange-200",
-                    )}
-                  >
-                    {selectedBooking.status || "Pending"}
-                  </span>
-                  {((selectedBooking.status || "Pending") === "Confirmed" ||
-                    (selectedBooking.status || "Pending") === "Cancelled") && (
-                    <span className="text-[9px] font-bold text-natural-text-light uppercase tracking-widest">
-                      {selectedBooking.status === "Confirmed"
-                        ? "Confirmed on"
-                        : "Cancelled on"}
-                      :{" "}
-                      {selectedBooking.updated_at
-                        ? new Date(selectedBooking.updated_at).toLocaleString(
-                            undefined,
-                            {
-                              year: "numeric",
-                              month: "short",
-                              day: "numeric",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            },
-                          )
-                        : selectedBooking.created_at
-                          ? new Date(selectedBooking.created_at).toLocaleString(
+            <div className="p-4 sm:p-5 xl:p-6 space-y-3.5 overflow-y-auto flex-1">
+              {/* Top Client Header & Logistics Bar */}
+              <div className="p-3.5 bg-natural-card/60 border border-natural-border rounded-xl space-y-2.5 shadow-2xs">
+                {/* Client Row */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-natural-border/60">
+                  <div>
+                    <h4 className="text-xl font-serif font-bold text-natural-text-main leading-tight">
+                      {selectedBooking.profiles?.name ||
+                        selectedBooking.profiles?.full_name ||
+                        "Unknown User"}
+                    </h4>
+                    <p className="text-xs font-medium text-natural-text-light">
+                      {selectedBooking.event_type} •{" "}
+                      {selectedBooking.packages?.name} Package
+                      <span className="opacity-75 ml-2">
+                        (Applied:{" "}
+                        {selectedBooking.created_at
+                          ? new Date(selectedBooking.created_at).toLocaleDateString(
                               undefined,
                               {
-                                year: "numeric",
                                 month: "short",
                                 day: "numeric",
-                                hour: "2-digit",
-                                minute: "2-digit",
+                                year: "numeric",
                               },
                             )
                           : "N/A"}
+                        )
+                      </span>
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        "text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full border",
+                        (selectedBooking.status || "Pending") === "Confirmed"
+                          ? "bg-green-50 text-green-700 border-green-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60"
+                          : (selectedBooking.status || "Pending") === "Completed"
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60"
+                            : (selectedBooking.status || "Pending") === "Cancelled"
+                              ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-800/60"
+                              : (selectedBooking.status || "Pending") === "Archived"
+                                ? "bg-gray-100 text-gray-600 border-gray-300 dark:bg-natural-bg/40 dark:text-natural-text-light dark:border-natural-border/60"
+                                : "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60",
+                      )}
+                    >
+                      {selectedBooking.status || "Pending"}
                     </span>
-                  )}
+                  </div>
                 </div>
+
+                {/* Logistics Strip */}
+                {(() => {
+                  const pkg =
+                    selectedBooking.packages ||
+                    packages.find((p) => p.id === selectedBooking.package_id);
+                  const basePrice =
+                    pkg && pkg.price
+                      ? parseFloat(String(pkg.price).replace(/[^\d.-]/g, "")) || 0
+                      : 0;
+                  const addPrice =
+                    pkg && pkg.additional_pax_price
+                      ? parseFloat(
+                          String(pkg.additional_pax_price).replace(/[^\d.-]/g, ""),
+                        ) || 0
+                      : 0;
+                  const additionalPaxTotal =
+                    selectedBooking.additional_pax
+                      ? addPrice * selectedBooking.additional_pax
+                      : 0;
+                  const servicesPrice = (
+                    selectedBooking.selected_add_ons || []
+                  ).reduce((acc: number, name: string) => {
+                    const service = additionalServices.find((s) => s.name === name);
+                    return (
+                      acc +
+                      (service
+                        ? parseFloat(
+                            String(service.price).replace(/[^\d.-]/g, ""),
+                          ) || 0
+                        : 0)
+                    );
+                  }, 0);
+                  const totalBudget = basePrice + additionalPaxTotal + servicesPrice;
+
+                  return (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                      <div className="flex items-start gap-2">
+                        <Calendar className="w-3.5 h-3.5 text-natural-accent mt-0.5 shrink-0" />
+                        <div>
+                          <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-wider">
+                            Date & Time
+                          </p>
+                          <p className="font-semibold text-natural-text-main text-xs">
+                            {formatEventDate(selectedBooking.event_date)} at{" "}
+                            {formatEventTime(selectedBooking.event_time)}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-2">
+                        <MapPin className="w-3.5 h-3.5 text-natural-accent mt-0.5 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-wider">
+                            Location
+                          </p>
+                          <p className="font-semibold text-natural-text-main text-xs truncate">
+                            {(selectedBooking.event_location || "").split(" - ")[0]}
+                          </p>
+                          {(selectedBooking.event_location || "").split(" - ")[1] && (
+                            <p className="text-[10px] text-natural-text-light truncate">
+                              {(selectedBooking.event_location || "").split(" - ")[1]}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-2">
+                        <Phone className="w-3.5 h-3.5 text-natural-accent mt-0.5 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-wider">
+                            Contact
+                          </p>
+                          <p className="font-semibold text-natural-text-main text-xs truncate">
+                            {selectedBooking.profiles?.phone_number ||
+                              selectedBooking.profiles?.phone ||
+                              "N/A"}
+                          </p>
+                          <p className="text-[10px] text-natural-text-light truncate">
+                            {selectedBooking.profiles?.email}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-2">
+                        <CreditCard className="w-3.5 h-3.5 text-natural-accent mt-0.5 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-wider">
+                            Estimated Budget
+                          </p>
+                          <p className="font-serif font-bold text-natural-accent text-sm leading-tight">
+                            ₱{totalBudget.toLocaleString()}
+                          </p>
+                          <p className="text-[10px] text-natural-text-light truncate">
+                            {selectedBooking.guest_count} Pax{" "}
+                            {selectedBooking.additional_pax > 0
+                              ? `(+${selectedBooking.additional_pax} extra @ ₱${addPrice.toLocaleString()})`
+                              : ""}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {(selectedBooking.status || "Pending") === "Cancelled" && (
-                <div className="mt-4 p-4 bg-red-50 border border-red-100 rounded-xl">
-                  <p className="text-[10px] font-bold text-red-800 uppercase tracking-widest mb-1">
+                <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-100 dark:border-red-800/40 rounded-xl">
+                  <p className="text-[10px] font-bold text-red-800 dark:text-red-400 uppercase tracking-wider mb-0.5">
                     Reason for Cancellation
                   </p>
-                  <p className="text-sm text-red-900 italic">
+                  <p className="text-xs text-red-900 dark:text-red-200 italic">
                     "
                     {selectedBooking.cancellation_reason &&
                     selectedBooking.cancellation_reason.trim() !== ""
@@ -2011,141 +2138,9 @@ export function BookingPage() {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-8 py-6 border-y border-natural-border/50">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                {/* LEFT COLUMN: Payment Scheme & Ledger */}
                 <div className="space-y-4">
-                  <div className="flex items-start gap-3">
-                    <Calendar className="w-4 h-4 text-natural-accent" />
-                    <div>
-                      <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest mb-0.5">
-                        Date & Time
-                      </p>
-                      <p className="text-sm font-semibold text-natural-text-main">
-                        {formatEventDate(selectedBooking.event_date)} at{" "}
-                        {formatEventTime(selectedBooking.event_time)}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <MapPin className="w-4 h-4 text-natural-accent" />
-                    <div>
-                      <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest mb-0.5">
-                        Location
-                      </p>
-                      <p className="text-sm font-semibold text-natural-text-main">
-                        {(selectedBooking.event_location || "").split(" - ")[0]}
-                      </p>
-                      <p className="text-xs text-natural-text-light mt-0.5">
-                        {(selectedBooking.event_location || "").split(" - ")[1]}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-                <div className="space-y-4">
-                  <div className="flex items-start gap-3">
-                    <CreditCard className="w-4 h-4 text-natural-accent shrink-0 mt-0.5" />
-                    <div className="w-full pr-4">
-                      <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest mb-3">
-                        Budget Breakdown
-                      </p>
-                      {(() => {
-                        const pkg =
-                          selectedBooking.packages ||
-                          packages.find(
-                            (p) => p.id === selectedBooking.package_id,
-                          );
-                        const basePrice =
-                          pkg && pkg.price
-                            ? parseFloat(
-                                String(pkg.price).replace(/[^\d.-]/g, ""),
-                              ) || 0
-                            : 0;
-                        const addPrice =
-                          pkg && pkg.additional_pax_price
-                            ? parseFloat(
-                                String(pkg.additional_pax_price).replace(
-                                  /[^\d.-]/g,
-                                  "",
-                                ),
-                              ) || 0
-                            : 0;
-                        const additionalPaxTotal =
-                          selectedBooking.additional_pax
-                            ? addPrice * selectedBooking.additional_pax
-                            : 0;
-                        const servicesPrice = (
-                          selectedBooking.selected_add_ons || []
-                        ).reduce((acc: number, name: string) => {
-                          const service = additionalServices.find(
-                            (s) => s.name === name,
-                          );
-                          return (
-                            acc +
-                            (service
-                              ? parseFloat(
-                                  String(service.price).replace(/[^\d.-]/g, ""),
-                                ) || 0
-                              : 0)
-                          );
-                        }, 0);
-                        const totalBudget =
-                          basePrice + additionalPaxTotal + servicesPrice;
-
-                        return (
-                          <div className="space-y-2">
-                            <div className="flex justify-between text-[0.7rem] text-natural-text-main font-medium">
-                              <span>
-                                Base Package ({selectedBooking.guest_count} Pax)
-                              </span>
-                              <span>₱{basePrice.toLocaleString()}</span>
-                            </div>
-                            {selectedBooking.additional_pax > 0 && (
-                              <div className="flex justify-between text-[0.7rem] text-natural-text-main font-medium">
-                                <span>
-                                  Extra Pax ({selectedBooking.additional_pax} @
-                                  ₱{addPrice.toLocaleString()})
-                                </span>
-                                <span>
-                                  ₱{additionalPaxTotal.toLocaleString()}
-                                </span>
-                              </div>
-                            )}
-                            {servicesPrice > 0 && (
-                              <div className="flex justify-between text-[0.7rem] text-natural-text-main font-medium">
-                                <span>Add-on Services</span>
-                                <span>₱{servicesPrice.toLocaleString()}</span>
-                              </div>
-                            )}
-                            <div className="flex justify-between items-center pt-3 mt-3 border-t border-natural-border/50">
-                              <span className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest">
-                                Total Estimated
-                              </span>
-                              <span className="text-lg font-bold text-natural-accent font-serif italic leading-none">
-                                ₱{totalBudget.toLocaleString()}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <Phone className="w-4 h-4 text-natural-accent" />
-                    <div>
-                      <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest mb-0.5">
-                        Contact
-                      </p>
-                      <p className="text-sm font-semibold text-natural-text-main">
-                        {selectedBooking.profiles?.phone_number ||
-                          selectedBooking.profiles?.phone ||
-                          "N/A"}
-                      </p>
-                      <p className="text-xs text-natural-text-light mt-0.5">
-                        {selectedBooking.profiles?.email}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
 
               {/* Payment Scheme & Installment Ledger Section (Catering Contract Clause 1 & Clause 16) */}
               {(() => {
@@ -2204,7 +2199,7 @@ export function BookingPage() {
                       </div>
                       <span
                         className={cn(
-                          "text-[9px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider border shrink-0",
+                          "text-xs font-bold px-2.5 py-1 rounded-md uppercase tracking-wider border shrink-0",
                           is50Percent
                             ? "bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20"
                             : "bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/20"
@@ -2217,7 +2212,7 @@ export function BookingPage() {
                     {/* Cost Overview Grid */}
                     <div className="grid grid-cols-3 gap-3 p-3 bg-natural-card rounded-xl border border-natural-border text-center shadow-2xs">
                       <div>
-                        <p className="text-[9px] font-bold uppercase tracking-widest text-natural-text-light">
+                        <p className="text-xs font-bold uppercase tracking-wider text-natural-text-light">
                           Total Event Cost
                         </p>
                         <p className="text-sm font-bold text-natural-text-main font-serif">
@@ -2225,7 +2220,7 @@ export function BookingPage() {
                         </p>
                       </div>
                       <div className="border-x border-natural-border px-1">
-                        <p className="text-[9px] font-bold uppercase tracking-widest text-natural-accent">
+                        <p className="text-xs font-bold uppercase tracking-wider text-natural-accent">
                           {is50Percent ? "50% Downpayment" : "20% Deposit"}
                         </p>
                         <p className="text-sm font-bold text-natural-accent font-serif">
@@ -2233,7 +2228,7 @@ export function BookingPage() {
                         </p>
                       </div>
                       <div>
-                        <p className="text-[9px] font-bold uppercase tracking-widest text-natural-text-light">
+                        <p className="text-xs font-bold uppercase tracking-wider text-natural-text-light">
                           {is50Percent ? "50% Final Balance" : "Remaining Balance"}
                         </p>
                         <p className="text-sm font-bold text-natural-text-main font-serif">
@@ -2245,17 +2240,17 @@ export function BookingPage() {
                     {/* Section 1: Initial Deposit Details & Slip */}
                     <div className="space-y-3 bg-natural-card p-3.5 rounded-xl border border-natural-border shadow-2xs">
                       <div className="flex items-center justify-between">
-                        <p className="text-[11px] font-bold text-natural-text-main flex items-center gap-1.5 uppercase tracking-wider">
+                        <p className="text-xs font-bold text-natural-text-main flex items-center gap-1.5 uppercase tracking-wider">
                           <CreditCard className="w-4 h-4 text-natural-accent" />
                           Date Lock Deposit ({is50Percent ? "50%" : "20%"})
                         </p>
                         <span
                           className={cn(
-                            "text-[9px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider border",
+                            "text-xs font-bold px-2.5 py-1 rounded-md uppercase tracking-wider border",
                             isDepositVerified
                               ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
                               : payment.receipt_url
-                                ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30"
+                                ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60"
                                 : "bg-natural-bg text-natural-text-light border-natural-border"
                           )}
                         >
@@ -2269,19 +2264,19 @@ export function BookingPage() {
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs pt-1">
                         <div className="space-y-1.5">
-                          <div className="flex justify-between items-center text-[11px] gap-2">
+                          <div className="flex justify-between items-center text-xs gap-2">
                             <span className="text-natural-text-light shrink-0">Method:</span>
                             <span className="font-semibold text-natural-text-main text-right">
                               {payment.payment_method || "Not selected"}
                             </span>
                           </div>
-                          <div className="flex justify-between items-center text-[11px] gap-2">
+                          <div className="flex justify-between items-center text-xs gap-2">
                             <span className="text-natural-text-light shrink-0">Reference:</span>
                             <span className="font-mono font-bold text-natural-accent text-right">
                               {payment.reference_number || "None provided"}
                             </span>
                           </div>
-                          <div className="flex justify-between items-start text-[11px] gap-2">
+                          <div className="flex justify-between items-start text-xs gap-2">
                             <span className="text-natural-text-light shrink-0">Contract Terms:</span>
                             <span className="font-semibold text-emerald-600 dark:text-emerald-400 text-right leading-tight">
                               {payment.terms_accepted
@@ -2314,10 +2309,10 @@ export function BookingPage() {
                                   }
                                 />
                                 <div>
-                                  <p className="text-[10px] font-bold text-natural-text-main">
+                                  <p className="text-xs font-bold text-natural-text-main">
                                     Deposit Receipt Slip
                                   </p>
-                                  <p className="text-[9px] text-natural-text-light">
+                                  <p className="text-xs text-natural-text-light">
                                     ₱{downpaymentDue.toLocaleString()}
                                   </p>
                                 </div>
@@ -2337,14 +2332,14 @@ export function BookingPage() {
                                     title: `${is50Percent ? "50%" : "20%"} Reservation Deposit Slip`,
                                   })
                                 }
-                                className="px-2.5 py-1.5 bg-natural-accent hover:bg-natural-accent/90 text-white text-[10px] font-bold uppercase tracking-wider rounded-md transition-all flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
+                                className="px-2.5 py-1.5 bg-natural-accent hover:bg-natural-accent/90 text-white text-xs font-bold uppercase tracking-wider rounded-md transition-all flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
                               >
                                 <Eye className="w-3 h-3" /> Inspect
                               </button>
                             </div>
                           ) : (
                             <div className="p-2.5 bg-amber-500/10 rounded-lg border border-amber-500/20 text-center">
-                              <p className="text-[10px] text-amber-700 dark:text-amber-400 italic">
+                              <p className="text-xs text-amber-700 dark:text-amber-400 italic">
                                 No deposit slip uploaded yet.
                               </p>
                             </div>
@@ -2353,34 +2348,14 @@ export function BookingPage() {
                       </div>
 
                       {/* Stage 1 Admin Verification / Status Action */}
-                      <div className="pt-2 border-t border-natural-border/60">
-                        {isDepositVerified ? (
+                      {isDepositVerified && (
+                        <div className="pt-2 border-t border-natural-border/60">
                           <div className="w-full py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5">
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                             Deposit Confirmed & Date Locked
                           </div>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setConfirmAction({
-                                type: "confirm",
-                                bookingId: selectedBooking.id,
-                                bookingName:
-                                  selectedBooking.profiles?.name ||
-                                  selectedBooking.profiles?.full_name ||
-                                  "Unknown User",
-                              })
-                            }
-                            className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            {payment.receipt_url
-                              ? `Verify Deposit & Confirm Booking (₱${downpaymentDue.toLocaleString()})`
-                              : `Confirm Booking & Lock Date (₱${downpaymentDue.toLocaleString()})`}
-                          </button>
-                        )}
-                      </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Section 2: Installment Milestones (If 20% Installment Scheme) */}
@@ -2391,7 +2366,7 @@ export function BookingPage() {
                             <Clock className="w-4 h-4 text-purple-700 dark:text-purple-400" />
                             Installment Breakdown Schedule
                           </p>
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-purple-100 text-purple-900 border border-purple-200 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800/50">
+                          <span className="text-xs font-bold px-2.5 py-1 rounded-md bg-purple-100 text-purple-900 border border-purple-200 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800/50">
                             Monthly Plan
                           </span>
                         </div>
@@ -2411,14 +2386,14 @@ export function BookingPage() {
                                   className="flex flex-col sm:flex-row sm:items-center justify-between text-xs p-3 bg-purple-50/50 hover:bg-purple-50/80 dark:bg-purple-950/30 dark:hover:bg-purple-950/50 rounded-lg border border-purple-200/80 dark:border-purple-800/50 transition-colors shadow-2xs gap-2"
                                 >
                                   <div className="flex items-center gap-3">
-                                    <div className="w-6 h-6 rounded-full bg-purple-700 text-white dark:bg-purple-600 dark:text-white font-bold text-[11px] flex items-center justify-center shrink-0 shadow-xs">
+                                    <div className="w-6 h-6 rounded-full bg-purple-700 text-white dark:bg-purple-600 dark:text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs">
                                       {idx + 1}
                                     </div>
                                     <div>
                                       <p className="font-bold text-natural-text-main text-xs leading-snug">
                                         {milestone.title || milestone.milestone || `Installment #${idx + 1}`}
                                       </p>
-                                      <p className="text-[11px] font-medium text-natural-text-main/75 dark:text-natural-text-light mt-0.5">
+                                      <p className="text-xs font-medium text-natural-text-main/75 dark:text-natural-text-light mt-0.5">
                                         <span className="font-semibold text-natural-text-main">Due:</span> {milestone.dueDate}
                                       </p>
                                     </div>
@@ -2431,7 +2406,7 @@ export function BookingPage() {
                                       </p>
                                       <span
                                         className={cn(
-                                          "inline-block text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border mt-0.5",
+                                          "inline-block text-xs font-bold px-2.5 py-1 rounded uppercase tracking-wider border mt-0.5",
                                           isPaid
                                             ? "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700"
                                             : isPending
@@ -2462,7 +2437,7 @@ export function BookingPage() {
                                               title: `${milestone.title || `Installment #${idx + 1}`} Slip`,
                                             })
                                           }
-                                          className="px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-bold uppercase tracking-wider rounded-md transition-all flex items-center gap-1 shadow-2xs cursor-pointer"
+                                          className="px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold uppercase tracking-wider rounded-md transition-all flex items-center gap-1 shadow-2xs cursor-pointer"
                                         >
                                           <Eye className="w-3 h-3" /> Slip
                                         </button>
@@ -2472,7 +2447,7 @@ export function BookingPage() {
                                         <button
                                           type="button"
                                           onClick={() => handleVerifyInstallment(selectedBooking.id, idx)}
-                                          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold uppercase tracking-wider rounded-md transition-all flex items-center gap-1 shadow-2xs cursor-pointer"
+                                          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold uppercase tracking-wider rounded-md transition-all flex items-center gap-1 shadow-2xs cursor-pointer"
                                         >
                                           <CheckCheck className="w-3 h-3" /> Confirm
                                         </button>
@@ -2488,7 +2463,7 @@ export function BookingPage() {
                             <p className="text-xs font-semibold">
                               Client opted for monthly installment distribution leading up to the 15-day final balance.
                             </p>
-                            <p className="text-[11px] text-purple-800/80 dark:text-purple-300 font-medium">
+                            <p className="text-xs text-purple-800/80 dark:text-purple-300 font-medium">
                               Remaining balance of ₱{balanceDue.toLocaleString()} is settled in monthly milestones, concluding strictly 15 days before the event.
                             </p>
                           </div>
@@ -2500,7 +2475,7 @@ export function BookingPage() {
                     <div className="space-y-3 bg-natural-card p-3.5 rounded-xl border border-natural-border shadow-2xs">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
                         <div>
-                          <p className="text-[11px] font-bold text-natural-text-main flex items-center gap-1.5 uppercase tracking-wider">
+                          <p className="text-xs font-bold text-natural-text-main flex items-center gap-1.5 uppercase tracking-wider">
                             <ShieldCheck className="w-4 h-4 text-natural-accent" />
                             Final Balance Settlement
                           </p>
@@ -2508,23 +2483,23 @@ export function BookingPage() {
 
                         <div className="flex items-center gap-1.5">
                           {isFinalVerified ? (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                              <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" /> Settled & Verified
+                            <span className="text-xs font-bold px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> Settled & Verified
                             </span>
                           ) : !isDepositVerified ? (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
-                              <Clock className="w-3 h-3 text-amber-600 dark:text-amber-400" /> Awaiting Deposit
+                            <span className="text-xs font-bold px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                              <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" /> Awaiting Deposit
                             </span>
                           ) : daysRemaining !== null && daysRemaining < 0 ? (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/30 flex items-center gap-1">
-                              <AlertCircle className="w-3 h-3 text-red-600 dark:text-red-400" /> Overdue by {Math.abs(daysRemaining)}d
+                            <span className="text-xs font-bold px-2.5 py-1 rounded-md bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/30 flex items-center gap-1">
+                              <AlertCircle className="w-3.5 h-3.5 text-red-600 dark:text-red-400" /> Overdue by {Math.abs(daysRemaining)}d
                             </span>
                           ) : daysRemaining !== null && daysRemaining <= 15 ? (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
-                              <Clock className="w-3 h-3 text-amber-600 dark:text-amber-400" /> Due in {daysRemaining}d
+                            <span className="text-xs font-bold px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                              <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" /> Due in {daysRemaining}d
                             </span>
                           ) : (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-natural-bg text-natural-text-light border border-natural-border">
+                            <span className="text-xs font-bold px-2.5 py-1 rounded-md bg-natural-bg text-natural-text-light border border-natural-border">
                               {daysRemaining !== null ? `Due in ${daysRemaining}d` : "Upcoming"}
                             </span>
                           )}
@@ -2533,19 +2508,19 @@ export function BookingPage() {
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs pt-1">
                         <div className="space-y-1.5">
-                          <div className="flex justify-between items-center text-[11px] gap-2">
+                          <div className="flex justify-between items-center text-xs gap-2">
                             <span className="text-natural-text-light shrink-0">Final Balance Amount:</span>
                             <span className="font-bold text-natural-accent font-serif text-sm text-right">
                               ₱{finalBalanceAmount.toLocaleString()}
                             </span>
                           </div>
-                          <div className="flex justify-between items-center text-[11px] gap-2">
+                          <div className="flex justify-between items-center text-xs gap-2">
                             <span className="text-natural-text-light shrink-0">Payment Method:</span>
                             <span className="font-semibold text-natural-text-main text-right">
                               {payment.final_balance_method || "Pending submission"}
                             </span>
                           </div>
-                          <div className="flex justify-between items-center text-[11px] gap-2">
+                          <div className="flex justify-between items-center text-xs gap-2">
                             <span className="text-natural-text-light shrink-0">Reference Number:</span>
                             <span className="font-mono font-semibold text-natural-text-main text-right">
                               {payment.final_balance_reference || "N/A"}
@@ -2576,10 +2551,10 @@ export function BookingPage() {
                                   }
                                 />
                                 <div>
-                                  <p className="text-[10px] font-bold text-natural-text-main">
+                                  <p className="text-xs font-bold text-natural-text-main">
                                     Final Balance Slip
                                   </p>
-                                  <p className="text-[9px] text-natural-text-light">
+                                  <p className="text-xs text-natural-text-light">
                                     ₱{finalBalanceAmount.toLocaleString()}
                                   </p>
                                 </div>
@@ -2599,14 +2574,14 @@ export function BookingPage() {
                                     title: "15-Day Final Balance Slip",
                                   })
                                 }
-                                className="px-2.5 py-1 bg-natural-accent hover:bg-natural-accent/90 text-white text-[10px] font-bold uppercase tracking-wider rounded-md transition-all flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
+                                className="px-2.5 py-1 bg-natural-accent hover:bg-natural-accent/90 text-white text-xs font-bold uppercase tracking-wider rounded-md transition-all flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
                               >
                                 <Eye className="w-3 h-3" /> Inspect
                               </button>
                             </div>
                           ) : (
                             <div className="p-2.5 bg-natural-bg/60 dark:bg-natural-sidebar/30 rounded-lg border border-natural-border text-center">
-                              <p className="text-[10px] text-natural-text-light italic">
+                              <p className="text-xs text-natural-text-light italic">
                                 No final balance slip uploaded yet.
                               </p>
                             </div>
@@ -2639,7 +2614,7 @@ export function BookingPage() {
                                 });
                               }}
                               className={cn(
-                                "w-full py-2 px-3 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all flex items-center justify-center gap-1.5 shadow-xs select-none",
+                                "w-full py-2 px-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shadow-xs select-none",
                                 hasFinalReceipt
                                   ? "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
                                   : "bg-natural-bg/70 dark:bg-natural-sidebar/40 border border-natural-border text-natural-text-light/60 cursor-not-allowed opacity-75"
@@ -2673,252 +2648,414 @@ export function BookingPage() {
                   </div>
                 );
               })()}
+                </div>
 
-              {(() => {
-                const cleanAllergies =
-                  typeof selectedBooking.food_allergies === "string" &&
-                  selectedBooking.food_allergies.includes(
-                    "__PAYMENT_METADATA__:",
-                  )
-                    ? selectedBooking.food_allergies
-                        .split("__PAYMENT_METADATA__:")[0]
-                        .trim()
-                    : (selectedBooking.food_allergies || "").trim();
+                {/* RIGHT COLUMN: Menu Selection & Equipment */}
+                <div className="space-y-3.5">
+                  {/* Food Allergies (if any) */}
+                  {(() => {
+                    const cleanAllergies =
+                      typeof selectedBooking.food_allergies === "string" &&
+                      selectedBooking.food_allergies.includes(
+                        "__PAYMENT_METADATA__:",
+                      )
+                        ? selectedBooking.food_allergies
+                            .split("__PAYMENT_METADATA__:")[0]
+                            .trim()
+                        : (selectedBooking.food_allergies || "").trim();
 
-                if (!cleanAllergies) return null;
+                    if (!cleanAllergies) return null;
 
-                return (
-                  <div className="p-4 bg-orange-50/80 border border-orange-200/60 rounded-xl flex items-start gap-3">
-                    <AlertCircle className="w-5 h-5 text-orange-600 shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-[10px] font-bold text-orange-800 uppercase tracking-widest mb-1">
-                        Food Allergies & Dietary Restrictions
-                      </p>
-                      <p className="text-sm text-orange-900 font-medium leading-relaxed">
-                        {cleanAllergies}
-                      </p>
+                    return (
+                      <div className="p-3 bg-orange-50/80 dark:bg-orange-950/30 border border-orange-200/60 dark:border-orange-800/40 rounded-xl flex items-start gap-2.5">
+                        <AlertCircle className="w-4 h-4 text-orange-600 dark:text-orange-400 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-[10px] font-bold text-orange-800 dark:text-orange-300 uppercase tracking-wider mb-0.5">
+                            Food Allergies & Dietary Restrictions
+                          </p>
+                          <p className="text-xs text-orange-900 dark:text-orange-200 font-medium leading-relaxed">
+                            {cleanAllergies}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Menu Selection & Additional Services */}
+                  <div className="p-3.5 bg-natural-card/50 border border-natural-border rounded-xl space-y-2.5 shadow-2xs">
+                    <h5 className="text-[11px] font-bold text-natural-accent uppercase tracking-wider flex items-center justify-between">
+                      <span>Menu Selection</span>
+                      {selectedBooking.selected_menu_items && (
+                        <span className="text-[10px] font-normal text-natural-text-light">
+                          ({selectedBooking.selected_menu_items.length} items)
+                        </span>
+                      )}
+                    </h5>
+                    <div className="max-h-60 overflow-y-auto pr-1 custom-scrollbar">
+                      {selectedBooking.selected_menu_items &&
+                      selectedBooking.selected_menu_items.length > 0 ? (
+                        (() => {
+                          const groupedMenu: Record<string, string[]> = {};
+                          const uncategorized: string[] = [];
+
+                          selectedBooking.selected_menu_items.forEach(
+                            (m: string) => {
+                              const itemDef = menuItems.find((mi) => mi.name === m);
+                              if (itemDef && itemDef.category) {
+                                const cat = itemDef.category;
+                                if (!groupedMenu[cat]) groupedMenu[cat] = [];
+                                groupedMenu[cat].push(m);
+                              } else {
+                                uncategorized.push(m);
+                              }
+                            },
+                          );
+
+                          return (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                              {Object.entries(groupedMenu).map(([cat, items]) => (
+                                <div key={cat} className="space-y-1">
+                                  <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-wider border-b border-natural-border/40 pb-0.5">
+                                    {cat} ({items.length})
+                                  </p>
+                                  <div className="flex flex-wrap gap-1">
+                                    {items.map((m) => (
+                                      <span
+                                        key={m}
+                                        className="px-2 py-0.5 bg-natural-bg border border-natural-border rounded-md text-[11px] font-semibold text-natural-text-main uppercase tracking-wider"
+                                      >
+                                        {m}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                              {uncategorized.length > 0 && (
+                                <div key="Other" className="space-y-1">
+                                  <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-wider border-b border-natural-border/40 pb-0.5">
+                                    Other
+                                  </p>
+                                  <div className="flex flex-wrap gap-1">
+                                    {uncategorized.map((m) => (
+                                      <span
+                                        key={m}
+                                        className="px-2 py-0.5 bg-natural-bg border border-natural-border rounded-md text-[11px] font-semibold text-natural-text-main uppercase tracking-wider"
+                                      >
+                                        {m}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()
+                      ) : (
+                        <span className="text-xs text-natural-text-light italic">
+                          No menu items selected
+                        </span>
+                      )}
                     </div>
+
+                    {selectedBooking.selected_add_ons &&
+                      selectedBooking.selected_add_ons.length > 0 && (
+                        <div className="space-y-1 pt-2 border-t border-natural-border/50">
+                          <h6 className="text-[10px] font-bold text-natural-accent uppercase tracking-wider">
+                            Additional Services
+                          </h6>
+                          <div className="flex flex-wrap gap-1">
+                            {selectedBooking.selected_add_ons.map((s: string) => (
+                              <span
+                                key={s}
+                                className="px-2 py-0.5 bg-natural-bg border border-natural-border rounded-md text-[11px] font-semibold text-natural-text-main uppercase tracking-wider"
+                              >
+                                {s}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                   </div>
-                );
-              })()}
 
-              <div className="space-y-4">
-                <h5 className="text-[0.65rem] font-bold text-natural-accent uppercase tracking-widest">
-                  Menu Selection
-                </h5>
-                <div className="space-y-3">
-                  {selectedBooking.selected_menu_items &&
-                  selectedBooking.selected_menu_items.length > 0 ? (
-                    (() => {
-                      const groupedMenu: Record<string, string[]> = {};
-                      const uncategorized: string[] = [];
+                  {/* Allocated Event Equipment Section */}
+                  {/* Allocated Event Equipment Section */}
+                  {(() => {
+                    const pkgName =
+                      selectedBooking.packages?.name ||
+                      packages.find((p) => p.id === selectedBooking.package_id)?.name ||
+                      selectedBooking.package ||
+                      packages[0]?.name ||
+                      "Event Package";
+                    const totalPax =
+                      (Number(selectedBooking.guest_count) || 50) +
+                      (Number(selectedBooking.additional_pax) || 0);
+                    const equipList = calculatePackageEquipment(
+                      pkgName,
+                      totalPax,
+                      selectedBooking.packages?.inclusions || selectedBooking.inclusions,
+                    );
 
-                      selectedBooking.selected_menu_items.forEach(
-                        (m: string) => {
-                          const itemDef = menuItems.find((mi) => mi.name === m);
-                          if (itemDef && itemDef.category) {
-                            const cat = itemDef.category;
-                            if (!groupedMenu[cat]) groupedMenu[cat] = [];
-                            groupedMenu[cat].push(m);
-                          } else {
-                            uncategorized.push(m);
-                          }
-                        },
+                    const deductionRec = deductionRecords.find(
+                      (d) => String(d.bookingId) === String(selectedBooking.id),
+                    );
+
+                    const equipBreakdown = equipList.map((eq) => {
+                      const matchedRecItem = deductionRec?.items.find(
+                        (it) => it.itemName.toLowerCase() === eq.itemName.toLowerCase(),
+                      );
+                      const invItem = items.find(
+                        (it) =>
+                          it.status !== "Archived" &&
+                          it.name.toLowerCase() === eq.itemName.toLowerCase(),
                       );
 
-                      const renderGroups: React.ReactNode[] = [];
-                      Object.entries(groupedMenu).forEach(([cat, items]) => {
-                        renderGroups.push(
-                          <div key={cat} className="space-y-1.5">
-                            <p className="text-[0.6rem] font-bold text-natural-text-light uppercase tracking-widest border-b border-natural-border/50 pb-1">
-                              {cat}
-                            </p>
-                            <div className="flex flex-wrap gap-2">
-                              {items.map((m) => (
-                                <span
-                                  key={m}
-                                  className="px-2 py-1 bg-natural-bg border border-natural-border rounded text-[9px] font-bold text-natural-text-main uppercase tracking-tighter"
-                                >
-                                  {m}
-                                </span>
-                              ))}
-                            </div>
-                          </div>,
-                        );
-                      });
+                      let inHouseQty = 0;
+                      let outsourcedQty = 0;
 
-                      if (uncategorized.length > 0) {
-                        renderGroups.push(
-                          <div key="Other" className="space-y-1.5">
-                            <p className="text-[0.6rem] font-bold text-natural-text-light uppercase tracking-widest border-b border-natural-border/50 pb-1">
-                              Other
-                            </p>
-                            <div className="flex flex-wrap gap-2">
-                              {uncategorized.map((m) => (
-                                <span
-                                  key={m}
-                                  className="px-2 py-1 bg-natural-bg border border-natural-border rounded text-[9px] font-bold text-natural-text-main uppercase tracking-tighter"
-                                >
-                                  {m}
-                                </span>
-                              ))}
-                            </div>
-                          </div>,
-                        );
+                      if (matchedRecItem !== undefined) {
+                        inHouseQty = Math.min(matchedRecItem.quantity, eq.quantity);
+                        const remainder = Math.max(0, eq.quantity - inHouseQty);
+                        outsourcedQty = Math.max(matchedRecItem.outsourcedQuantity || 0, remainder);
+                      } else {
+                        const available = invItem ? Math.max(0, invItem.stock) : 0;
+                        inHouseQty = Math.min(available, eq.quantity);
+                        outsourcedQty = Math.max(0, eq.quantity - inHouseQty);
                       }
 
-                      return renderGroups;
-                    })()
-                  ) : (
-                    <span className="text-xs text-natural-text-light italic">
-                      No menu items selected
-                    </span>
-                  )}
-                </div>
-              </div>
+                      return {
+                        ...eq,
+                        inHouseQty,
+                        outsourcedQty,
+                      };
+                    });
 
-              {selectedBooking.selected_add_ons &&
-                selectedBooking.selected_add_ons.length > 0 && (
-                  <div className="space-y-2">
-                    <h5 className="text-[0.65rem] font-bold text-natural-accent uppercase tracking-widest">
-                      Additional Services
-                    </h5>
-                    <div className="flex flex-wrap gap-2">
-                      {selectedBooking.selected_add_ons.map((s: string) => (
-                        <span
-                          key={s}
-                          className="px-2 py-1 bg-natural-bg border border-natural-border rounded text-[9px] font-bold text-natural-text-main uppercase tracking-tighter"
-                        >
-                          {s}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                    const totalInHouse = equipBreakdown.reduce((acc, eq) => acc + eq.inHouseQty, 0);
+                    const totalOutsourced = equipBreakdown.reduce((acc, eq) => acc + eq.outsourcedQty, 0);
+                    const bookingStatus = selectedBooking.status || "Pending";
+                    const isCompleted = bookingStatus === "Completed";
+                    const isConfirmed = bookingStatus === "Confirmed";
+                    const isCancelled = bookingStatus === "Cancelled";
 
-              {/* Allocated Equipment Monitoring Section */}
-              <div className="space-y-3 pt-4 border-t border-natural-border/50">
-                <div className="flex items-center justify-between">
-                  <h5 className="text-[0.65rem] font-bold text-natural-accent uppercase tracking-widest flex items-center gap-1.5">
-                    <Boxes className="w-3.5 h-3.5" />
-                    Allocated Event Equipment
-                  </h5>
-                  <span
-                    className={cn(
-                      "text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border",
-                      isBookingDeducted(selectedBooking.id) || (selectedBooking.status || "Pending") === "Confirmed"
-                        ? "bg-green-50 text-green-700 border-green-200"
-                        : "bg-orange-50 text-orange-700 border-orange-200",
-                    )}
-                  >
-                    {isBookingDeducted(selectedBooking.id) || (selectedBooking.status || "Pending") === "Confirmed"
-                      ? "✓ Stock Deducted & Allocated"
-                      : "Pending Confirmation"}
-                  </span>
-                </div>
-                {(() => {
-                  const pkgName =
-                    selectedBooking.packages?.name ||
-                    packages.find((p) => p.id === selectedBooking.package_id)?.name ||
-                    selectedBooking.package ||
-                    packages[0]?.name ||
-                    "Event Package";
-                  const totalPax =
-                    (Number(selectedBooking.guest_count) || 50) +
-                    (Number(selectedBooking.additional_pax) || 0);
-                  const equipList = calculatePackageEquipment(
-                    pkgName,
-                    totalPax,
-                    selectedBooking.packages?.inclusions || selectedBooking.inclusions,
-                  );
+                    return (
+                      <div className="p-3.5 bg-natural-card/50 border border-natural-border rounded-xl space-y-2.5 shadow-2xs">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 pb-0.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h5 className="text-[11px] font-bold text-natural-accent uppercase tracking-wider flex items-center gap-1.5">
+                              <Boxes className="w-3.5 h-3.5" />
+                              Allocated Event Equipment
+                            </h5>
+                            {isCompleted ? (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 flex items-center gap-1">
+                                <CheckCheck className="w-3 h-3" /> Returned to Monitoring
+                              </span>
+                            ) : isConfirmed || isBookingDeducted(selectedBooking.id) ? (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border bg-green-50 text-green-700 border-green-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60 flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3" /> ✓ Stock Deducted
+                              </span>
+                            ) : isCancelled ? (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60">
+                                Cancelled / Released
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30">
+                                Pending Confirmation
+                              </span>
+                            )}
+                          </div>
 
-                  return (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto pr-1">
-                      {equipList.map((eq, i) => (
-                        <div
-                          key={i}
-                          className="p-2 bg-natural-bg/40 border border-natural-border rounded-lg flex justify-between items-center text-[10px]"
-                        >
-                          <span className="font-medium text-natural-text-main truncate mr-1">
-                            {eq.itemName}
-                          </span>
-                          <span className="font-bold text-natural-accent shrink-0">
-                            {eq.quantity} {eq.unit}
-                          </span>
+                          <div className="flex items-center gap-1.5 text-[10px] font-bold flex-wrap">
+                            {isCompleted ? (
+                              <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                                <CheckCheck className="w-3 h-3" /> Supplies Returned ({totalPax} Pax)
+                              </span>
+                            ) : (
+                              <>
+                                <span
+                                  className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1"
+                                  title={`In-use equipment: ${totalInHouse.toLocaleString()} units`}
+                                >
+                                  <Warehouse className="w-3 h-3" /> In-Use: {totalInHouse.toLocaleString()} units
+                                </span>
+                                {totalOutsourced > 0 && (
+                                  <span
+                                    className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30 flex items-center gap-1"
+                                    title={`Equipment to outsource: ${totalOutsourced.toLocaleString()} units`}
+                                  >
+                                    <ArrowUpRight className="w-3 h-3" /> To Outsource: {totalOutsourced.toLocaleString()} units
+                                  </span>
+                                )}
+                              </>
+                            )}
+                          </div>
                         </div>
-                      ))}
-                    </div>
-                  );
-                })()}
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2 max-h-56 overflow-y-auto pr-1 custom-scrollbar">
+                          {equipBreakdown.map((eq, i) => (
+                            <div
+                              key={i}
+                              className={cn(
+                                "p-2 rounded-xl border text-[11px] flex flex-col justify-between gap-1.5 transition-all shadow-2xs",
+                                !isCompleted && eq.outsourcedQty > 0
+                                  ? "bg-amber-500/5 dark:bg-amber-950/20 border-amber-300/70 dark:border-amber-800/50"
+                                  : "bg-natural-card border-natural-border",
+                              )}
+                            >
+                              <div className="flex justify-between items-start gap-1">
+                                <span
+                                  className="font-semibold text-natural-text-main leading-tight truncate"
+                                  title={eq.itemName}
+                                >
+                                  {eq.itemName}
+                                </span>
+                                <span className="font-serif font-bold text-natural-accent shrink-0 text-xs">
+                                  {eq.quantity} {eq.unit}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center justify-between text-[10.5px] pt-1.5 border-t border-natural-border/50 gap-1.5">
+                                <span
+                                  className={cn(
+                                    "px-1.5 py-0.5 rounded font-bold flex items-center gap-1 shrink-0",
+                                    eq.inHouseQty > 0
+                                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20"
+                                      : "bg-natural-bg text-natural-text-light/60 border border-natural-border/40",
+                                  )}
+                                  title={`In-Use: ${eq.inHouseQty.toLocaleString()} ${eq.unit}`}
+                                >
+                                  <Warehouse className="w-3 h-3 shrink-0" />
+                                  <span>{eq.inHouseQty.toLocaleString()}</span>
+                                </span>
+
+                                {isCompleted ? (
+                                  <span
+                                    className="text-emerald-700 dark:text-emerald-400 font-semibold text-[10px] shrink-0 flex items-center gap-0.5"
+                                    title="Returned to Monitoring"
+                                  >
+                                    <CheckCheck className="w-3 h-3 shrink-0" /> Returned
+                                  </span>
+                                ) : eq.outsourcedQty > 0 ? (
+                                  <span
+                                    className="px-1.5 py-0.5 rounded font-bold bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30 shrink-0 flex items-center gap-1"
+                                    title={`To Outsource: ${eq.outsourcedQty.toLocaleString()} ${eq.unit}`}
+                                  >
+                                    <ArrowUpRight className="w-3 h-3 shrink-0" />
+                                    <span>{eq.outsourcedQty.toLocaleString()}</span>
+                                  </span>
+                                ) : (
+                                  <span
+                                    className="text-emerald-700 dark:text-emerald-400 font-semibold text-[10px] shrink-0 flex items-center gap-0.5"
+                                    title="Fully covered (in-use)"
+                                  >
+                                    <CheckCircle2 className="w-3 h-3 shrink-0" /> In-Use
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                </div>
               </div>
             </div>
 
-            <div className="p-6 bg-natural-bg/30 border-t border-natural-border flex gap-3 shrink-0">
-              {(selectedBooking.status || "Pending") === "Pending" && (
-                <>
-                  <button
-                    onClick={() =>
-                      setConfirmAction({
-                        type: "confirm",
-                        bookingId: selectedBooking.id,
-                        bookingName:
-                          selectedBooking.profiles?.name ||
-                          selectedBooking.profiles?.full_name ||
-                          "Unknown User",
-                      })
-                    }
-                    className="flex-1 bg-green-600 text-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-green-700 transition-all shadow-sm"
-                  >
-                    Confirm
-                  </button>
-                  <button
-                    onClick={() =>
-                      setConfirmAction({
-                        type: "cancel",
-                        bookingId: selectedBooking.id,
-                        bookingName:
-                          selectedBooking.profiles?.name ||
-                          selectedBooking.profiles?.full_name ||
-                          "Unknown User",
-                      })
-                    }
-                    className="flex-1 border border-orange-200 text-orange-600 bg-orange-50/50 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-orange-50 transition-all"
-                  >
-                    Cancel
-                  </button>
-                </>
-              )}
+            <div className="py-3.5 px-6 bg-natural-bg/30 border-t border-natural-border flex gap-3 shrink-0">
+              {(selectedBooking.status || "Pending") === "Pending" && (() => {
+                const payment = getBookingPayment(selectedBooking);
+                const totalBudget = calculateBudget(selectedBooking);
+                const is50Percent = payment.payment_scheme === "Standard 50%";
+                const downpaymentDue =
+                  payment.downpayment_amount > 0
+                    ? payment.downpayment_amount
+                    : Math.round(totalBudget * (is50Percent ? 0.5 : 0.2));
+
+                return (
+                  <>
+                    <button
+                      onClick={() =>
+                        setConfirmAction({
+                          type: "confirm",
+                          bookingId: selectedBooking.id,
+                          bookingName:
+                            selectedBooking.profiles?.name ||
+                            selectedBooking.profiles?.full_name ||
+                            "Unknown User",
+                        })
+                      }
+                      className="flex-1 bg-green-600 text-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-green-700 transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      Verify Deposit & Confirm (₱{downpaymentDue.toLocaleString()})
+                    </button>
+                    <button
+                      onClick={() =>
+                        setConfirmAction({
+                          type: "cancel",
+                          bookingId: selectedBooking.id,
+                          bookingName:
+                            selectedBooking.profiles?.name ||
+                            selectedBooking.profiles?.full_name ||
+                            "Unknown User",
+                        })
+                      }
+                      className="flex-1 bg-orange-50 text-orange-700 border border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-orange-100/70 dark:hover:bg-orange-950/70 transition-all cursor-pointer flex items-center justify-center gap-2"
+                    >
+                      <XCircle className="w-4 h-4" />
+                      Cancel Booking
+                    </button>
+                  </>
+                );
+              })()}
               {(selectedBooking.status || "Pending") === "Confirmed" && (() => {
                 const payment = getBookingPayment(selectedBooking);
                 const isFinalVerified = payment.final_balance_status === "Verified";
 
                 return (
                   <>
-                    {!isFinalVerified ? (
-                      <div className="flex-1" />
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setConfirmAction({
-                            type: "complete",
-                            bookingId: selectedBooking.id,
-                            bookingName:
-                              selectedBooking.profiles?.name ||
-                              selectedBooking.profiles?.full_name ||
-                              "Unknown User",
-                          })
-                        }
-                        className="flex-1 bg-emerald-600 text-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        Mark Event Done & Return Equipment
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      disabled={!isFinalVerified}
+                      onClick={() => {
+                        if (!isFinalVerified) return;
+                        setConfirmAction({
+                          type: "complete",
+                          bookingId: selectedBooking.id,
+                          bookingName:
+                            selectedBooking.profiles?.name ||
+                            selectedBooking.profiles?.full_name ||
+                            "Unknown User",
+                        });
+                      }}
+                      className={cn(
+                        "flex-1 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest transition-all shadow-sm flex items-center justify-center gap-1.5 select-none",
+                        isFinalVerified
+                          ? "bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+                          : "bg-natural-bg/70 dark:bg-natural-sidebar/50 border border-natural-border text-natural-text-light/60 cursor-not-allowed opacity-75",
+                      )}
+                      title={
+                        !isFinalVerified
+                          ? "Final balance payment must be confirmed and verified before completing event"
+                          : "Mark event completed and return equipment to monitoring"
+                      }
+                    >
+                      {!isFinalVerified ? (
+                        <>
+                          <Lock className="w-3.5 h-3.5 text-natural-text-light/60" />
+                          <span>Complete Event (Final Payment Verification Required)</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCheck className="w-3.5 h-3.5" />
+                          <span>Complete Event</span>
+                        </>
+                      )}
+                    </button>
                     <button
                       type="button"
                       onClick={() => setSelectedBooking(null)}
-                      className="px-6 border border-natural-border text-natural-text-light hover:text-natural-text-main bg-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest transition-all cursor-pointer shrink-0"
+                      className="px-6 border border-natural-border text-natural-text-light hover:text-natural-text-main bg-white dark:bg-natural-card py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest transition-all cursor-pointer shrink-0"
                     >
                       Close
                     </button>
@@ -2939,349 +3076,661 @@ export function BookingPage() {
         </div>
       )}
 
-      {confirmAction && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-60 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[90vh] overflow-y-auto animate-in zoom-in-95 duration-200">
-            <div className="p-6 text-center">
-              <div
-                className={cn(
-                  "w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4",
-                  confirmAction.type === "confirm"
-                    ? "bg-green-100"
-                    : confirmAction.type === "complete"
-                      ? "bg-emerald-100"
-                      : confirmAction.type === "cancel"
-                        ? "bg-orange-100"
-                        : confirmAction.type === "archive"
-                          ? "bg-gray-100"
-                          : "bg-blue-100",
-                )}
-              >
-                {confirmAction.type === "confirm" && (
-                  <CheckCircle2 className="w-8 h-8 text-green-600" />
-                )}
-                {confirmAction.type === "complete" && (
-                  <RotateCcw className="w-8 h-8 text-emerald-600" />
-                )}
-                {confirmAction.type === "cancel" && (
-                  <XCircle className="w-8 h-8 text-orange-600" />
-                )}
-                {confirmAction.type === "archive" && (
-                  <Archive className="w-8 h-8 text-gray-600" />
-                )}
-                {confirmAction.type === "create" && (
-                  <Plus className="w-8 h-8 text-blue-600" />
-                )}
-                {confirmAction.type === "verify_final_payment" && (
-                  <CheckCheck className="w-8 h-8 text-blue-600" />
-                )}
-              </div>
-              <h3 className="text-lg font-serif font-bold text-natural-text-main mb-2 capitalize">
-                {confirmAction.type === "complete"
-                  ? "Complete Event?"
-                  : confirmAction.type === "verify_final_payment"
-                    ? "Confirm Final Payment?"
-                    : `${confirmAction.type} Booking?`}
-              </h3>
-              <p className="text-sm text-natural-text-light mb-4">
-                {confirmAction.type === "create"
-                  ? `Are you sure you want to create a new booking for ${confirmAction.bookingName}?`
+      {confirmAction && (() => {
+        const confirmTargetBooking =
+          confirmAction.type === "confirm"
+            ? bookings.find((b) => b.id === confirmAction.bookingId)
+            : null;
+        const confirmPkgName =
+          confirmTargetBooking?.packages?.name ||
+          packages.find((p) => p.id === confirmTargetBooking?.package_id)?.name ||
+          confirmTargetBooking?.package ||
+          packages[0]?.name ||
+          "Event Package";
+        const confirmTotalPax =
+          (Number(confirmTargetBooking?.guest_count) || 50) +
+          (Number(confirmTargetBooking?.additional_pax) || 0);
+        const confirmCheck =
+          confirmAction.type === "confirm"
+            ? checkInventoryAvailability(
+                confirmPkgName,
+                confirmTotalPax,
+                confirmTargetBooking?.packages?.inclusions ||
+                  confirmTargetBooking?.inclusions,
+              )
+            : null;
+        const hasShortage = confirmCheck ? !confirmCheck.isAvailable : false;
+
+        return (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-60 p-4">
+            <div
+              className={cn(
+                "bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl w-full animate-in zoom-in-95 duration-200",
+                hasShortage
+                  ? "max-w-2xl"
                   : confirmAction.type === "complete"
-                    ? `Are you sure the event for ${confirmAction.bookingName} is finished? This will return all allocated equipment back to equipment monitoring.`
+                    ? "max-w-xl"
+                    : confirmAction.type === "confirm" ||
+                        confirmAction.type === "verify_final_payment"
+                      ? "max-w-md"
+                      : "max-w-sm",
+              )}
+            >
+              <div className={cn("text-center", hasShortage ? "p-5" : "p-6")}>
+                <div
+                  className={cn(
+                    "rounded-full flex items-center justify-center mx-auto",
+                    hasShortage ? "w-10 h-10 mb-2" : "w-14 h-14 mb-3",
+                    confirmAction.type === "confirm"
+                      ? "bg-green-100 dark:bg-emerald-950/60"
+                      : confirmAction.type === "complete"
+                        ? "bg-emerald-100 dark:bg-emerald-950/60"
+                        : confirmAction.type === "cancel"
+                          ? "bg-orange-100 dark:bg-orange-950/60"
+                          : confirmAction.type === "archive"
+                            ? "bg-gray-100 dark:bg-natural-bg/50"
+                            : "bg-blue-100 dark:bg-blue-950/60",
+                  )}
+                >
+                  {confirmAction.type === "confirm" && (
+                    <CheckCircle2 className={cn("text-green-600 dark:text-emerald-400", hasShortage ? "w-5 h-5" : "w-7 h-7")} />
+                  )}
+                  {confirmAction.type === "complete" && (
+                    <CheckCheck className="w-7 h-7 text-emerald-600 dark:text-emerald-400" />
+                  )}
+                  {confirmAction.type === "cancel" && (
+                    <XCircle className="w-7 h-7 text-orange-600 dark:text-orange-400" />
+                  )}
+                  {confirmAction.type === "archive" && (
+                    <Archive className="w-7 h-7 text-gray-600 dark:text-natural-text-light" />
+                  )}
+                  {confirmAction.type === "create" && (
+                    <Plus className="w-7 h-7 text-blue-600 dark:text-blue-400" />
+                  )}
+                  {confirmAction.type === "verify_final_payment" && (
+                    <CheckCheck className="w-7 h-7 text-blue-600 dark:text-blue-400" />
+                  )}
+                </div>
+                <h3 className="text-lg font-serif font-bold text-natural-text-main mb-1 capitalize">
+                  {confirmAction.type === "complete"
+                    ? "Complete Event?"
                     : confirmAction.type === "verify_final_payment"
-                      ? `Confirming the final payment will record the client's balance settlement and unlock the Mark Event Complete action for ${confirmAction.bookingName}.`
-                      : `Are you sure you want to ${confirmAction.type} the booking for ${confirmAction.bookingName}?`}
-              </p>
+                      ? "Confirm Final Payment?"
+                      : `${confirmAction.type} Booking?`}
+                </h3>
+                <p className={cn("text-sm text-natural-text-light", hasShortage ? "mb-3" : "mb-4")}>
+                  {confirmAction.type === "create"
+                    ? `Are you sure you want to create a new booking for ${confirmAction.bookingName}?`
+                    : confirmAction.type === "complete"
+                      ? `Are you sure the event for ${confirmAction.bookingName} is finished? This will mark the booking as Completed and return all allocated equipment back to equipment monitoring.`
+                      : confirmAction.type === "verify_final_payment"
+                        ? `Confirming the final payment will record the client's balance settlement and unlock the Mark Event Complete action for ${confirmAction.bookingName}.`
+                        : `Are you sure you want to ${confirmAction.type} the booking for ${confirmAction.bookingName}?`}
+                </p>
 
-              {confirmAction.type === "verify_final_payment" && (() => {
-                const targetBooking = bookings.find((b) => b.id === confirmAction.bookingId);
-                const payment = targetBooking ? getBookingPayment(targetBooking) : null;
-                const totalBudget = targetBooking ? calculateBudget(targetBooking) : 0;
-                const is50Percent = payment?.payment_scheme === "Standard 50%";
-                const downpaymentDue =
-                  payment?.downpayment_amount && payment.downpayment_amount > 0
-                    ? payment.downpayment_amount
-                    : Math.round(totalBudget * (is50Percent ? 0.5 : 0.2));
-                const finalBalanceAmount =
-                  payment?.final_balance_amount && payment.final_balance_amount > 0
-                    ? payment.final_balance_amount
-                    : Math.max(0, totalBudget - downpaymentDue);
+                {confirmAction.type === "verify_final_payment" && (() => {
+                  const targetBooking = bookings.find((b) => b.id === confirmAction.bookingId);
+                  const payment = targetBooking ? getBookingPayment(targetBooking) : null;
+                  const totalBudget = targetBooking ? calculateBudget(targetBooking) : 0;
+                  const is50Percent = payment?.payment_scheme === "Standard 50%";
+                  const downpaymentDue =
+                    payment?.downpayment_amount && payment.downpayment_amount > 0
+                      ? payment.downpayment_amount
+                      : Math.round(totalBudget * (is50Percent ? 0.5 : 0.2));
+                  const finalBalanceAmount =
+                    payment?.final_balance_amount && payment.final_balance_amount > 0
+                      ? payment.final_balance_amount
+                      : Math.max(0, totalBudget - downpaymentDue);
 
-                return (
-                  <div className="space-y-3 mb-5">
-                    <div className="p-3.5 bg-blue-50/90 border border-blue-200/90 rounded-xl text-left space-y-2">
-                      <div className="flex items-center justify-between text-blue-900 font-bold text-xs">
-                        <div className="flex items-center gap-1.5">
-                          <CheckCheck className="w-4 h-4 text-blue-600" />
-                          <span>Final Balance Settlement</span>
-                        </div>
-                        <span className="font-mono text-blue-800 font-bold text-sm">
-                          ₱{finalBalanceAmount.toLocaleString()}
-                        </span>
-                      </div>
-
-                      <div className="text-[11px] text-blue-950/80 space-y-1">
-                        <div className="flex justify-between">
-                          <span className="text-natural-text-light">Payment Scheme:</span>
-                          <span className="font-semibold text-natural-text-main">
-                            {payment?.payment_scheme || "Standard 50%"}
+                  return (
+                    <div className="space-y-3 mb-5">
+                      <div className="p-3.5 bg-blue-50/90 dark:bg-blue-950/30 border border-blue-200/90 dark:border-blue-800/40 rounded-xl text-left space-y-2">
+                        <div className="flex items-center justify-between text-blue-900 dark:text-blue-300 font-bold text-xs">
+                          <div className="flex items-center gap-1.5">
+                            <CheckCheck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                            <span>Final Balance Settlement</span>
+                          </div>
+                          <span className="font-mono text-blue-800 dark:text-blue-300 font-bold text-sm">
+                            ₱{finalBalanceAmount.toLocaleString()}
                           </span>
                         </div>
-                        <div className="flex justify-between">
-                          <span className="text-natural-text-light">Payment Method:</span>
-                          <span className="font-semibold text-natural-text-main">
-                            {payment?.final_balance_method || "Manual / In-Person"}
-                          </span>
-                        </div>
-                        {payment?.final_balance_reference && (
+
+                        <div className="text-xs text-blue-950/80 dark:text-blue-200/90 space-y-1.5">
                           <div className="flex justify-between">
-                            <span className="text-natural-text-light">Reference:</span>
-                            <span className="font-mono font-bold text-natural-accent">
-                              {payment.final_balance_reference}
+                            <span className="text-natural-text-light">Payment Scheme:</span>
+                            <span className="font-semibold text-natural-text-main">
+                              {payment?.payment_scheme || "Standard 50%"}
                             </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-natural-text-light">Payment Method:</span>
+                            <span className="font-semibold text-natural-text-main">
+                              {payment?.final_balance_method || "Manual / In-Person"}
+                            </span>
+                          </div>
+                          {payment?.final_balance_reference && (
+                            <div className="flex justify-between">
+                              <span className="text-natural-text-light">Reference:</span>
+                              <span className="font-mono font-bold text-natural-accent">
+                                {payment.final_balance_reference}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {payment?.final_balance_receipt && (
+                          <div className="pt-2 border-t border-blue-200/70 dark:border-blue-800/40 flex items-center justify-between">
+                            <span className="text-xs text-natural-text-light">
+                              Receipt attached by client
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setViewingReceipt({
+                                  url: payment.final_balance_receipt,
+                                  bookingName: confirmAction.bookingName,
+                                  ref: payment.final_balance_reference,
+                                  method: payment.final_balance_method,
+                                  amount: finalBalanceAmount,
+                                  title: "15-Day Final Balance Receipt",
+                                })
+                              }
+                              className="px-2.5 py-1 bg-blue-600 text-white text-xs font-bold uppercase tracking-wider rounded hover:bg-blue-700 transition-all flex items-center gap-1 cursor-pointer"
+                            >
+                              <Eye className="w-3.5 h-3.5" /> Inspect Slip
+                            </button>
                           </div>
                         )}
                       </div>
 
-                      {payment?.final_balance_receipt && (
-                        <div className="pt-2 border-t border-blue-200/70 flex items-center justify-between">
-                          <span className="text-[10px] text-natural-text-light">
-                            Receipt attached by client
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setViewingReceipt({
-                                url: payment.final_balance_receipt,
-                                bookingName: confirmAction.bookingName,
-                                ref: payment.final_balance_reference,
-                                method: payment.final_balance_method,
-                                amount: finalBalanceAmount,
-                                title: "15-Day Final Balance Receipt",
-                              })
-                            }
-                            className="px-2 py-1 bg-blue-600 text-white text-[10px] font-bold uppercase tracking-wider rounded hover:bg-blue-700 transition-all flex items-center gap-1 cursor-pointer"
-                          >
-                            <Eye className="w-3 h-3" /> Inspect Slip
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="p-2.5 bg-emerald-50 border border-emerald-200/80 rounded-lg text-left text-[11px] text-emerald-900 flex items-start gap-2">
-                      <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                      <span>
-                        Confirming will verify the client's final balance and immediately reveal the <strong>Mark Event Done & Return Equipment</strong> button.
-                      </span>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {confirmAction.type === "complete" && (
-                <div className="mb-5 p-3.5 bg-emerald-50/80 border border-emerald-200/90 rounded-xl text-left space-y-1.5">
-                  <div className="flex items-center gap-2 text-emerald-900 font-bold text-xs">
-                    <RotateCcw className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>Automatic Equipment Return</span>
-                  </div>
-                  <p className="text-[11px] text-emerald-950/80 leading-relaxed">
-                    Marking this event as Completed will automatically return all reserved tableware, equipment, and supplies back to equipment monitoring.
-                  </p>
-                </div>
-              )}
-
-              {confirmAction.type === "confirm" && (() => {
-                const targetBooking = bookings.find((b) => b.id === confirmAction.bookingId);
-                const payment = targetBooking ? getBookingPayment(targetBooking) : null;
-                const totalBudget = targetBooking ? calculateBudget(targetBooking) : 0;
-                const is50Percent = payment?.payment_scheme === "Standard 50%";
-                const downpaymentDue =
-                  payment?.downpayment_amount && payment.downpayment_amount > 0
-                    ? payment.downpayment_amount
-                    : Math.round(totalBudget * (is50Percent ? 0.5 : 0.2));
-
-                const pkgName =
-                  targetBooking?.packages?.name ||
-                  packages.find((p) => p.id === targetBooking?.package_id)?.name ||
-                  targetBooking?.package ||
-                  packages[0]?.name ||
-                  "Event Package";
-                const totalPax =
-                  (Number(targetBooking?.guest_count) || 50) +
-                  (Number(targetBooking?.additional_pax) || 0);
-                const check = checkInventoryAvailability(pkgName, totalPax, targetBooking?.packages?.inclusions || targetBooking?.inclusions);
-
-                return (
-                  <div className="space-y-3 mb-5">
-                    <div className="p-3.5 bg-blue-50/80 border border-blue-200/90 rounded-xl text-left space-y-1.5">
-                      <div className="flex items-center justify-between text-blue-900 font-bold text-xs">
-                        <div className="flex items-center gap-1.5">
-                          <ShieldCheck className="w-4 h-4 text-blue-600" />
-                          <span>{is50Percent ? "50%" : "20%"} Downpayment Verification</span>
-                        </div>
-                        <span className="font-mono text-blue-700 font-bold">
-                          ₱{downpaymentDue.toLocaleString()}
+                      <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200/80 dark:border-emerald-800/40 rounded-lg text-left text-xs text-emerald-900 dark:text-emerald-200 flex items-start gap-2">
+                        <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                        <span>
+                          Confirming will verify the client's final balance and immediately reveal the <strong>Mark Event Done & Return Equipment</strong> button.
                         </span>
                       </div>
-                      <p className="text-[11px] text-blue-950/80 leading-relaxed">
-                        {payment?.receipt_url ? (
-                          <>
-                            Client submitted proof slip via{" "}
-                            <span className="font-semibold">
-                              {payment.payment_method || "Online"}
-                            </span>{" "}
-                            (Ref:{" "}
-                            <span className="font-mono font-semibold">
-                              {payment.reference_number || "N/A"}
-                            </span>
-                            ). Confirming marks payment as{" "}
-                            <span className="font-semibold text-green-700">
-                              Verified
-                            </span>
-                            .
-                          </>
-                        ) : (
-                          <>
-                            Confirming will verify the {is50Percent ? "50%" : "20%"} downpayment requirement
-                            and lock in the event date for the client.
-                          </>
-                        )}
-                      </p>
                     </div>
+                  );
+                })()}
 
-                    <div className="p-3.5 bg-amber-50/80 border border-amber-200/90 rounded-xl text-left space-y-2">
-                      <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
-                        <Boxes className="w-4 h-4 text-amber-600 shrink-0" />
-                        <span>Automatic Stock Allocation</span>
-                      </div>
-                      <p className="text-[11px] text-amber-950/80 leading-relaxed">
-                        Confirming will allocate equipment for{" "}
-                        <span className="font-bold">{totalPax} Guests</span> (
-                        {pkgName}) from equipment monitoring.
-                      </p>
-                      {!check.isAvailable && (
-                        <div className="p-2 bg-red-50 border border-red-200 rounded-lg text-[10px] text-red-700 font-semibold leading-tight">
-                          ⚠️ Low stock warning:{" "}
-                          {check.requirements
-                            .filter((r) => !r.isAvailable)
-                            .map(
-                              (r) =>
-                                `${r.itemName} (Deficit: ${r.deficit} ${r.unit})`,
-                            )
-                            .join(", ")}
+                {confirmAction.type === "complete" && (() => {
+                  const targetBooking = bookings.find((b) => b.id === confirmAction.bookingId);
+                  const payment = targetBooking ? getBookingPayment(targetBooking) : null;
+                  const totalBudget = targetBooking ? calculateBudget(targetBooking) : 0;
+                  const is50Percent = payment?.payment_scheme === "Standard 50%";
+                  const downpaymentDue =
+                    payment?.downpayment_amount && payment.downpayment_amount > 0
+                      ? payment.downpayment_amount
+                      : Math.round(totalBudget * (is50Percent ? 0.5 : 0.2));
+                  const finalBalanceAmount =
+                    payment?.final_balance_amount && payment.final_balance_amount > 0
+                      ? payment.final_balance_amount
+                      : Math.max(0, totalBudget - downpaymentDue);
+
+                  return (
+                    <div className="space-y-3 mb-5 text-left">
+                      {/* Financial Overview Strip */}
+                      <div className="grid grid-cols-3 gap-2 p-3 bg-natural-bg/70 dark:bg-natural-sidebar/50 border border-natural-border/70 rounded-xl text-center">
+                        <div>
+                          <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-wider">
+                            Total Event Cost
+                          </p>
+                          <p className="font-serif font-bold text-natural-text-main text-sm mt-0.5">
+                            ₱{totalBudget.toLocaleString()}
+                          </p>
                         </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })()}
+                        <div className="border-x border-natural-border/60">
+                          <p className="text-[10px] font-bold text-natural-accent uppercase tracking-wider">
+                            {is50Percent ? "50% Downpayment" : "20% Downpayment"}
+                          </p>
+                          <p className="font-serif font-bold text-natural-accent text-sm mt-0.5">
+                            ₱{downpaymentDue.toLocaleString()}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
+                            {is50Percent ? "50% Final Balance" : "Final Balance"}
+                          </p>
+                          <p className="font-serif font-bold text-emerald-700 dark:text-emerald-400 text-sm mt-0.5">
+                            ₱{finalBalanceAmount.toLocaleString()}
+                          </p>
+                        </div>
+                      </div>
 
-              {["confirm", "cancel", "archive"].includes(
-                confirmAction.type,
-              ) && (
-                <div className="mb-6 space-y-4 text-left animate-in slide-in-from-bottom-2 duration-300">
-                  {confirmAction.type === "cancel" && (
-                    <div className="space-y-2">
-                      <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest pl-1">
-                        Reason for Cancellation{" "}
-                        <span className="text-red-500">*</span>
+                      {/* Payment Records with Inspect Slips */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {/* Date Lock Deposit Card */}
+                        <div className="p-3 bg-natural-card border border-natural-border/70 rounded-xl space-y-2.5 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-bold text-natural-text-main uppercase tracking-wider flex items-center gap-1.5">
+                              <ShieldCheck className="w-3.5 h-3.5 text-natural-accent" />
+                              Date Lock Deposit
+                            </span>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
+                              Deposit Verified
+                            </span>
+                          </div>
+
+                          <div className="text-xs space-y-1.5 text-natural-text-light">
+                            <div className="flex justify-between items-center">
+                              <span>Amount:</span>
+                              <span className="font-serif font-bold text-natural-text-main text-xs">
+                                ₱{downpaymentDue.toLocaleString()}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span>Method:</span>
+                              <span className="font-semibold text-natural-text-main">
+                                {payment?.payment_method || "Bank Transfer"}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span>Reference:</span>
+                              <span className="font-mono font-medium text-natural-text-main truncate max-w-[130px]">
+                                {payment?.reference_number || "None provided"}
+                              </span>
+                            </div>
+                          </div>
+
+                          {payment?.receipt_url ? (
+                            <div className="pt-2 border-t border-natural-border/60 flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 overflow-hidden">
+                                <img
+                                  src={payment.receipt_url}
+                                  alt="Deposit Slip"
+                                  className="w-8 h-8 object-cover rounded border border-natural-border cursor-pointer hover:opacity-80 transition-opacity shrink-0"
+                                  onClick={() =>
+                                    setViewingReceipt({
+                                      url: payment.receipt_url,
+                                      bookingName: confirmAction.bookingName,
+                                      ref: payment.reference_number,
+                                      method: payment.payment_method,
+                                      amount: downpaymentDue,
+                                      title: `${is50Percent ? "50%" : "20%"} Reservation Deposit Slip`,
+                                    })
+                                  }
+                                />
+                                <div className="truncate">
+                                  <p className="text-[11px] font-bold text-natural-text-main truncate">
+                                    Deposit Receipt Slip
+                                  </p>
+                                  <p className="text-[10px] text-natural-text-light">
+                                    ₱{downpaymentDue.toLocaleString()}
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setViewingReceipt({
+                                    url: payment.receipt_url,
+                                    bookingName: confirmAction.bookingName,
+                                    ref: payment.reference_number,
+                                    method: payment.payment_method,
+                                    amount: downpaymentDue,
+                                    title: `${is50Percent ? "50%" : "20%"} Reservation Deposit Slip`,
+                                  })
+                                }
+                                className="px-2.5 py-1 bg-natural-accent hover:bg-natural-accent/90 text-white text-[10px] font-bold uppercase tracking-wider rounded transition-all flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
+                              >
+                                <Eye className="w-3 h-3" /> Inspect
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="pt-2 border-t border-natural-border/60 text-[10px] text-natural-text-light italic">
+                              No deposit slip attached
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Final Balance Card */}
+                        <div className="p-3 bg-natural-card border border-natural-border/70 rounded-xl space-y-2.5 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-bold text-natural-text-main uppercase tracking-wider flex items-center gap-1.5">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                              Final Balance
+                            </span>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
+                              Settled & Verified
+                            </span>
+                          </div>
+
+                          <div className="text-xs space-y-1.5 text-natural-text-light">
+                            <div className="flex justify-between items-center">
+                              <span>Amount:</span>
+                              <span className="font-serif font-bold text-natural-text-main text-xs">
+                                ₱{finalBalanceAmount.toLocaleString()}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span>Method:</span>
+                              <span className="font-semibold text-natural-text-main">
+                                {payment?.final_balance_method || "Bank Transfer"}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span>Reference:</span>
+                              <span className="font-mono font-medium text-natural-text-main truncate max-w-[130px]">
+                                {payment?.final_balance_reference || "N/A"}
+                              </span>
+                            </div>
+                          </div>
+
+                          {payment?.final_balance_receipt ? (
+                            <div className="pt-2 border-t border-natural-border/60 flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 overflow-hidden">
+                                <img
+                                  src={payment.final_balance_receipt}
+                                  alt="Final Balance Slip"
+                                  className="w-8 h-8 object-cover rounded border border-natural-border cursor-pointer hover:opacity-80 transition-opacity shrink-0"
+                                  onClick={() =>
+                                    setViewingReceipt({
+                                      url: payment.final_balance_receipt,
+                                      bookingName: confirmAction.bookingName,
+                                      ref: payment.final_balance_reference,
+                                      method: payment.final_balance_method,
+                                      amount: finalBalanceAmount,
+                                      title: "15-Day Final Balance Slip",
+                                    })
+                                  }
+                                />
+                                <div className="truncate">
+                                  <p className="text-[11px] font-bold text-natural-text-main truncate">
+                                    Final Balance Slip
+                                  </p>
+                                  <p className="text-[10px] text-natural-text-light">
+                                    ₱{finalBalanceAmount.toLocaleString()}
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setViewingReceipt({
+                                    url: payment.final_balance_receipt,
+                                    bookingName: confirmAction.bookingName,
+                                    ref: payment.final_balance_reference,
+                                    method: payment.final_balance_method,
+                                    amount: finalBalanceAmount,
+                                    title: "15-Day Final Balance Slip",
+                                  })
+                                }
+                                className="px-2.5 py-1 bg-natural-accent hover:bg-natural-accent/90 text-white text-[10px] font-bold uppercase tracking-wider rounded transition-all flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
+                              >
+                                <Eye className="w-3 h-3" /> Inspect
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="pt-2 border-t border-natural-border/60 text-[10px] text-natural-text-light italic">
+                              No final slip attached
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Milestone Installments if applicable */}
+                      {!is50Percent &&
+                        payment?.installment_schedule &&
+                        payment.installment_schedule.length > 0 && (
+                          <div className="p-2.5 bg-purple-50/50 dark:bg-purple-950/30 border border-purple-200/70 dark:border-purple-800/40 rounded-xl space-y-1.5">
+                            <div className="flex items-center justify-between text-xs font-bold text-purple-900 dark:text-purple-200">
+                              <span className="flex items-center gap-1.5">
+                                <Clock className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                                Milestone Installments
+                              </span>
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-900/50 text-purple-800 dark:text-purple-300 font-semibold">
+                                Settled
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                              {payment.installment_schedule.map((milestone: any, idx: number) => {
+                                const receiptUrl =
+                                  milestone.receipt_url ||
+                                  (payment.final_balance_status === "Verified"
+                                    ? payment.final_balance_receipt
+                                    : "");
+                                return (
+                                  <div
+                                    key={idx}
+                                    className="flex items-center justify-between p-1.5 bg-white dark:bg-natural-card rounded border border-purple-200/60 dark:border-purple-800/40 text-[11px]"
+                                  >
+                                    <span className="font-semibold text-natural-text-main truncate">
+                                      {milestone.title || `Installment #${idx + 1}`} (₱{Number(milestone.amount).toLocaleString()})
+                                    </span>
+                                    {receiptUrl && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setViewingReceipt({
+                                            url: receiptUrl,
+                                            bookingName: confirmAction.bookingName,
+                                            ref: milestone.reference_number || payment.final_balance_reference,
+                                            method: milestone.payment_method || payment.final_balance_method,
+                                            amount: Number(milestone.amount),
+                                            title: `${milestone.title || `Installment #${idx + 1}`} Slip`,
+                                          })
+                                        }
+                                        className="px-2 py-0.5 bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-bold rounded transition-all flex items-center gap-1 cursor-pointer shrink-0 ml-1.5"
+                                      >
+                                        <Eye className="w-3 h-3" /> Inspect
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                      {/* Equipment Return & Completion Callout */}
+                      <div className="p-3 bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200/90 dark:border-emerald-800/40 rounded-xl space-y-1">
+                        <div className="flex items-center gap-2 text-emerald-900 dark:text-emerald-300 font-bold text-xs">
+                          <CheckCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                          <span>Automatic Equipment Return</span>
+                        </div>
+                        <p className="text-xs text-emerald-950/80 dark:text-emerald-200/90 leading-relaxed">
+                          Marking this event as Completed will finalize the booking and automatically return all reserved tableware, equipment, and supplies back to equipment monitoring.
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {confirmAction.type === "confirm" && confirmCheck && (() => {
+                  const targetBooking = confirmTargetBooking;
+                  const payment = targetBooking ? getBookingPayment(targetBooking) : null;
+                  const totalBudget = targetBooking ? calculateBudget(targetBooking) : 0;
+                  const is50Percent = payment?.payment_scheme === "Standard 50%";
+                  const downpaymentDue =
+                    payment?.downpayment_amount && payment.downpayment_amount > 0
+                      ? payment.downpayment_amount
+                      : Math.round(totalBudget * (is50Percent ? 0.5 : 0.2));
+
+                  return (
+                    <div className="space-y-3 mb-4">
+                      <div className="p-3 bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200/90 dark:border-blue-800/40 rounded-xl text-left space-y-1">
+                        <div className="flex items-center justify-between text-blue-900 dark:text-blue-300 font-bold text-xs">
+                          <div className="flex items-center gap-1.5">
+                            <ShieldCheck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                            <span>{is50Percent ? "50%" : "20%"} Downpayment Verification</span>
+                          </div>
+                          <span className="font-mono text-blue-700 dark:text-blue-300 font-bold">
+                            ₱{downpaymentDue.toLocaleString()}
+                          </span>
+                        </div>
+                        <p className="text-xs text-blue-950/80 dark:text-blue-200/90 leading-relaxed">
+                          {payment?.receipt_url ? (
+                            <>
+                              Client submitted proof slip via{" "}
+                              <span className="font-semibold">
+                                {payment.payment_method || "Online"}
+                              </span>{" "}
+                              (Ref:{" "}
+                              <span className="font-mono font-semibold">
+                                {payment.reference_number || "N/A"}
+                              </span>
+                              ). Confirming marks payment as{" "}
+                              <span className="font-semibold text-green-700 dark:text-emerald-400">
+                                Verified
+                              </span>
+                              .
+                            </>
+                          ) : (
+                            <>
+                              Confirming will verify the {is50Percent ? "50%" : "20%"} downpayment requirement
+                              and lock in the event date for the client.
+                            </>
+                          )}
+                        </p>
+                      </div>
+
+                      <div className="p-3 bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200/90 dark:border-amber-800/40 rounded-xl text-left space-y-2">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-2 text-amber-900 dark:text-amber-300 font-bold text-xs">
+                            <Boxes className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                            <span>Automatic Stock Allocation</span>
+                          </div>
+                          <span className="text-[11px] text-amber-950/80 dark:text-amber-200/90">
+                            <span className="font-bold">{confirmTotalPax} Guests</span> ({confirmPkgName})
+                          </span>
+                        </div>
+                        {!confirmCheck.isAvailable && (
+                          <div className="p-2.5 bg-orange-50 dark:bg-orange-950/40 border border-orange-200 dark:border-orange-800/50 rounded-lg text-xs text-orange-800 dark:text-orange-300 leading-normal space-y-1.5">
+                            <p className="font-bold">
+                              ⚠️ Shortage — these items will be marked TO OUTSOURCE (rent):
+                            </p>
+                            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1">
+                              {confirmCheck.requirements
+                                .filter((r) => !r.isAvailable)
+                                .map((r) => (
+                                  <li
+                                    key={r.itemName}
+                                    className="flex items-center justify-between gap-2 text-[11px] border-b border-orange-200/40 dark:border-orange-800/30 pb-0.5"
+                                  >
+                                    <span className="font-semibold truncate">{r.itemName}</span>
+                                    <span className="font-mono whitespace-nowrap shrink-0">
+                                      {Math.max(0, r.availableStock)} in-house + {r.deficit} to outsource
+                                    </span>
+                                  </li>
+                                ))}
+                            </ul>
+                            <p className="text-[10px] opacity-80">
+                              Items to outsource are tracked in Equipment Monitoring and are not added to warehouse stock when the event is completed.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {["confirm", "cancel", "archive"].includes(
+                  confirmAction.type,
+                ) && (
+                  <div className="mb-4 space-y-3 text-left animate-in slide-in-from-bottom-2 duration-300">
+                    {confirmAction.type === "cancel" && (
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider pl-1">
+                          Reason for Cancellation{" "}
+                          <span className="text-red-500">*</span>
+                        </label>
+                        <textarea
+                          value={cancelReason}
+                          onChange={(e) => {
+                            setCancelReason(e.target.value);
+                            setCancelReasonError(false);
+                          }}
+                          placeholder="Enter the reason for cancelling..."
+                          className={cn(
+                            "w-full px-4 py-2.5 bg-natural-bg/50 border rounded-xl text-sm transition-all focus:outline-none focus:bg-white focus:ring-2 resize-none min-h-[80px]",
+                            cancelReasonError
+                              ? "border-red-300 focus:ring-red-100"
+                              : "border-natural-border focus:ring-natural-accent/10",
+                          )}
+                        />
+                        {cancelReasonError && (
+                          <p className="text-xs font-bold text-red-500 uppercase tracking-wider pl-1">
+                            {typeof cancelReasonError === "string"
+                              ? cancelReasonError
+                              : "Reason is required."}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider pl-1">
+                        Security Verification
                       </label>
-                      <textarea
-                        value={cancelReason}
+                      <input
+                        type="password"
+                        value={confirmPassword}
                         onChange={(e) => {
-                          setCancelReason(e.target.value);
-                          setCancelReasonError(false);
+                          setConfirmPassword(e.target.value);
+                          setPasswordError(false);
                         }}
-                        placeholder="Enter the reason for cancelling..."
+                        placeholder="Enter admin password to proceed"
                         className={cn(
-                          "w-full px-4 py-2.5 bg-natural-bg/50 border rounded-xl text-sm transition-all focus:outline-none focus:bg-white focus:ring-2 resize-none min-h-[80px]",
-                          cancelReasonError
+                          "w-full px-4 py-2 bg-natural-bg/50 border rounded-xl text-sm transition-all focus:outline-none focus:bg-white focus:ring-2",
+                          passwordError
                             ? "border-red-300 focus:ring-red-100"
                             : "border-natural-border focus:ring-natural-accent/10",
                         )}
                       />
-                      {cancelReasonError && (
-                        <p className="text-[10px] font-bold text-red-500 uppercase tracking-tighter pl-1">
-                          {typeof cancelReasonError === "string"
-                            ? cancelReasonError
-                            : "Reason is required."}
+                      {passwordError && (
+                        <p className="text-xs font-bold text-red-500 uppercase tracking-wider pl-1">
+                          {typeof passwordError === "string"
+                              ? passwordError
+                              : "Password is required to proceed."}
                         </p>
                       )}
                     </div>
-                  )}
-                  <div className="space-y-2">
-                    <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest pl-1">
-                      Security Verification
-                    </label>
-                    <input
-                      type="password"
-                      value={confirmPassword}
-                      onChange={(e) => {
-                        setConfirmPassword(e.target.value);
-                        setPasswordError(false);
-                      }}
-                      placeholder="Enter admin password to proceed"
-                      className={cn(
-                        "w-full px-4 py-2.5 bg-natural-bg/50 border rounded-xl text-sm transition-all focus:outline-none focus:bg-white focus:ring-2",
-                        passwordError
-                          ? "border-red-300 focus:ring-red-100"
-                          : "border-natural-border focus:ring-natural-accent/10",
-                      )}
-                    />
-                    {passwordError && (
-                      <p className="text-[10px] font-bold text-red-500 uppercase tracking-tighter pl-1">
-                        {typeof passwordError === "string"
-                            ? passwordError
-                            : "Password is required to proceed."}
-                      </p>
-                    )}
                   </div>
-                </div>
-              )}
+                )}
 
-              <div className="flex flex-col gap-2">
-                <button
-                  onClick={handleConfirmAction}
-                  className={cn(
-                    "w-full py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest text-white transition-all shadow-sm cursor-pointer",
-                    confirmAction.type === "confirm"
-                      ? "bg-green-600 hover:bg-green-700"
+                <div className={cn("flex gap-2", hasShortage ? "flex-row-reverse" : "flex-col")}>
+                  <button
+                    onClick={handleConfirmAction}
+                    className={cn(
+                      "w-full py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest text-white transition-all shadow-sm cursor-pointer",
+                      confirmAction.type === "confirm"
+                        ? "bg-green-600 hover:bg-green-700"
+                        : confirmAction.type === "complete"
+                          ? "bg-emerald-600 hover:bg-emerald-700"
+                          : confirmAction.type === "verify_final_payment"
+                            ? "bg-blue-600 hover:bg-blue-700"
+                            : confirmAction.type === "cancel"
+                              ? "bg-orange-600 hover:bg-orange-700"
+                              : confirmAction.type === "archive"
+                                ? "bg-gray-600 hover:bg-gray-700"
+                                : "bg-blue-600 hover:bg-blue-700",
+                    )}
+                  >
+                    Yes,{" "}
+                    {confirmAction.type === "create"
+                      ? "Create"
                       : confirmAction.type === "complete"
-                        ? "bg-emerald-600 hover:bg-emerald-700"
+                        ? "Complete Event"
                         : confirmAction.type === "verify_final_payment"
-                          ? "bg-blue-600 hover:bg-blue-700"
-                          : confirmAction.type === "cancel"
-                            ? "bg-orange-600 hover:bg-orange-700"
-                            : confirmAction.type === "archive"
-                              ? "bg-gray-600 hover:bg-gray-700"
-                              : "bg-blue-600 hover:bg-blue-700",
-                  )}
-                >
-                  Yes,{" "}
-                  {confirmAction.type === "create"
-                    ? "Create"
-                    : confirmAction.type === "complete"
-                      ? "Complete & Return Supplies"
-                      : confirmAction.type === "verify_final_payment"
-                        ? "Confirm Final Payment"
-                        : confirmAction.type}
-                </button>
-                <button
-                  onClick={() => setConfirmAction(null)}
-                  className="w-full py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest text-natural-text-light border border-natural-border hover:bg-natural-bg transition-all"
-                >
-                  Cancel
-                </button>
+                          ? "Confirm Final Payment"
+                          : confirmAction.type}
+                  </button>
+                  <button
+                    onClick={() => setConfirmAction(null)}
+                    className="w-full py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest text-natural-text-light border border-natural-border hover:bg-natural-bg transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Proof of Payment Full Inspection Modal */}
       {viewingReceipt && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-70 p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden flex flex-col max-h-[92vh]">
+          <div className="bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden flex flex-col max-h-[92vh]">
             <div className="p-4 border-b border-natural-border flex items-center justify-between bg-natural-bg/30">
               <div className="flex items-center gap-2">
                 <Receipt className="w-5 h-5 text-natural-accent" />
@@ -3289,7 +3738,7 @@ export function BookingPage() {
                   <h4 className="text-sm font-bold text-natural-text-main">
                     {viewingReceipt.title || "Proof of Payment Receipt"}
                   </h4>
-                  <p className="text-[10px] text-natural-text-light">
+                  <p className="text-xs text-natural-text-light">
                     Submitted by {viewingReceipt.bookingName}
                   </p>
                 </div>
@@ -3306,18 +3755,18 @@ export function BookingPage() {
               <img
                 src={viewingReceipt.url}
                 alt="Proof of Payment"
-                className="max-h-[55vh] w-auto max-w-full rounded-lg shadow-md object-contain border border-natural-border bg-white"
+                className="max-h-[55vh] w-auto max-w-full rounded-lg shadow-md object-contain border border-natural-border bg-white dark:bg-natural-bg/40"
               />
             </div>
 
-            <div className="p-4 bg-white border-t border-natural-border flex items-center justify-between gap-3">
+            <div className="p-4 bg-white dark:bg-natural-card border-t border-natural-border">
               <div className="text-left">
                 {typeof viewingReceipt.amount === "number" && (
-                  <p className="text-xs font-bold text-natural-accent">
+                  <p className="text-sm font-bold text-natural-accent">
                     ₱{viewingReceipt.amount.toLocaleString()} {viewingReceipt.title ? `(${viewingReceipt.title})` : ""}
                   </p>
                 )}
-                <p className="text-[10px] text-natural-text-light">
+                <p className="text-xs text-natural-text-light">
                   Method:{" "}
                   <span className="font-semibold text-natural-text-main">
                     {viewingReceipt.method || "N/A"}
@@ -3333,13 +3782,6 @@ export function BookingPage() {
                   )}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setViewingReceipt(null)}
-                className="px-5 py-2 bg-natural-accent text-white rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-natural-accent/90 cursor-pointer shrink-0"
-              >
-                Close Slip
-              </button>
             </div>
           </div>
         </div>

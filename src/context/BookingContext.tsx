@@ -67,7 +67,7 @@ interface BookingContextType {
   refreshBookings: (silent?: boolean) => Promise<void>;
 }
 
-const BookingContext = createContext<BookingContextType | undefined>(undefined);
+export const BookingContext = createContext<BookingContextType | undefined>(undefined);
 
 const initialBookings: Booking[] = [];
 
@@ -76,45 +76,75 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch bookings on mount and set up real-time listener and polling
+  // Fetch bookings on mount and set up real-time listener
   useEffect(() => {
     refreshBookings();
-
-    // Fallback polling: Refresh bookings silently every 10 seconds
-    const intervalId = setInterval(() => refreshBookings(true), 10000);
 
     // Cross-component event listener for immediate synchronization
     const handleSync = () => refreshBookings(true);
     window.addEventListener("bookingsUpdated", handleSync);
 
-    // Subscribe to real-time changes on the bookings table
+    // Refresh immediately when the admin returns to the tab/window
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") refreshBookings(true);
+    };
+    window.addEventListener("focus", handleSync);
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    // Subscribe to real-time changes on the bookings table.
+    // A unique channel name per mount prevents the React StrictMode
+    // unmount/remount race where a re-created channel with the same topic
+    // gets torn down by the pending removeChannel() and silently stops
+    // receiving events.
+    let realtimeHealthy = false;
     const channel = supabase
-      .channel("bookings-channel-context")
+      .channel(`bookings-channel-context-${Date.now()}-${Math.random().toString(36).slice(2)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "bookings" },
         (payload: any) => {
-          console.log("Booking change detected in context:", payload);
           if (payload.eventType === "DELETE" && payload.old?.id) {
             setBookings((prev) => prev.filter((b) => String(b.id) !== String(payload.old.id)));
           }
-          refreshBookings(true); // Refresh data silently when any booking changes
+          refreshBookings(true); // Refresh data silently only when a booking actually changes
         },
       )
-      .subscribe();
+      .subscribe((status: string, err?: Error) => {
+        realtimeHealthy = status === "SUBSCRIBED";
+        if (status === "SUBSCRIBED") {
+          // Catch anything that changed while we were connecting
+          refreshBookings(true);
+        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.warn(`[Bookings] Realtime ${status}. Falling back to polling.`, err);
+        }
+      });
+
+    // Fallback polling: fast when realtime is down, slow safety net otherwise
+    let tick = 0;
+    const pollId = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      tick++;
+      if (!realtimeHealthy || tick % 6 === 0) refreshBookings(true);
+    }, 5000);
 
     // Cleanup subscription on unmount
     return () => {
-      clearInterval(intervalId);
       window.removeEventListener("bookingsUpdated", handleSync);
+      window.removeEventListener("focus", handleSync);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.clearInterval(pollId);
       supabase.removeChannel(channel);
     };
   }, []);
 
+  // Guards against out-of-order responses overwriting newer data
+  const latestRequestRef = React.useRef(0);
+
   /**
-   * Fetches all active bookings from Supabase
+   * Fetches all active bookings from Supabase with lightweight joined fields
    */
   const refreshBookings = async (silent = false) => {
+    const requestId = ++latestRequestRef.current;
     try {
       if (!silent) setIsLoading(true);
       setError(null);
@@ -129,6 +159,9 @@ export function BookingProvider({ children }: { children: ReactNode }) {
         `,
         )
         .order("created_at", { ascending: false });
+
+      // A newer refresh has been started; discard this stale result
+      if (requestId !== latestRequestRef.current) return;
 
       if (bError) {
         setError(`Error fetching bookings: ${bError.message}`);
