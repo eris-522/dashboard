@@ -238,7 +238,7 @@ export function BookingPage() {
 
   useEffect(() => {
     if (selectedBooking && selectedBooking.status === "Confirmed") {
-      reconcileCompletedEvents([selectedBooking]);
+      reconcileCompletedEvents();
     }
   }, [
     selectedBooking?.id,
