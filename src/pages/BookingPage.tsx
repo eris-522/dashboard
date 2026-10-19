@@ -1328,7 +1328,7 @@ export function BookingPage() {
                                 )}
                               >
                                 {isVerified
-                                  ? "Deposit Verified"
+                                  ? "Deposit Paid"
                                   : payment.receipt_url
                                     ? "Review Deposit"
                                     : "Unpaid"}
@@ -2255,7 +2255,7 @@ export function BookingPage() {
                           )}
                         >
                           {isDepositVerified
-                            ? "Deposit Verified"
+                            ? "Deposit Paid"
                             : payment.receipt_url
                               ? "Pending Review"
                               : "Unpaid"}
@@ -3307,7 +3307,7 @@ export function BookingPage() {
                               Date Lock Deposit
                             </span>
                             <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
-                              Deposit Verified
+                              Deposit Paid
                             </span>
                           </div>
 

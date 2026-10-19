@@ -789,14 +789,11 @@ export function InventoryPage() {
           </div>
           <div>
             <p className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
-              To Outsource (Rent)
+              Outsourced (Rent)
             </p>
             <h4 className="text-2xl font-bold font-serif text-orange-700 dark:text-orange-400">
               {stats.totalOutsourced.toLocaleString()} Units
             </h4>
-            <p className="text-[10px] text-natural-text-light font-medium">
-              Not counted in warehouse stock
-            </p>
           </div>
         </div>
       </div>
