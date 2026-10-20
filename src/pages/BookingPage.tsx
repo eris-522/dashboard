@@ -1299,11 +1299,11 @@ export function BookingPage() {
                       {(() => {
                         const payment = getBookingPayment(booking);
                         const estBudget = calculateBudget(booking);
-                        const is50Plan = payment.payment_scheme === "Standard 50%";
+                        const is50Percent = payment.payment_scheme === "Standard 50%";
                         const downpaymentDue =
                           payment.downpayment_amount > 0
                             ? payment.downpayment_amount
-                            : Math.round(estBudget * (is50Plan ? 0.5 : 0.2));
+                            : Math.round(estBudget * (is50Percent ? 0.5 : 0.2));
                         const isVerified =
                           payment.payment_status === "Verified" ||
                           (booking.status || "Pending") === "Confirmed";
@@ -1359,8 +1359,8 @@ export function BookingPage() {
                               </button>
                             )}
 
-                            {/* 15-Day Final Balance Settlement Row */}
-                            {payment.final_balance_amount > 0 && (
+                            {/* 15-Day Final Balance Settlement Row (Only for Standard 50% Scheme) */}
+                            {is50Percent && payment.final_balance_amount > 0 && (
                               <div className="pt-2 mt-1 border-t border-natural-border/50 flex flex-col gap-1.5">
                                 <div className="flex items-center justify-between gap-1.5 text-xs">
                                   <span className="text-natural-text-light font-medium">15-Day Balance:</span>
@@ -2471,8 +2471,9 @@ export function BookingPage() {
                       </div>
                     )}
 
-                    {/* Section 3: 15-Day Final Balance Settlement Tracker & Verification */}
-                    <div className="space-y-3 bg-natural-card p-3.5 rounded-xl border border-natural-border shadow-2xs">
+                    {/* Section 3: 15-Day Final Balance Settlement Tracker & Verification (Only for Standard 50% Scheme) */}
+                    {is50Percent && (
+                      <div className="space-y-3 bg-natural-card p-3.5 rounded-xl border border-natural-border shadow-2xs">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
                         <div>
                           <p className="text-xs font-bold text-natural-text-main flex items-center gap-1.5 uppercase tracking-wider">
@@ -2645,6 +2646,7 @@ export function BookingPage() {
                         </div>
                       </div>
                     </div>
+                    )}
                   </div>
                 );
               })()}
@@ -3102,10 +3104,10 @@ export function BookingPage() {
         const hasShortage = confirmCheck ? !confirmCheck.isAvailable : false;
 
         return (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-60 p-4">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-60 p-4 overflow-y-auto">
             <div
               className={cn(
-                "bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl w-full animate-in zoom-in-95 duration-200",
+                "bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl w-full max-h-[92vh] overflow-y-auto animate-in zoom-in-95 duration-200 my-auto relative",
                 hasShortage
                   ? "max-w-2xl"
                   : confirmAction.type === "complete"
@@ -3116,6 +3118,15 @@ export function BookingPage() {
                       : "max-w-sm",
               )}
             >
+              <button
+                type="button"
+                onClick={() => setConfirmAction(null)}
+                className="absolute top-4 right-4 p-1 rounded-lg text-natural-text-light hover:text-natural-text-main hover:bg-natural-bg/80 transition-colors cursor-pointer z-10"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
               <div className={cn("text-center", hasShortage ? "p-5" : "p-6")}>
                 <div
                   className={cn(
@@ -3298,7 +3309,7 @@ export function BookingPage() {
                       </div>
 
                       {/* Payment Records with Inspect Slips */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div className={cn("grid gap-2.5", is50Percent ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1")}>
                         {/* Date Lock Deposit Card */}
                         <div className="p-3 bg-natural-card border border-natural-border/70 rounded-xl space-y-2.5 shadow-2xs">
                           <div className="flex items-center justify-between">
@@ -3383,8 +3394,9 @@ export function BookingPage() {
                           )}
                         </div>
 
-                        {/* Final Balance Card */}
-                        <div className="p-3 bg-natural-card border border-natural-border/70 rounded-xl space-y-2.5 shadow-2xs">
+                        {/* Final Balance Card (Only for Standard 50% Scheme) */}
+                        {is50Percent && (
+                          <div className="p-3 bg-natural-card border border-natural-border/70 rounded-xl space-y-2.5 shadow-2xs">
                           <div className="flex items-center justify-between">
                             <span className="text-[11px] font-bold text-natural-text-main uppercase tracking-wider flex items-center gap-1.5">
                               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
@@ -3466,6 +3478,7 @@ export function BookingPage() {
                             </div>
                           )}
                         </div>
+                        )}
                       </div>
 
                       {/* Milestone Installments if applicable */}
