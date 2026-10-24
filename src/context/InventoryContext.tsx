@@ -1106,9 +1106,13 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
 
     isReconcilingRef.current = true;
     try {
-      // Always fetch authoritative bookings and deduction records from Supabase
+      // Use provided bookings list if available to avoid redundant egress, otherwise fetch minimal required columns
+      const fetchBookingsPromise = (_bookingsList && _bookingsList.length > 0)
+        ? Promise.resolve({ data: _bookingsList, error: null })
+        : supabase.from('bookings').select('id, status, guest_count, additional_pax, customerName, packages(name, inclusions), profiles(name, full_name)');
+
       const [bookingsRes, deductionsRes, invRes] = await Promise.all([
-        supabase.from('bookings').select('*, packages(*), profiles(*)'),
+        fetchBookingsPromise,
         supabase.from('inventory_deductions').select('*').order('deducted_at', { ascending: false }),
         supabase.from('inventory').select('*').order('name', { ascending: true })
       ]);

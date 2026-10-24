@@ -91,7 +91,7 @@ export function PackagePage() {
     fetchInclusions();
 
     const channel = supabase
-      .channel("packages-channel-sync")
+      .channel(`packages-sync-${Date.now()}-${Math.random().toString(36).slice(2)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "packages" },

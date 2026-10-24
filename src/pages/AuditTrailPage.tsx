@@ -34,7 +34,7 @@ export function AuditTrailPage() {
     fetchLogs(0, false);
 
     const channel = supabase
-      .channel("audit-logs-channel")
+      .channel(`audit-logs-${Date.now()}-${Math.random().toString(36).slice(2)}`)
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "audit_logs" },

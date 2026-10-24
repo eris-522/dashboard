@@ -255,7 +255,7 @@ export function BookingPage() {
 
     // Subscribe to real-time changes on the bookings table
     const channel = supabase
-      .channel("bookings-channel")
+      .channel(`bookings-page-${Date.now()}-${Math.random().toString(36).slice(2)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "bookings" },
@@ -317,7 +317,6 @@ export function BookingPage() {
           reconcileCompletedEvents(bData);
         }
       }
-      window.dispatchEvent(new CustomEvent("bookingsUpdated"));
 
       const [pRes, pkgRes, menuRes, incRes] = await Promise.all([
         supabase
@@ -2294,6 +2293,9 @@ export function BookingPage() {
                                   src={payment.receipt_url}
                                   alt="Deposit Slip"
                                   className="w-10 h-10 object-cover rounded-md border border-natural-border cursor-pointer hover:opacity-80 transition-opacity"
+                                  onError={(e) => {
+                                    (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1554415707-9e4c07d3882d?auto=format&fit=crop&q=80&w=800";
+                                  }}
                                   onClick={() =>
                                     setViewingReceipt({
                                       url: payment.receipt_url,
@@ -2537,6 +2539,9 @@ export function BookingPage() {
                                   src={payment.final_balance_receipt}
                                   alt="Final Balance Slip"
                                   className="w-10 h-10 object-cover rounded-md border border-natural-border cursor-pointer hover:opacity-80 transition-opacity"
+                                  onError={(e) => {
+                                    (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1554415707-9e4c07d3882d?auto=format&fit=crop&q=80&w=800";
+                                  }}
                                   onClick={() =>
                                     setViewingReceipt({
                                       url: payment.final_balance_receipt,
@@ -3769,6 +3774,9 @@ export function BookingPage() {
                 src={viewingReceipt.url}
                 alt="Proof of Payment"
                 className="max-h-[55vh] w-auto max-w-full rounded-lg shadow-md object-contain border border-natural-border bg-white dark:bg-natural-bg/40"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1554415707-9e4c07d3882d?auto=format&fit=crop&q=80&w=800";
+                }}
               />
             </div>
 

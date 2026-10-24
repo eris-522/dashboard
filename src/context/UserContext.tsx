@@ -97,7 +97,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
     // Subscribe to real-time changes on the profiles table so Dashboard metrics stay synced
     const channel = supabase
-      .channel("users-channel-context")
+      .channel(`users-ctx-${Date.now()}-${Math.random().toString(36).slice(2)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "profiles" },

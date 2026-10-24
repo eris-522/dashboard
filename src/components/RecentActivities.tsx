@@ -46,7 +46,7 @@ export function RecentActivities({ onViewLogs }: { onViewLogs?: () => void }) {
 
     // Set up real-time listener for audit log additions
     const channel = supabase
-      .channel("recent-activities-channel")
+      .channel(`recent-activities-${Date.now()}-${Math.random().toString(36).slice(2)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "audit_logs" },

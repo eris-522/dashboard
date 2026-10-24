@@ -94,6 +94,7 @@ async function tryUploadToSupabase(file: File): Promise<string | null> {
 
     for (const bucket of ["cms", "public", "images", "receipts"]) {
       const { data, error } = await supabase.storage.from(bucket).upload(filePath, file, {
+        contentType: file.type || "image/jpeg",
         cacheControl: "31536000",
         upsert: true,
       });

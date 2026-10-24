@@ -68,7 +68,7 @@ export function MenuPage() {
     fetchMenuItems();
 
     const channel = supabase
-      .channel("admin-menu-items")
+      .channel(`admin-menu-${Date.now()}-${Math.random().toString(36).slice(2)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "menu_items" },
@@ -337,6 +337,9 @@ export function MenuPage() {
             src={item.image_url}
             alt={item.name}
             className="w-12 h-12 rounded-xl object-cover border border-natural-border"
+            onError={(e) => {
+              (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1544025162-d76694265947?auto=format&fit=crop&q=80&w=600";
+            }}
           />
         ) : (
           <div className="p-3 bg-natural-bg border border-natural-border rounded-xl">
