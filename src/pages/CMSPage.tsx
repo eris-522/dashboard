@@ -48,6 +48,7 @@ import {
   DEFAULT_CMS_DATA,
   fetchCMSContent,
   saveCMSSection,
+  mergeSectionWithDefaults,
   PillarItem,
   TestimonialItem,
   FAQItem,
@@ -250,31 +251,57 @@ export function CMSPage() {
         tag?: string;
         image?: string;
         image_url?: string;
+        defaultImage: string;
       }
     >();
 
     // 1. Default presets
-    (DEFAULT_CMS_DATA.packages.items || []).forEach((item) => {
-      map.set(item.name.toLowerCase(), { ...item });
+    (DEFAULT_CMS_DATA.packages.items || []).forEach((item, idx) => {
+      const defImg =
+        DEFAULT_CMS_DATA.packages.packageImages[item.name] ||
+        item.image ||
+        PRESET_PACKAGE_IMAGES[idx % PRESET_PACKAGE_IMAGES.length].url;
+      map.set(item.name.toLowerCase(), {
+        ...item,
+        image: defImg,
+        defaultImage: defImg,
+      });
     });
 
     // 2. CMS configured items
-    (packagesForm.items || []).forEach((item) => {
+    (packagesForm.items || []).forEach((item, idx) => {
       const key = item.name.toLowerCase();
       const existing = map.get(key);
-      map.set(key, { ...existing, ...item });
+      const defImg =
+        existing?.defaultImage ||
+        DEFAULT_CMS_DATA.packages.packageImages[item.name] ||
+        PRESET_PACKAGE_IMAGES[idx % PRESET_PACKAGE_IMAGES.length].url;
+      const resolvedImg =
+        item.image && item.image.trim() !== ""
+          ? item.image
+          : existing?.image || defImg;
+      map.set(key, {
+        ...existing,
+        ...item,
+        image: resolvedImg,
+        defaultImage: defImg,
+      });
     });
 
     // 3. Database packages from Supabase
-    dbPackages.forEach((pkg) => {
+    dbPackages.forEach((pkg, idx) => {
       const key = pkg.name.toLowerCase();
       const existing = map.get(key);
+      const defImg =
+        existing?.defaultImage ||
+        DEFAULT_CMS_DATA.packages.packageImages[pkg.name] ||
+        PRESET_PACKAGE_IMAGES[idx % PRESET_PACKAGE_IMAGES.length].url;
       const customImg =
         packagesForm.packageImages?.[pkg.id] ||
         packagesForm.packageImages?.[pkg.name] ||
         existing?.image ||
         pkg.image_url ||
-        "";
+        defImg;
       map.set(key, {
         id: pkg.id,
         name: pkg.name,
@@ -282,6 +309,8 @@ export function CMSPage() {
         pax: pkg.pax || existing?.pax,
         tag: pkg.tag || existing?.tag,
         image: customImg,
+        image_url: pkg.image_url,
+        defaultImage: defImg,
       });
     });
 
@@ -299,31 +328,57 @@ export function CMSPage() {
         description?: string;
         image?: string;
         image_url?: string;
+        defaultImage: string;
       }
     >();
 
     // 1. Default presets
-    (DEFAULT_CMS_DATA.menu.items || []).forEach((item) => {
-      map.set(item.name.toLowerCase(), { ...item });
+    (DEFAULT_CMS_DATA.menu.items || []).forEach((item, idx) => {
+      const defImg =
+        DEFAULT_CMS_DATA.menu.menuImages[item.name] ||
+        item.image ||
+        PRESET_MENU_IMAGES[idx % PRESET_MENU_IMAGES.length].url;
+      map.set(item.name.toLowerCase(), {
+        ...item,
+        image: defImg,
+        defaultImage: defImg,
+      });
     });
 
     // 2. CMS configured items
-    (menuForm.items || []).forEach((item) => {
+    (menuForm.items || []).forEach((item, idx) => {
       const key = item.name.toLowerCase();
       const existing = map.get(key);
-      map.set(key, { ...existing, ...item });
+      const defImg =
+        existing?.defaultImage ||
+        DEFAULT_CMS_DATA.menu.menuImages[item.name] ||
+        PRESET_MENU_IMAGES[idx % PRESET_MENU_IMAGES.length].url;
+      const resolvedImg =
+        item.image && item.image.trim() !== ""
+          ? item.image
+          : existing?.image || defImg;
+      map.set(key, {
+        ...existing,
+        ...item,
+        image: resolvedImg,
+        defaultImage: defImg,
+      });
     });
 
     // 3. Database menu items from Supabase
-    dbMenuItems.forEach((item) => {
+    dbMenuItems.forEach((item, idx) => {
       const key = item.name.toLowerCase();
       const existing = map.get(key);
+      const defImg =
+        existing?.defaultImage ||
+        DEFAULT_CMS_DATA.menu.menuImages[item.name] ||
+        PRESET_MENU_IMAGES[idx % PRESET_MENU_IMAGES.length].url;
       const customImg =
         menuForm.menuImages?.[item.id] ||
         menuForm.menuImages?.[item.name] ||
         existing?.image ||
         item.image_url ||
-        "";
+        defImg;
       map.set(key, {
         id: item.id,
         name: item.name,
@@ -333,6 +388,7 @@ export function CMSPage() {
           item.description || existing?.description || item.sub_category || "",
         image: customImg,
         image_url: item.image_url,
+        defaultImage: defImg,
       });
     });
 
@@ -357,14 +413,24 @@ export function CMSPage() {
   const handleUpdatePackageImage = (
     pkgId: string,
     pkgName: string,
-    newUrl: string
+    newUrl: string,
+    defaultImg = ""
   ) => {
+    const resolvedUrl =
+      newUrl.trim() ||
+      defaultImg ||
+      DEFAULT_CMS_DATA.packages.packageImages[pkgName] ||
+      "";
+
     setPackagesForm((prev) => {
-      const updatedImages = {
-        ...(prev.packageImages || {}),
-        [pkgId]: newUrl,
-        [pkgName]: newUrl,
-      };
+      const updatedImages = { ...(prev.packageImages || {}) };
+      if (resolvedUrl) {
+        if (pkgId) updatedImages[pkgId] = resolvedUrl;
+        updatedImages[pkgName] = resolvedUrl;
+      } else {
+        delete updatedImages[pkgId];
+        delete updatedImages[pkgName];
+      }
 
       const existingIndex = (prev.items || []).findIndex(
         (item) =>
@@ -372,17 +438,17 @@ export function CMSPage() {
           item.name.toLowerCase() === pkgName.toLowerCase()
       );
 
-      let updatedItems = [...(prev.items || [])];
+      const updatedItems = [...(prev.items || [])];
       if (existingIndex >= 0) {
         updatedItems[existingIndex] = {
           ...updatedItems[existingIndex],
-          image: newUrl,
+          image: resolvedUrl,
         };
-      } else {
+      } else if (resolvedUrl) {
         updatedItems.push({
           id: pkgId || `pkg-${Date.now()}`,
           name: pkgName,
-          image: newUrl,
+          image: resolvedUrl,
         });
       }
 
@@ -397,14 +463,22 @@ export function CMSPage() {
   const handleUpdateMenuImage = (
     itemId: string,
     itemName: string,
-    newUrl: string
+    newUrl: string,
+    defaultImg = ""
   ) => {
+    const presetDefault = DEFAULT_CMS_DATA.menu.menuImages[itemName] || defaultImg || "";
+    const isClearing = !newUrl.trim() || newUrl === presetDefault;
+    const resolvedUrl = newUrl.trim() || presetDefault;
+
     setMenuForm((prev) => {
-      const updatedImages = {
-        ...(prev.menuImages || {}),
-        [itemId]: newUrl,
-        [itemName]: newUrl,
-      };
+      const updatedImages = { ...(prev.menuImages || {}) };
+      if (isClearing && !DEFAULT_CMS_DATA.menu.menuImages[itemName]) {
+        delete updatedImages[itemId];
+        delete updatedImages[itemName];
+      } else if (resolvedUrl) {
+        if (itemId) updatedImages[itemId] = resolvedUrl;
+        updatedImages[itemName] = resolvedUrl;
+      }
 
       const existingIndex = (prev.items || []).findIndex(
         (item) =>
@@ -414,16 +488,20 @@ export function CMSPage() {
 
       let updatedItems = [...(prev.items || [])];
       if (existingIndex >= 0) {
-        updatedItems[existingIndex] = {
-          ...updatedItems[existingIndex],
-          image: newUrl,
-        };
-      } else {
+        if (isClearing && !DEFAULT_CMS_DATA.menu.menuImages[itemName]) {
+          updatedItems = updatedItems.filter((_, idx) => idx !== existingIndex);
+        } else {
+          updatedItems[existingIndex] = {
+            ...updatedItems[existingIndex],
+            image: resolvedUrl,
+          };
+        }
+      } else if (resolvedUrl && !isClearing) {
         updatedItems.push({
           id: itemId || `menu-${Date.now()}`,
           name: itemName,
           category: "Main Course",
-          image: newUrl,
+          image: resolvedUrl,
         });
       }
 
@@ -435,6 +513,41 @@ export function CMSPage() {
     });
   };
 
+  const handleEditorBlur = (e: React.FocusEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    if (
+      (target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement) &&
+      target.type !== "checkbox" &&
+      target.type !== "file" &&
+      target.value.trim() === ""
+    ) {
+      // Restore default value immediately when a text input is cleared and loses focus
+      if (activeTab === "hero") {
+        setHeroForm((prev) => mergeSectionWithDefaults("hero", prev));
+        setAnnouncementForm((prev) =>
+          mergeSectionWithDefaults("announcement", prev)
+        );
+      } else if (activeTab === "packages") {
+        setPackagesForm((prev) => mergeSectionWithDefaults("packages", prev));
+      } else if (activeTab === "menu") {
+        setMenuForm((prev) => mergeSectionWithDefaults("menu", prev));
+      } else if (activeTab === "about") {
+        setAboutForm((prev) => mergeSectionWithDefaults("about", prev));
+      } else if (activeTab === "contact") {
+        setContactForm((prev) => mergeSectionWithDefaults("contact", prev));
+      } else if (activeTab === "testimonials") {
+        setTestimonialsForm((prev) =>
+          mergeSectionWithDefaults("testimonials", prev)
+        );
+      } else if (activeTab === "process") {
+        setProcessForm((prev) => mergeSectionWithDefaults("process", prev));
+      } else if (activeTab === "faqs") {
+        setFaqsForm((prev) => mergeSectionWithDefaults("faqs", prev));
+      }
+    }
+  };
+
   const handleSaveCurrentSection = async () => {
     setIsSaving(true);
     setSaveStatus({ type: "", text: "" });
@@ -442,62 +555,98 @@ export function CMSPage() {
 
     try {
       if (activeTab === "hero") {
-        await saveCMSSection("hero", heroForm, userName);
-        await saveCMSSection("announcement", announcementForm, userName);
+        const heroRes = await saveCMSSection("hero", heroForm, userName);
+        const annRes = await saveCMSSection(
+          "announcement",
+          announcementForm,
+          userName
+        );
+        setHeroForm(heroRes.data);
+        setAnnouncementForm(annRes.data);
         setCmsData((prev) => ({
           ...prev,
-          hero: heroForm,
-          announcement: announcementForm,
+          hero: heroRes.data,
+          announcement: annRes.data,
         }));
       } else if (activeTab === "packages") {
-        await saveCMSSection("packages", packagesForm, userName);
+        const pkgRes = await saveCMSSection("packages", packagesForm, userName);
+        setPackagesForm(pkgRes.data);
         try {
-          if (packagesForm.packageImages) {
-            for (const [key, imgUrl] of Object.entries(packagesForm.packageImages)) {
-              if (imgUrl) {
-                await supabase
-                  .from("packages")
-                  .update({ image_url: imgUrl })
-                  .or(`id.eq.${key},name.eq.${key}`);
-              }
+          const updatedDbPkgs = [...dbPackages];
+          for (let i = 0; i < updatedDbPkgs.length; i++) {
+            const pkg = updatedDbPkgs[i];
+            const targetImg =
+              pkgRes.data.packageImages?.[pkg.id] ||
+              pkgRes.data.packageImages?.[pkg.name] ||
+              DEFAULT_CMS_DATA.packages.packageImages[pkg.name] ||
+              pkg.image_url ||
+              null;
+            if (pkg.id && targetImg !== pkg.image_url) {
+              await supabase
+                .from("packages")
+                .update({ image_url: targetImg })
+                .eq("id", pkg.id);
+              updatedDbPkgs[i] = { ...pkg, image_url: targetImg };
             }
           }
+          setDbPackages(updatedDbPkgs);
         } catch (e) {
           console.warn("Could not sync image_url directly to packages table:", e);
         }
-        setCmsData((prev) => ({ ...prev, packages: packagesForm }));
+        setCmsData((prev) => ({ ...prev, packages: pkgRes.data }));
       } else if (activeTab === "menu") {
-        await saveCMSSection("menu", menuForm, userName);
+        const menuRes = await saveCMSSection("menu", menuForm, userName);
+        setMenuForm(menuRes.data);
         try {
-          if (menuForm.menuImages) {
-            for (const [key, imgUrl] of Object.entries(menuForm.menuImages)) {
-              if (imgUrl) {
-                await supabase
-                  .from("menu_items")
-                  .update({ image_url: imgUrl })
-                  .or(`id.eq.${key},name.eq.${key}`);
-              }
+          const updatedDbDishes = [...dbMenuItems];
+          for (let i = 0; i < updatedDbDishes.length; i++) {
+            const dish = updatedDbDishes[i];
+            const customImg =
+              menuRes.data.menuImages?.[dish.id] ||
+              menuRes.data.menuImages?.[dish.name] ||
+              DEFAULT_CMS_DATA.menu.menuImages[dish.name] ||
+              null;
+            if (dish.id && customImg !== dish.image_url) {
+              await supabase
+                .from("menu_items")
+                .update({ image_url: customImg })
+                .eq("id", dish.id);
+              updatedDbDishes[i] = { ...dish, image_url: customImg };
             }
           }
+          setDbMenuItems(updatedDbDishes);
         } catch (e) {
           console.warn("Could not sync image_url directly to menu_items table:", e);
         }
-        setCmsData((prev) => ({ ...prev, menu: menuForm }));
+        setCmsData((prev) => ({ ...prev, menu: menuRes.data }));
       } else if (activeTab === "about") {
-        await saveCMSSection("about", aboutForm, userName);
-        setCmsData((prev) => ({ ...prev, about: aboutForm }));
+        const aboutRes = await saveCMSSection("about", aboutForm, userName);
+        setAboutForm(aboutRes.data);
+        setCmsData((prev) => ({ ...prev, about: aboutRes.data }));
       } else if (activeTab === "contact") {
-        await saveCMSSection("contact", contactForm, userName);
-        setCmsData((prev) => ({ ...prev, contact: contactForm }));
+        const contactRes = await saveCMSSection(
+          "contact",
+          contactForm,
+          userName
+        );
+        setContactForm(contactRes.data);
+        setCmsData((prev) => ({ ...prev, contact: contactRes.data }));
       } else if (activeTab === "testimonials") {
-        await saveCMSSection("testimonials", testimonialsForm, userName);
-        setCmsData((prev) => ({ ...prev, testimonials: testimonialsForm }));
+        const testRes = await saveCMSSection(
+          "testimonials",
+          testimonialsForm,
+          userName
+        );
+        setTestimonialsForm(testRes.data);
+        setCmsData((prev) => ({ ...prev, testimonials: testRes.data }));
       } else if (activeTab === "process") {
-        await saveCMSSection("process", processForm, userName);
-        setCmsData((prev) => ({ ...prev, process: processForm }));
+        const procRes = await saveCMSSection("process", processForm, userName);
+        setProcessForm(procRes.data);
+        setCmsData((prev) => ({ ...prev, process: procRes.data }));
       } else if (activeTab === "faqs") {
-        await saveCMSSection("faqs", faqsForm, userName);
-        setCmsData((prev) => ({ ...prev, faqs: faqsForm }));
+        const faqRes = await saveCMSSection("faqs", faqsForm, userName);
+        setFaqsForm(faqRes.data);
+        setCmsData((prev) => ({ ...prev, faqs: faqRes.data }));
       }
 
       setSaveStatus({
@@ -517,30 +666,105 @@ export function CMSPage() {
   };
 
   const handleResetCurrentSection = async () => {
-    if (activeTab === "hero") {
-      setHeroForm(DEFAULT_CMS_DATA.hero);
-      setAnnouncementForm(DEFAULT_CMS_DATA.announcement);
-    } else if (activeTab === "packages") {
-      setPackagesForm(DEFAULT_CMS_DATA.packages);
-    } else if (activeTab === "menu") {
-      setMenuForm(DEFAULT_CMS_DATA.menu);
-    } else if (activeTab === "about") {
-      setAboutForm(DEFAULT_CMS_DATA.about);
-    } else if (activeTab === "contact") {
-      setContactForm(DEFAULT_CMS_DATA.contact);
-    } else if (activeTab === "testimonials") {
-      setTestimonialsForm(DEFAULT_CMS_DATA.testimonials);
-    } else if (activeTab === "process") {
-      setProcessForm(DEFAULT_CMS_DATA.process);
-    } else if (activeTab === "faqs") {
-      setFaqsForm(DEFAULT_CMS_DATA.faqs);
+    setIsSaving(true);
+    const userName = currentUser?.name || "Admin User";
+    try {
+      if (activeTab === "hero") {
+        const defHero = JSON.parse(JSON.stringify(DEFAULT_CMS_DATA.hero));
+        const defAnn = JSON.parse(
+          JSON.stringify(DEFAULT_CMS_DATA.announcement)
+        );
+        await saveCMSSection("hero", defHero, userName);
+        await saveCMSSection("announcement", defAnn, userName);
+        setHeroForm(defHero);
+        setAnnouncementForm(defAnn);
+        setCmsData((prev) => ({ ...prev, hero: defHero, announcement: defAnn }));
+      } else if (activeTab === "packages") {
+        const defPkgs = JSON.parse(JSON.stringify(DEFAULT_CMS_DATA.packages));
+        await saveCMSSection("packages", defPkgs, userName);
+        setPackagesForm(defPkgs);
+        try {
+          const updatedDbPkgs = [...dbPackages];
+          for (let i = 0; i < updatedDbPkgs.length; i++) {
+            const pkg = updatedDbPkgs[i];
+            const defImg =
+              DEFAULT_CMS_DATA.packages.packageImages[pkg.name] ||
+              PRESET_PACKAGE_IMAGES[i % PRESET_PACKAGE_IMAGES.length].url;
+            if (pkg.id) {
+              await supabase
+                .from("packages")
+                .update({ image_url: defImg })
+                .eq("id", pkg.id);
+              updatedDbPkgs[i] = { ...pkg, image_url: defImg };
+            }
+          }
+          setDbPackages(updatedDbPkgs);
+        } catch (e) {}
+        setCmsData((prev) => ({ ...prev, packages: defPkgs }));
+      } else if (activeTab === "menu") {
+        const defMenu = JSON.parse(JSON.stringify(DEFAULT_CMS_DATA.menu));
+        await saveCMSSection("menu", defMenu, userName);
+        setMenuForm(defMenu);
+        try {
+          const updatedDbDishes = [...dbMenuItems];
+          for (let i = 0; i < updatedDbDishes.length; i++) {
+            const dish = updatedDbDishes[i];
+            const defImg =
+              DEFAULT_CMS_DATA.menu.menuImages[dish.name] || null;
+            if (dish.id && dish.image_url !== defImg) {
+              await supabase
+                .from("menu_items")
+                .update({ image_url: defImg })
+                .eq("id", dish.id);
+              updatedDbDishes[i] = { ...dish, image_url: defImg };
+            }
+          }
+          setDbMenuItems(updatedDbDishes);
+        } catch (e) {}
+        setCmsData((prev) => ({ ...prev, menu: defMenu }));
+      } else if (activeTab === "about") {
+        const defAbout = JSON.parse(JSON.stringify(DEFAULT_CMS_DATA.about));
+        await saveCMSSection("about", defAbout, userName);
+        setAboutForm(defAbout);
+        setCmsData((prev) => ({ ...prev, about: defAbout }));
+      } else if (activeTab === "contact") {
+        const defContact = JSON.parse(JSON.stringify(DEFAULT_CMS_DATA.contact));
+        await saveCMSSection("contact", defContact, userName);
+        setContactForm(defContact);
+        setCmsData((prev) => ({ ...prev, contact: defContact }));
+      } else if (activeTab === "testimonials") {
+        const defTest = JSON.parse(
+          JSON.stringify(DEFAULT_CMS_DATA.testimonials)
+        );
+        await saveCMSSection("testimonials", defTest, userName);
+        setTestimonialsForm(defTest);
+        setCmsData((prev) => ({ ...prev, testimonials: defTest }));
+      } else if (activeTab === "process") {
+        const defProc = JSON.parse(JSON.stringify(DEFAULT_CMS_DATA.process));
+        await saveCMSSection("process", defProc, userName);
+        setProcessForm(defProc);
+        setCmsData((prev) => ({ ...prev, process: defProc }));
+      } else if (activeTab === "faqs") {
+        const defFaqs = JSON.parse(JSON.stringify(DEFAULT_CMS_DATA.faqs));
+        await saveCMSSection("faqs", defFaqs, userName);
+        setFaqsForm(defFaqs);
+        setCmsData((prev) => ({ ...prev, faqs: defFaqs }));
+      }
+
+      setShowConfirmModal(false);
+      setSaveStatus({
+        type: "success",
+        text: `${activeTab.toUpperCase()} reset to default presets and published!`,
+      });
+      setTimeout(() => setSaveStatus({ type: "", text: "" }), 3000);
+    } catch (err: any) {
+      setSaveStatus({
+        type: "error",
+        text: err.message || "Failed to reset section.",
+      });
+    } finally {
+      setIsSaving(false);
     }
-    setShowConfirmModal(false);
-    setSaveStatus({
-      type: "success",
-      text: `${activeTab.toUpperCase()} reset to default presets. Click Save to publish.`,
-    });
-    setTimeout(() => setSaveStatus({ type: "", text: "" }), 3000);
   };
 
   const tabs = [
@@ -762,7 +986,7 @@ export function CMSPage() {
         </aside>
 
         {/* Content Editor Panel */}
-        <div className="flex-1 space-y-6">
+        <div className="flex-1 space-y-6" onBlurCapture={handleEditorBlur}>
           {/* ========================================================================= */}
           {/* TAB 1: HERO & ANNOUNCEMENT */}
           {/* ========================================================================= */}
@@ -1006,10 +1230,12 @@ export function CMSPage() {
                     label="Hero Backdrop Photography"
                     sublabel="High-resolution web landscape image recommended (1920x1080)"
                     value={heroForm.backgroundImage}
+                    defaultValue={DEFAULT_CMS_DATA.hero.backgroundImage}
                     onChange={(url) =>
                       setHeroForm({
                         ...heroForm,
-                        backgroundImage: url,
+                        backgroundImage:
+                          url || DEFAULT_CMS_DATA.hero.backgroundImage,
                       })
                     }
                     presets={PRESET_HERO_IMAGES}
@@ -1216,8 +1442,14 @@ export function CMSPage() {
                           label={`Cover Photo for "${pkg.name}"`}
                           sublabel="Upload a photo from your computer, drag & drop, or paste an image link."
                           value={currentImg}
+                          defaultValue={pkg.defaultImage}
                           onChange={(url) =>
-                            handleUpdatePackageImage(pkg.id, pkg.name, url)
+                            handleUpdatePackageImage(
+                              pkg.id,
+                              pkg.name,
+                              url,
+                              pkg.defaultImage
+                            )
                           }
                           presets={PRESET_PACKAGE_IMAGES}
                           aspectRatio="video"
@@ -1479,8 +1711,14 @@ export function CMSPage() {
                             label={`Presentation Photo for "${dish.name}"`}
                             sublabel="Upload a photo from your computer, drag & drop, or paste an image link."
                             value={currentImg}
+                            defaultValue={dish.defaultImage}
                             onChange={(url) =>
-                              handleUpdateMenuImage(dish.id, dish.name, url)
+                              handleUpdateMenuImage(
+                                dish.id,
+                                dish.name,
+                                url,
+                                dish.defaultImage
+                              )
                             }
                             presets={PRESET_MENU_IMAGES}
                             aspectRatio="video"
@@ -1667,10 +1905,11 @@ export function CMSPage() {
                   label="Story Feature Image"
                   sublabel="High-resolution photography showcasing the culinary team, venue, or banquet feast"
                   value={aboutForm.storyImage}
+                  defaultValue={DEFAULT_CMS_DATA.about.storyImage}
                   onChange={(url) =>
                     setAboutForm({
                       ...aboutForm,
-                      storyImage: url,
+                      storyImage: url || DEFAULT_CMS_DATA.about.storyImage,
                     })
                   }
                   aspectRatio="video"
@@ -1724,7 +1963,13 @@ export function CMSPage() {
                           const updated = aboutForm.pillars.filter(
                             (_, i) => i !== pIdx
                           );
-                          setAboutForm({ ...aboutForm, pillars: updated });
+                          setAboutForm({
+                            ...aboutForm,
+                            pillars:
+                              updated.length > 0
+                                ? updated
+                                : DEFAULT_CMS_DATA.about.pillars,
+                          });
                         }}
                         className="absolute top-3 right-3 text-natural-text-light hover:text-red-500 p-1 cursor-pointer opacity-50 group-hover:opacity-100 transition-opacity"
                         title="Delete Pillar"
@@ -1987,10 +2232,12 @@ export function CMSPage() {
                   <ImageUploadField
                     label="Why Us Showcase Image 1"
                     value={contactForm.whyUsImage1}
+                    defaultValue={DEFAULT_CMS_DATA.contact.whyUsImage1}
                     onChange={(url) =>
                       setContactForm({
                         ...contactForm,
-                        whyUsImage1: url,
+                        whyUsImage1:
+                          url || DEFAULT_CMS_DATA.contact.whyUsImage1,
                       })
                     }
                     aspectRatio="landscape"
@@ -1999,10 +2246,12 @@ export function CMSPage() {
                   <ImageUploadField
                     label="Why Us Showcase Image 2"
                     value={contactForm.whyUsImage2}
+                    defaultValue={DEFAULT_CMS_DATA.contact.whyUsImage2}
                     onChange={(url) =>
                       setContactForm({
                         ...contactForm,
-                        whyUsImage2: url,
+                        whyUsImage2:
+                          url || DEFAULT_CMS_DATA.contact.whyUsImage2,
                       })
                     }
                     aspectRatio="landscape"
@@ -2161,7 +2410,10 @@ export function CMSPage() {
                             );
                             setTestimonialsForm({
                               ...testimonialsForm,
-                              items: updated,
+                              items:
+                                updated.length > 0
+                                  ? updated
+                                  : DEFAULT_CMS_DATA.testimonials.items,
                             });
                           }}
                           className="text-natural-text-light hover:text-red-500 p-1 cursor-pointer"
@@ -2350,7 +2602,13 @@ export function CMSPage() {
                           const updated = faqsForm.items.filter(
                             (_, i) => i !== fIdx
                           );
-                          setFaqsForm({ ...faqsForm, items: updated });
+                          setFaqsForm({
+                            ...faqsForm,
+                            items:
+                              updated.length > 0
+                                ? updated
+                                : DEFAULT_CMS_DATA.faqs.items,
+                          });
                         }}
                         className="text-natural-text-light hover:text-red-500 p-1 cursor-pointer"
                         title="Delete FAQ"
@@ -2459,7 +2717,7 @@ export function CMSPage() {
 
               <div className="relative min-h-[300px] rounded-xl overflow-hidden flex flex-col justify-center items-center text-center p-5 border border-white/15 bg-[#070707] shadow-xl">
                 <img
-                  src={heroForm.backgroundImage}
+                  src={heroForm.backgroundImage || DEFAULT_CMS_DATA.hero.backgroundImage}
                   alt="Live Hero"
                   className="absolute inset-0 w-full h-full object-cover opacity-35"
                 />
@@ -2642,7 +2900,7 @@ export function CMSPage() {
                 </h4>
                 <div className="relative aspect-video rounded-lg overflow-hidden border border-white/10 shadow-md">
                   <img
-                    src={aboutForm.storyImage}
+                    src={aboutForm.storyImage || DEFAULT_CMS_DATA.about.storyImage}
                     alt="Story preview"
                     className="w-full h-full object-cover"
                   />
@@ -2784,12 +3042,12 @@ export function CMSPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-2 pt-1">
                   <img
-                    src={contactForm.whyUsImage1}
+                    src={contactForm.whyUsImage1 || DEFAULT_CMS_DATA.contact.whyUsImage1}
                     alt="Why us 1"
                     className="w-full aspect-[4/3] object-cover rounded border border-white/10"
                   />
                   <img
-                    src={contactForm.whyUsImage2}
+                    src={contactForm.whyUsImage2 || DEFAULT_CMS_DATA.contact.whyUsImage2}
                     alt="Why us 2"
                     className="w-full aspect-[4/3] object-cover rounded border border-white/10"
                   />

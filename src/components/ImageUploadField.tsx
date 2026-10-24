@@ -5,10 +5,10 @@ import {
   Image as ImageIcon,
   X,
   Check,
-  ExternalLink,
   Loader2,
   RefreshCw,
   Sparkles,
+  RotateCcw,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { supabase } from "../utils/supabase";
@@ -17,6 +17,7 @@ export interface ImageUploadFieldProps {
   label?: string;
   sublabel?: string;
   value: string;
+  defaultValue?: string;
   onChange: (value: string) => void;
   aspectRatio?: "video" | "square" | "landscape" | "auto" | "wide";
   presets?: { label: string; url: string }[];
@@ -32,11 +33,10 @@ export interface ImageUploadFieldProps {
  */
 async function processImageFile(
   file: File,
-  maxDimension = 1000,
-  quality = 0.72
+  maxDimension = 1200,
+  quality = 0.78
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    // For vector SVG or animated GIF, keep original encoding
     if (file.type === "image/svg+xml" || file.type === "image/gif") {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as string);
@@ -82,24 +82,56 @@ async function processImageFile(
   });
 }
 
+function dataUrlToBlob(dataUrl: string): { blob: Blob; mimeType: string; ext: string } | null {
+  try {
+    const parts = dataUrl.split(",");
+    if (parts.length < 2) return null;
+    const mimeMatch = parts[0].match(/:(.*?);/);
+    const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+    const binary = atob(parts[1]);
+    const array = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      array[i] = binary.charCodeAt(i);
+    }
+    const ext = mimeType === "image/png" ? "png" : mimeType === "image/gif" ? "gif" : mimeType === "image/webp" ? "webp" : "jpg";
+    return {
+      blob: new Blob([array], { type: mimeType }),
+      mimeType,
+      ext,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Attempts to upload the file to Supabase storage if any common bucket exists ('cms', 'public', 'images').
+ * Attempts to upload the optimized image to Supabase storage ('cms', 'public', 'images').
  * Returns the public URL if successful, or null to fall back to the optimized Data URL.
  */
-async function tryUploadToSupabase(file: File): Promise<string | null> {
+async function tryUploadToSupabase(
+  file: File,
+  optimizedDataUrl: string
+): Promise<string | null> {
   try {
-    const fileExt = file.name.split(".").pop() || "jpg";
+    const converted = dataUrlToBlob(optimizedDataUrl);
+    const uploadPayload = converted ? converted.blob : file;
+    const contentType = converted ? converted.mimeType : file.type || "image/jpeg";
+    const fileExt = converted ? converted.ext : file.name.split(".").pop() || "jpg";
     const fileName = `img_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
     const filePath = `cms/${fileName}`;
 
     for (const bucket of ["cms", "public", "images", "receipts"]) {
-      const { data, error } = await supabase.storage.from(bucket).upload(filePath, file, {
-        contentType: file.type || "image/jpeg",
-        cacheControl: "31536000",
-        upsert: true,
-      });
+      const { data, error } = await supabase.storage
+        .from(bucket)
+        .upload(filePath, uploadPayload, {
+          contentType,
+          cacheControl: "31536000",
+          upsert: true,
+        });
       if (!error && data) {
-        const { data: pubData } = supabase.storage.from(bucket).getPublicUrl(data.path);
+        const { data: pubData } = supabase.storage
+          .from(bucket)
+          .getPublicUrl(data.path);
         if (pubData?.publicUrl) {
           return pubData.publicUrl;
         }
@@ -115,6 +147,7 @@ export function ImageUploadField({
   label,
   sublabel,
   value,
+  defaultValue = "",
   onChange,
   aspectRatio = "video",
   presets = [],
@@ -122,10 +155,13 @@ export function ImageUploadField({
   className,
   maxDimension = 1600,
 }: ImageUploadFieldProps) {
-  // Mode: 'upload' | 'url' | 'presets'
-  const isDataUrl = value && value.startsWith("data:");
+  const effectiveValue = value || defaultValue || "";
+  const isDataUrl = effectiveValue.startsWith("data:");
+  const isDefaultActive =
+    Boolean(defaultValue) && effectiveValue === defaultValue;
+
   const [activeTab, setActiveTab] = useState<"upload" | "url" | "presets">(
-    isDataUrl ? "upload" : "upload"
+    "upload"
   );
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -136,7 +172,9 @@ export function ImageUploadField({
 
   const handleFile = async (file: File) => {
     if (!file.type.startsWith("image/")) {
-      setErrorMsg("Please select a valid image file (PNG, JPG, JPEG, WebP, GIF).");
+      setErrorMsg(
+        "Please select a valid image file (PNG, JPG, JPEG, WebP, GIF)."
+      );
       return;
     }
 
@@ -146,16 +184,17 @@ export function ImageUploadField({
     try {
       setUploadFileName(file.name);
       const sizeKb = (file.size / 1024).toFixed(1);
-      const sizeStr = file.size > 1024 * 1024
-        ? `${(file.size / (1024 * 1024)).toFixed(2)} MB`
-        : `${sizeKb} KB`;
+      const sizeStr =
+        file.size > 1024 * 1024
+          ? `${(file.size / (1024 * 1024)).toFixed(2)} MB`
+          : `${sizeKb} KB`;
       setUploadFileSize(sizeStr);
 
       // 1. Generate optimized client data URL immediately for responsive UI
       const optimizedDataUrl = await processImageFile(file, maxDimension);
 
-      // 2. Try remote Supabase upload in the background
-      const remoteUrl = await tryUploadToSupabase(file);
+      // 2. Try remote Supabase upload using the compressed image blob
+      const remoteUrl = await tryUploadToSupabase(file, optimizedDataUrl);
 
       // 3. Update value (prefer remote URL if available, else optimized Data URL)
       onChange(remoteUrl || optimizedDataUrl);
@@ -192,7 +231,8 @@ export function ImageUploadField({
   };
 
   const handleClear = () => {
-    onChange("");
+    // If a defaultValue exists, removing a custom image restores the default image so it always comes back
+    onChange(defaultValue || "");
     setUploadFileName(null);
     setUploadFileSize(null);
     setErrorMsg(null);
@@ -326,15 +366,20 @@ export function ImageUploadField({
               type="url"
               value={value || ""}
               onChange={(e) => onChange(e.target.value)}
-              placeholder={placeholder}
+              onBlur={() => {
+                if (!value?.trim() && defaultValue) {
+                  onChange(defaultValue);
+                }
+              }}
+              placeholder={defaultValue || placeholder}
               className="flex-1 px-3.5 py-2.5 bg-natural-bg/40 border border-natural-border rounded-lg text-xs text-natural-text-main focus:outline-none focus:ring-2 focus:ring-natural-accent/20"
             />
-            {value && (
+            {effectiveValue && !isDefaultActive && (
               <button
                 type="button"
                 onClick={handleClear}
                 className="p-2.5 text-natural-text-light hover:text-red-500 hover:bg-natural-bg rounded-lg border border-natural-border transition-colors cursor-pointer"
-                title="Clear image URL"
+                title={defaultValue ? "Remove custom image & restore default" : "Clear image URL"}
               >
                 <X className="w-4 h-4" />
               </button>
@@ -357,7 +402,7 @@ export function ImageUploadField({
                 onClick={() => onChange(preset.url)}
                 className={cn(
                   "relative aspect-video rounded-lg overflow-hidden border-2 text-left group transition-all cursor-pointer",
-                  value === preset.url
+                  effectiveValue === preset.url
                     ? "border-natural-accent ring-2 ring-natural-accent/30"
                     : "border-natural-border hover:border-natural-accent/50 opacity-70 hover:opacity-100"
                 )}
@@ -372,7 +417,7 @@ export function ImageUploadField({
                     {preset.label}
                   </span>
                 </div>
-                {value === preset.url && (
+                {effectiveValue === preset.url && (
                   <div className="absolute top-1 right-1 p-0.5 bg-natural-accent rounded-full text-white shadow-xs">
                     <Check className="w-3 h-3" />
                   </div>
@@ -391,10 +436,10 @@ export function ImageUploadField({
       )}
 
       {/* Live Preview Card (if an image is selected) */}
-      {value && (
+      {effectiveValue && (
         <div className="glass-card p-3 rounded-xl border border-natural-border space-y-2 animate-in fade-in duration-200">
           <div className="flex items-center justify-between text-xs pb-1 border-b border-natural-border/60">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-[10px] font-bold uppercase tracking-wider text-natural-text-main flex items-center gap-1">
                 <ImageIcon className="w-3.5 h-3.5 text-natural-accent" />
                 Active Image Preview
@@ -402,14 +447,20 @@ export function ImageUploadField({
               <span
                 className={cn(
                   "text-[9px] font-bold px-2.5 py-0.5 rounded-full uppercase whitespace-nowrap inline-flex items-center justify-center text-center",
-                  isDataUrl
+                  isDefaultActive
+                    ? "bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200"
+                    : isDataUrl
                     ? "bg-purple-100 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200"
                     : "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200"
                 )}
               >
-                {isDataUrl ? "Uploaded File" : "Remote Web Link"}
+                {isDefaultActive
+                  ? "Default Image"
+                  : isDataUrl
+                  ? "Uploaded File"
+                  : "Custom Web Link"}
               </span>
-              {uploadFileSize && (
+              {uploadFileSize && !isDefaultActive && (
                 <span className="text-[10px] text-natural-text-light font-mono">
                   {uploadFileSize}
                 </span>
@@ -429,15 +480,25 @@ export function ImageUploadField({
                 <RefreshCw className="w-3 h-3 text-natural-accent" />
                 Replace
               </button>
-              <button
-                type="button"
-                onClick={handleClear}
-                className="px-2 py-1 text-[10px] font-semibold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 rounded border border-red-200 dark:border-red-900 transition-colors cursor-pointer flex items-center gap-1"
-                title="Remove image"
-              >
-                <X className="w-3 h-3" />
-                Remove
-              </button>
+              {!isDefaultActive && (
+                <button
+                  type="button"
+                  onClick={handleClear}
+                  className="px-2 py-1 text-[10px] font-semibold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 rounded border border-red-200 dark:border-red-900 transition-colors cursor-pointer flex items-center gap-1"
+                  title={
+                    defaultValue
+                      ? "Remove custom image and restore default"
+                      : "Remove image"
+                  }
+                >
+                  {defaultValue ? (
+                    <RotateCcw className="w-3 h-3" />
+                  ) : (
+                    <X className="w-3 h-3" />
+                  )}
+                  Remove
+                </button>
+              )}
             </div>
           </div>
 
@@ -452,17 +513,21 @@ export function ImageUploadField({
             )}
           >
             <img
-              src={value}
+              src={effectiveValue}
               alt="Selected Preview"
               className="w-full h-full object-cover"
               onError={(e) => {
-                // Image failed to load (e.g. broken external link or blocked by referrer policy)
                 const target = e.currentTarget;
+                if (defaultValue && target.src !== defaultValue) {
+                  target.src = defaultValue;
+                  return;
+                }
                 target.style.display = "none";
                 const parent = target.parentElement;
                 if (parent && !parent.querySelector(".img-error-badge")) {
                   const div = document.createElement("div");
-                  div.className = "img-error-badge absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-red-950/20 text-red-400 text-xs";
+                  div.className =
+                    "img-error-badge absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-red-950/20 text-red-400 text-xs";
                   div.innerHTML = `<span class="font-bold">⚠️ Unable to load image link</span><span class="text-[10px] mt-1 text-natural-text-light">The remote server might block hotlinking. Try uploading the image file directly from your computer instead.</span>`;
                   parent.appendChild(div);
                 }

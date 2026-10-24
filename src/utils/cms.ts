@@ -442,49 +442,160 @@ export const DEFAULT_CMS_DATA: FullCMSData = {
 };
 
 const LOCAL_STORAGE_CMS_KEY = "rp_cms_content_cache";
+export const CMS_SYNC_CHANNEL_NAME = "cms-live-sync";
 
 // Realtime broadcast channel shared with Customer
-const broadcastChannel = supabase.channel("cms-broadcast");
+const broadcastChannel = supabase.channel(CMS_SYNC_CHANNEL_NAME, {
+  config: {
+    broadcast: { self: true },
+  },
+});
 broadcastChannel.subscribe();
 
 /**
- * Loads the CMS content from Supabase (or localStorage/defaults as reliable fallback)
+ * Deeply merges a section's saved data with DEFAULT_CMS_DATA[sectionKey],
+ * ensuring that any removed/cleared string or empty list automatically
+ * falls back to its default preset value.
  */
-export async function fetchCMSContent(): Promise<FullCMSData> {
-  const result: FullCMSData = { ...DEFAULT_CMS_DATA };
+export function mergeSectionWithDefaults<K extends keyof FullCMSData>(
+  sectionKey: K,
+  incoming: any
+): FullCMSData[K] {
+  const defaultSection = JSON.parse(
+    JSON.stringify(DEFAULT_CMS_DATA[sectionKey])
+  ) as any;
 
-  // 1. Read local cache first for instant load
-  try {
-    const cached = localStorage.getItem(LOCAL_STORAGE_CMS_KEY);
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      Object.assign(result, parsed);
-    }
-  } catch (e) {
-    console.warn("Failed reading local CMS cache:", e);
+  if (!incoming || typeof incoming !== "object") {
+    return defaultSection;
   }
 
-  // 2. Fetch from Supabase primary table `cms_content`
-  let loadedFromPrimary = false;
+  const result: any = { ...defaultSection };
+
+  for (const key of Object.keys(defaultSection)) {
+    const defVal = defaultSection[key];
+    const incVal = incoming[key];
+
+    if (incVal === undefined || incVal === null) {
+      result[key] = defVal;
+      continue;
+    }
+
+    if (typeof defVal === "string") {
+      if (typeof incVal === "string") {
+        // If the default is non-empty and the incoming value was cleared to "", restore default
+        result[key] =
+          defVal.trim() !== "" && incVal.trim() === "" ? defVal : incVal;
+      } else {
+        result[key] = defVal;
+      }
+    } else if (typeof defVal === "boolean") {
+      result[key] = typeof incVal === "boolean" ? incVal : defVal;
+    } else if (typeof defVal === "number") {
+      result[key] = typeof incVal === "number" ? incVal : defVal;
+    } else if (Array.isArray(defVal)) {
+      if (Array.isArray(incVal) && incVal.length > 0) {
+        if (key === "items" && (sectionKey === "packages" || sectionKey === "menu")) {
+          // Merge package/menu items while preserving default images when an item's image is empty
+          const itemMap = new Map<string, any>();
+          defVal.forEach((dItem: any) => {
+            if (dItem?.name) {
+              itemMap.set(dItem.name.toLowerCase(), { ...dItem });
+            }
+          });
+          incVal.forEach((iItem: any) => {
+            if (!iItem?.name) return;
+            const k = iItem.name.toLowerCase();
+            const existing = itemMap.get(k);
+            const resolvedImage =
+              typeof iItem.image === "string" && iItem.image.trim() !== ""
+                ? iItem.image
+                : existing?.image || "";
+            if (resolvedImage || existing) {
+              itemMap.set(k, {
+                ...(existing || {}),
+                ...iItem,
+                image: resolvedImage,
+              });
+            }
+          });
+          result[key] = Array.from(itemMap.values());
+        } else {
+          // For pillars, steps, whyUsHighlights, testimonials.items, faqs.items, quickLinks
+          result[key] = incVal.map((item: any, idx: number) => {
+            const defItem =
+              defVal.find((d: any) => d?.id && item?.id && d.id === item.id) ||
+              defVal[idx];
+            if (!defItem || typeof item !== "object" || item === null) {
+              return item;
+            }
+            const mergedItem: any = { ...defItem, ...item };
+            for (const field of Object.keys(defItem)) {
+              if (
+                typeof defItem[field] === "string" &&
+                defItem[field].trim() !== "" &&
+                typeof item[field] === "string" &&
+                item[field].trim() === ""
+              ) {
+                mergedItem[field] = defItem[field];
+              }
+            }
+            return mergedItem;
+          });
+        }
+      } else {
+        // If all items were removed, restore default items
+        result[key] = defVal;
+      }
+    } else if (typeof defVal === "object" && defVal !== null) {
+      // e.g. packageImages or menuImages record
+      const mergedMap: Record<string, string> = { ...defVal };
+      if (typeof incVal === "object" && incVal !== null) {
+        for (const [mapKey, mapVal] of Object.entries(incVal)) {
+          if (typeof mapVal === "string" && mapVal.trim() !== "") {
+            mergedMap[mapKey] = mapVal;
+          } else if (defVal[mapKey]) {
+            // Revert to default preset image if cleared
+            mergedMap[mapKey] = defVal[mapKey];
+          } else {
+            delete mergedMap[mapKey];
+          }
+        }
+      }
+      result[key] = mergedMap;
+    }
+  }
+
+  return result as FullCMSData[K];
+}
+
+/**
+ * Loads the CMS content from Supabase (with localStorage/defaults as offline fallback)
+ */
+export async function fetchCMSContent(): Promise<FullCMSData> {
+  const result: FullCMSData = JSON.parse(JSON.stringify(DEFAULT_CMS_DATA));
+
+  // 1. Fetch from Supabase primary table `cms_content` first (source of truth across local/port-forwarded/Vercel)
+  let loadedFromSupabase = false;
   try {
     const { data, error } = await supabase.from("cms_content").select("*");
     if (!error && data && data.length > 0) {
       data.forEach((row: any) => {
-        if (row.id && row.data && (result as any)[row.id] !== undefined) {
-          (result as any)[row.id] = {
-            ...(DEFAULT_CMS_DATA as any)[row.id],
-            ...row.data,
-          };
+        const sectionKey = (row.id || row.section) as keyof FullCMSData;
+        if (sectionKey && result[sectionKey] !== undefined && row.data) {
+          (result as any)[sectionKey] = mergeSectionWithDefaults(
+            sectionKey,
+            row.data
+          );
         }
       });
-      loadedFromPrimary = true;
+      loadedFromSupabase = true;
     }
   } catch (err) {
     console.warn("Supabase fetchCMSContent cms_content error:", err);
   }
 
-  // 3. Dual-layer fallback: Fetch from Supabase `inclusions` table (where category like '__CMS_%')
-  if (!loadedFromPrimary) {
+  // 2. Dual-layer fallback: Fetch from Supabase `inclusions` table (where category like '__CMS_%')
+  if (!loadedFromSupabase) {
     try {
       const { data, error } = await supabase
         .from("inclusions")
@@ -493,14 +604,18 @@ export async function fetchCMSContent(): Promise<FullCMSData> {
 
       if (!error && data && data.length > 0) {
         data.forEach((row: any) => {
-          const sectionKey = row.category.replace("__CMS_", "");
-          if (sectionKey && (result as any)[sectionKey] !== undefined) {
+          const sectionKey = row.category.replace(
+            "__CMS_",
+            ""
+          ) as keyof FullCMSData;
+          if (sectionKey && result[sectionKey] !== undefined) {
             try {
               const parsed = JSON.parse(row.items);
-              (result as any)[sectionKey] = {
-                ...(DEFAULT_CMS_DATA as any)[sectionKey],
-                ...parsed,
-              };
+              (result as any)[sectionKey] = mergeSectionWithDefaults(
+                sectionKey,
+                parsed
+              );
+              loadedFromSupabase = true;
             } catch (e) {}
           }
         });
@@ -510,7 +625,26 @@ export async function fetchCMSContent(): Promise<FullCMSData> {
     }
   }
 
-  // Update local cache
+  // 3. Offline fallback: Only use localStorage if Supabase was unreachable or empty
+  if (!loadedFromSupabase) {
+    try {
+      const cached = localStorage.getItem(LOCAL_STORAGE_CMS_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        (Object.keys(DEFAULT_CMS_DATA) as Array<keyof FullCMSData>).forEach(
+          (key) => {
+            if (parsed?.[key]) {
+              (result as any)[key] = mergeSectionWithDefaults(key, parsed[key]);
+            }
+          }
+        );
+      }
+    } catch (e) {
+      console.warn("Failed reading local CMS cache:", e);
+    }
+  }
+
+  // Update local cache with clean merged state
   try {
     localStorage.setItem(LOCAL_STORAGE_CMS_KEY, JSON.stringify(result));
   } catch (e) {}
@@ -525,12 +659,15 @@ export async function saveCMSSection<K extends keyof FullCMSData>(
   sectionKey: K,
   data: FullCMSData[K],
   userName = "Admin User"
-): Promise<{ success: boolean; message?: string }> {
+): Promise<{ success: boolean; data: FullCMSData[K]; message?: string }> {
+  // Normalize with defaults so cleared/removed fields revert cleanly to defaults
+  const normalizedData = mergeSectionWithDefaults(sectionKey, data);
+
   // 1. Update local storage cache immediately
   try {
     const cached = localStorage.getItem(LOCAL_STORAGE_CMS_KEY);
     const parsed = cached ? JSON.parse(cached) : { ...DEFAULT_CMS_DATA };
-    parsed[sectionKey] = data;
+    parsed[sectionKey] = normalizedData;
     localStorage.setItem(LOCAL_STORAGE_CMS_KEY, JSON.stringify(parsed));
   } catch (e) {
     console.warn("Error updating local storage cache for CMS:", e);
@@ -540,32 +677,36 @@ export async function saveCMSSection<K extends keyof FullCMSData>(
   try {
     window.dispatchEvent(
       new CustomEvent("cms_section_updated", {
-        detail: { section: sectionKey, data },
+        detail: { section: sectionKey, data: normalizedData },
       })
     );
   } catch (e) {}
 
-  // 3. Send over Supabase Realtime broadcast channel
-  try {
-    broadcastChannel.send({
-      type: "broadcast",
-      event: "cms_update",
-      payload: { section: sectionKey, data },
-    });
-  } catch (e) {}
-
-  // 4. Save to primary `cms_content` table
-  try {
-    await supabase.from("cms_content").upsert({
+  // 3. Save to primary `cms_content` table in Supabase
+  const { error: upsertError } = await supabase.from("cms_content").upsert(
+    {
       id: sectionKey,
       section: sectionKey,
-      data: data as any,
+      data: normalizedData as any,
       updated_at: new Date().toISOString(),
       updated_by: userName,
-    });
-  } catch (err: any) {
-    console.warn("Primary cms_content table save notice:", err?.message);
+    },
+    { onConflict: "id" }
+  );
+
+  if (upsertError) {
+    console.error("Primary cms_content table save error:", upsertError.message);
+    throw new Error(`Failed to save to database: ${upsertError.message}`);
   }
+
+  // 4. Send over Supabase Realtime broadcast channel
+  try {
+    await broadcastChannel.send({
+      type: "broadcast",
+      event: "cms_update",
+      payload: { section: sectionKey, data: normalizedData },
+    });
+  } catch (e) {}
 
   // 5. Audit log
   try {
@@ -577,5 +718,5 @@ export async function saveCMSSection<K extends keyof FullCMSData>(
     });
   } catch (e) {}
 
-  return { success: true };
+  return { success: true, data: normalizedData };
 }
