@@ -1456,10 +1456,6 @@ export function BookingPage() {
                               : `${booking.packages.name} Package`
                             : "Custom Package"}
                         </p>
-                        <p className="text-xs text-natural-text-light mt-1.5 flex items-center gap-1.5 tracking-normal">
-                          <MapPin className="w-3.5 h-3.5 text-natural-text-light/80 shrink-0" />{" "}
-                          <span>{(booking.event_location || "").split(" - ")[0]}</span>
-                        </p>
                       </div>
                     </td>
                     <td className="px-6 py-5.5 border-b border-natural-border/50">
@@ -2192,7 +2188,7 @@ export function BookingPage() {
                         "Unknown User"}
                     </h4>
                     <p className="text-xs font-medium text-natural-text-light">
-                      {selectedBooking.event_type} •{" "}
+                      {selectedBooking.event_type}{" "}
                       {selectedBooking.packages?.name} Package
                       <span className="opacity-75 ml-2">
                         (Applied:{" "}
@@ -2299,22 +2295,6 @@ export function BookingPage() {
                               {(selectedBooking.event_location || "").split(" - ")[1]}
                             </p>
                           )}
-                          <div className="flex flex-wrap items-center gap-1 mt-1">
-                            {logistics.isOutsideTaytay ? (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700/60">
-                                Outside Taytay
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-700/60">
-                                Within Taytay
-                              </span>
-                            )}
-                            {logistics.requiresStairsIngress && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-rose-100 text-rose-800 border border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-700/60">
-                                Stairs Ingress Required
-                              </span>
-                            )}
-                          </div>
                           {false && (
                             <p>
                             </p>
@@ -2407,9 +2387,6 @@ export function BookingPage() {
                               <h5 className="text-xs font-bold text-natural-text-main uppercase tracking-wider">
                                 Venue Coverage &amp; Logistics Surcharge
                               </h5>
-                              <p className="text-[11px] text-natural-text-light">
-                                Clause #7 (Out-of-Town) &amp; Clause #9 (Hauling Fee)
-                              </p>
                             </div>
                           </div>
 
