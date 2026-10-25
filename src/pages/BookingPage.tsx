@@ -123,6 +123,66 @@ export const getBookingPayment = (booking: any): BookingPaymentInfo => {
   };
 };
 
+export interface BookingLogisticsInfo {
+  isOutsideTaytay: boolean;
+  isSecondFloorOrHigher: boolean;
+  floorLevel: number;
+  hasElevator: boolean;
+  requiresStairsIngress: boolean;
+  waiterCount: number;
+  haulingFee: number;
+  travelFee: number;
+  notes?: string;
+}
+
+export const getBookingLogistics = (booking: any): BookingLogisticsInfo => {
+  const loc = String(booking?.event_location || "").toLowerCase();
+  const totalPax = (Number(booking?.guest_count) || 0) + (Number(booking?.additional_pax) || 0);
+  const defaultWaiters = Math.max(2, Math.ceil((totalPax || 50) / 25));
+
+  let raw: any = booking?.logistics_info || null;
+
+  if (
+    (!raw || Object.keys(raw).length === 0) &&
+    typeof booking?.food_allergies === "string" &&
+    booking.food_allergies.includes("__PAYMENT_METADATA__:")
+  ) {
+    try {
+      const parsed = JSON.parse(booking.food_allergies.split("__PAYMENT_METADATA__:")[1]);
+      if (parsed?.logistics) raw = parsed.logistics;
+    } catch (e) {}
+  }
+
+  const isOutsideTaytay =
+    raw?.isOutsideTaytay !== undefined
+      ? Boolean(raw.isOutsideTaytay)
+      : Boolean(loc.trim() && !loc.includes("taytay"));
+
+  const isSecondFloorOrHigher = Boolean(raw?.isSecondFloorOrHigher);
+  const floorLevel = Number(raw?.floorLevel) || (isSecondFloorOrHigher ? 2 : 1);
+  const hasElevator = Boolean(raw?.hasElevator);
+  const requiresStairsIngress =
+    raw?.requiresStairsIngress !== undefined
+      ? Boolean(raw.requiresStairsIngress)
+      : isSecondFloorOrHigher && !hasElevator;
+  const waiterCount = Number(raw?.waiterCount) || defaultWaiters;
+  const haulingFee = Number(raw?.haulingFee) || 0;
+  const travelFee = Number(raw?.travelFee) || 0;
+  const notes = raw?.notes || "";
+
+  return {
+    isOutsideTaytay,
+    isSecondFloorOrHigher,
+    floorLevel,
+    hasElevator,
+    requiresStairsIngress,
+    waiterCount,
+    haulingFee,
+    travelFee,
+    notes,
+  };
+};
+
 const formatEventDate = (dateStr?: string) => {
   if (!dateStr) return "N/A";
   const date = new Date(`${dateStr}T12:00:00`);
@@ -177,6 +237,11 @@ export function BookingPage() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState<any | null>(null);
+  const [customTravelFeeInput, setCustomTravelFeeInput] = useState<string>("0");
+  const [customHaulingFeeInput, setCustomHaulingFeeInput] = useState<string>("0");
+  const [customLogisticsNotes, setCustomLogisticsNotes] = useState<string>("");
+  const [isSavingLogistics, setIsSavingLogistics] = useState<boolean>(false);
+  const [logisticsSaveMessage, setLogisticsSaveMessage] = useState<string>("");
   const [viewingReceipt, setViewingReceipt] = useState<{
     url: string;
     bookingName: string;
@@ -235,6 +300,16 @@ export function BookingPage() {
     setCancelReason("");
     setCancelReasonError(false);
   }, [confirmAction]);
+
+  useEffect(() => {
+    if (selectedBooking) {
+      const logInfo = getBookingLogistics(selectedBooking);
+      setCustomTravelFeeInput(String(logInfo.travelFee || 0));
+      setCustomHaulingFeeInput(String(logInfo.haulingFee || 0));
+      setCustomLogisticsNotes(logInfo.notes || "");
+      setLogisticsSaveMessage("");
+    }
+  }, [selectedBooking?.id]);
 
   useEffect(() => {
     if (selectedBooking && selectedBooking.status === "Confirmed") {
@@ -409,7 +484,8 @@ export function BookingPage() {
       0,
     );
 
-    return basePrice + additionalPaxTotal + servicesPrice;
+    const logistics = getBookingLogistics(booking);
+    return basePrice + additionalPaxTotal + servicesPrice + logistics.haulingFee + logistics.travelFee;
   };
 
   const filteredBookings = useMemo(() => {
@@ -959,6 +1035,144 @@ export function BookingPage() {
     }
 
     await fetchAllData();
+  };
+
+  const handleSaveLogisticsSurcharge = async (bookingId: number | string) => {
+    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId));
+    if (!targetBooking) return;
+
+    setIsSavingLogistics(true);
+    setLogisticsSaveMessage("");
+
+    const clientName =
+      targetBooking.profiles?.name || targetBooking.profiles?.full_name || "Client";
+    const currentLogistics = getBookingLogistics(targetBooking);
+    const payment = getBookingPayment(targetBooking);
+
+    const newTravelFee = Math.max(0, parseFloat(customTravelFeeInput) || 0);
+    const newHaulingFee = Math.max(0, parseFloat(customHaulingFeeInput) || 0);
+
+    const updatedLogistics: any = {
+      ...currentLogistics,
+      travelFee: newTravelFee,
+      haulingFee: newHaulingFee,
+      requiresStairsIngress:
+        currentLogistics.requiresStairsIngress || newHaulingFee > 0,
+      notes: customLogisticsNotes.trim(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const tempBooking = {
+      ...targetBooking,
+      logistics_info: updatedLogistics,
+    };
+    const newTotalBudget = calculateBudget(tempBooking);
+    const is50Percent = payment.payment_scheme === "Standard 50%";
+    const downpaymentDue =
+      payment.downpayment_amount > 0
+        ? payment.downpayment_amount
+        : Math.round(newTotalBudget * (is50Percent ? 0.5 : 0.2));
+    const newRemainingBalance = Math.max(0, newTotalBudget - downpaymentDue);
+
+    let updatedSchedule = payment.installment_schedule
+      ? [...payment.installment_schedule]
+      : null;
+
+    if (updatedSchedule && updatedSchedule.length > 0) {
+      let paidTotal = 0;
+      let unpaidIndices: number[] = [];
+      updatedSchedule.forEach((m: any, idx: number) => {
+        if (m.status === "Verified" || m.status === "Paid") {
+          paidTotal += Number(m.amount) || 0;
+        } else {
+          unpaidIndices.push(idx);
+        }
+      });
+
+      if (unpaidIndices.length > 0) {
+        const remainingToDistribute = Math.max(0, newRemainingBalance - paidTotal);
+        const perMilestone = Math.floor(remainingToDistribute / unpaidIndices.length);
+        let acc = 0;
+        unpaidIndices.forEach((mIdx, i) => {
+          const isLast = i === unpaidIndices.length - 1;
+          const amt = isLast ? remainingToDistribute - acc : perMilestone;
+          acc += amt;
+          updatedSchedule![mIdx] = {
+            ...updatedSchedule![mIdx],
+            amount: amt,
+          };
+        });
+      }
+    }
+
+    let updatedAllergies = targetBooking.food_allergies || "";
+    try {
+      if (updatedAllergies.includes("__PAYMENT_METADATA__:")) {
+        const parts = updatedAllergies.split("__PAYMENT_METADATA__:");
+        const meta = JSON.parse(parts[1]);
+        meta.logistics = updatedLogistics;
+        meta.balance = newRemainingBalance;
+        if (updatedSchedule) meta.installments = updatedSchedule;
+        updatedAllergies = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+      }
+    } catch (e) {}
+
+    const updatePayload: any = {
+      logistics_info: updatedLogistics,
+      final_balance_amount: newRemainingBalance,
+    };
+    if (updatedSchedule) {
+      updatePayload.installment_schedule = updatedSchedule;
+    }
+    if (updatedAllergies !== (targetBooking.food_allergies || "")) {
+      updatePayload.food_allergies = updatedAllergies;
+    }
+
+    const { error: dbError } = await supabase
+      .from("bookings")
+      .update(updatePayload)
+      .eq("id", bookingId);
+
+    setIsSavingLogistics(false);
+
+    if (dbError) {
+      setLogisticsSaveMessage(`Failed to save: ${dbError.message}`);
+      return;
+    }
+
+    await logAuditAction({
+      action: "Updated Logistics Surcharge",
+      target: clientName,
+      type: "Update",
+      details: `Admin updated logistics surcharge for ${clientName} (Booking #${bookingId}): Travel Fee ₱${newTravelFee.toLocaleString()}, Hauling Fee ₱${newHaulingFee.toLocaleString()}`,
+    });
+
+    setBookings((prev) =>
+      prev.map((b) =>
+        String(b.id) === String(bookingId)
+          ? {
+              ...b,
+              logistics_info: updatedLogistics,
+              final_balance_amount: newRemainingBalance,
+              installment_schedule: updatedSchedule || b.installment_schedule,
+              food_allergies: updatedAllergies,
+            }
+          : b,
+      ),
+    );
+
+    if (selectedBooking && String(selectedBooking.id) === String(bookingId)) {
+      setSelectedBooking({
+        ...selectedBooking,
+        logistics_info: updatedLogistics,
+        final_balance_amount: newRemainingBalance,
+        installment_schedule: updatedSchedule || selectedBooking.installment_schedule,
+        food_allergies: updatedAllergies,
+      });
+    }
+
+    setLogisticsSaveMessage("Logistics surcharge saved & balance updated.");
+    setTimeout(() => setLogisticsSaveMessage(""), 4000);
   };
 
   return (
@@ -2048,7 +2262,13 @@ export function BookingPage() {
                         : 0)
                     );
                   }, 0);
-                  const totalBudget = basePrice + additionalPaxTotal + servicesPrice;
+                  const logistics = getBookingLogistics(selectedBooking);
+                  const totalBudget =
+                    basePrice +
+                    additionalPaxTotal +
+                    servicesPrice +
+                    logistics.haulingFee +
+                    logistics.travelFee;
 
                   return (
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
@@ -2077,6 +2297,26 @@ export function BookingPage() {
                           {(selectedBooking.event_location || "").split(" - ")[1] && (
                             <p className="text-[10px] text-natural-text-light truncate">
                               {(selectedBooking.event_location || "").split(" - ")[1]}
+                            </p>
+                          )}
+                          <div className="flex flex-wrap items-center gap-1 mt-1">
+                            {logistics.isOutsideTaytay ? (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700/60">
+                                Outside Taytay
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-700/60">
+                                Within Taytay
+                              </span>
+                            )}
+                            {logistics.requiresStairsIngress && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-rose-100 text-rose-800 border border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-700/60">
+                                Stairs Ingress Required
+                              </span>
+                            )}
+                          </div>
+                          {false && (
+                            <p>
                             </p>
                           )}
                         </div>
@@ -2140,6 +2380,179 @@ export function BookingPage() {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
                 {/* LEFT COLUMN: Payment Scheme & Ledger */}
                 <div className="space-y-4">
+                  {/* Venue Coverage & Custom Logistics Surcharge Card */}
+                  {(() => {
+                    const logistics = getBookingLogistics(selectedBooking);
+                    const totalPax =
+                      (Number(selectedBooking.guest_count) || 0) +
+                      (Number(selectedBooking.additional_pax) || 0);
+                    const autoWaiters =
+                      logistics.waiterCount || Math.max(2, Math.ceil((totalPax || 50) / 25));
+                    const floorsUp = logistics.isSecondFloorOrHigher
+                      ? Math.max(1, (logistics.floorLevel || 2) - 1)
+                      : 0;
+                    const recommendedHauling =
+                      logistics.isSecondFloorOrHigher && !logistics.hasElevator
+                        ? 150 * floorsUp * autoWaiters
+                        : 0;
+
+                    return (
+                      <div className="p-4 bg-natural-card/60 border border-natural-border rounded-2xl space-y-3.5 shadow-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-lg bg-natural-accent/10 flex items-center justify-center text-natural-accent shrink-0">
+                              <MapPin className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <h5 className="text-xs font-bold text-natural-text-main uppercase tracking-wider">
+                                Venue Coverage &amp; Logistics Surcharge
+                              </h5>
+                              <p className="text-[11px] text-natural-text-light">
+                                Clause #7 (Out-of-Town) &amp; Clause #9 (Hauling Fee)
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Out-of-Town & Logistics Badges */}
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {logistics.isOutsideTaytay ? (
+                              <span className="text-[10px] font-bold px-2.5 py-1 rounded-md uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700/60">
+                                Outside Taytay
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold px-2.5 py-1 rounded-md uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-700/60">
+                                Within Taytay
+                              </span>
+                            )}
+                            {logistics.requiresStairsIngress && (
+                              <span className="text-[10px] font-bold px-2.5 py-1 rounded-md uppercase tracking-wider bg-rose-100 text-rose-800 border border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-700/60">
+                                Stairs Ingress Required
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Accessibility Questionnaire Summary */}
+                        <div className="grid grid-cols-3 gap-2 p-2.5 bg-natural-card rounded-xl border border-natural-border text-xs">
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
+                              Floor Level
+                            </p>
+                            <p className="font-semibold text-natural-text-main mt-0.5">
+                              {logistics.isSecondFloorOrHigher
+                                ? `Floor ${logistics.floorLevel} (${floorsUp} flr up)`
+                                : "Ground Floor"}
+                            </p>
+                          </div>
+                          <div className="border-x border-natural-border px-2">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
+                              Elevator
+                            </p>
+                            <p className="font-semibold text-natural-text-main mt-0.5">
+                              {logistics.isSecondFloorOrHigher
+                                ? logistics.hasElevator
+                                  ? "Available"
+                                  : "No Elevator"
+                                : "Not Required"}
+                            </p>
+                          </div>
+                          <div className="pl-1">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
+                              Staff Count
+                            </p>
+                            <p className="font-semibold text-natural-text-main mt-0.5">
+                              {autoWaiters} Waiters ({totalPax} Pax)
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Custom Logistics Surcharge Inputs */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                          <div className="space-y-1">
+                            <label className="block text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
+                              Out-of-Town Travel Fee (₱)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="100"
+                              value={customTravelFeeInput}
+                              onChange={(e) => setCustomTravelFeeInput(e.target.value)}
+                              placeholder="0"
+                              className="w-full px-3 py-2 text-xs font-semibold bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                            />
+                            <p className="text-[10px] text-natural-text-light">
+                              {logistics.isOutsideTaytay
+                                ? "Venue is outside Taytay — input distance/ocular fee"
+                                : "Within Taytay coverage (₱0 default)"}
+                            </p>
+                          </div>
+
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <label className="block text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
+                                Hauling / Stairs Fee (₱)
+                              </label>
+                              {recommendedHauling > 0 &&
+                                Number(customHaulingFeeInput) !== recommendedHauling && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setCustomHaulingFeeInput(String(recommendedHauling))
+                                    }
+                                    className="text-[10px] font-bold text-natural-accent hover:underline cursor-pointer"
+                                  >
+                                    Use Auto (₱{recommendedHauling.toLocaleString()})
+                                  </button>
+                                )}
+                            </div>
+                            <input
+                              type="number"
+                              min="0"
+                              step="150"
+                              value={customHaulingFeeInput}
+                              onChange={(e) => setCustomHaulingFeeInput(e.target.value)}
+                              placeholder="0"
+                              className="w-full px-3 py-2 text-xs font-semibold bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                            />
+                            <p className="text-[10px] text-natural-text-light">
+                              Standard: ₱150 / floor / waiter
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
+                          <div className="text-xs">
+                            {logisticsSaveMessage ? (
+                              <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                                {logisticsSaveMessage}
+                              </span>
+                            ) : (
+                              <span className="text-natural-text-light">
+                                Current Logistics Total:{" "}
+                                <strong className="text-natural-text-main font-serif">
+                                  ₱
+                                  {(
+                                    (logistics.travelFee || 0) + (logistics.haulingFee || 0)
+                                  ).toLocaleString()}
+                                </strong>
+                              </span>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            disabled={isSavingLogistics}
+                            onClick={() => handleSaveLogisticsSurcharge(selectedBooking.id)}
+                            className="px-3.5 py-2 bg-natural-accent hover:bg-natural-accent/90 disabled:opacity-50 text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-all shadow-2xs cursor-pointer shrink-0"
+                          >
+                            {isSavingLogistics
+                              ? "Saving..."
+                              : "Update Logistics Surcharge"}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
               {/* Payment Scheme & Installment Ledger Section (Catering Contract Clause 1 & Clause 16) */}
               {(() => {
