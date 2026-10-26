@@ -168,9 +168,6 @@ export function CMSPage() {
   const [showLivePreview, setShowLivePreview] = useState(true);
   const [showFullPreviewModal, setShowFullPreviewModal] = useState(false);
 
-  // Home Section Jumper
-  const [activeHomeSection, setActiveHomeSection] = useState<string>("sec-hero");
-
   // Form local states
   const [heroForm, setHeroForm] = useState(DEFAULT_CMS_DATA.hero);
   const [announcementForm, setAnnouncementForm] = useState(DEFAULT_CMS_DATA.announcement);
@@ -990,40 +987,6 @@ export function CMSPage() {
           {/* ========================================================================= */}
           {activeTab === "home" && (
             <div className="space-y-6">
-              {/* Home Quick Jumper Bar */}
-              <div className="p-3 glass-card flex items-center gap-2 overflow-x-auto custom-scrollbar border-l-4 border-l-natural-accent">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light shrink-0 mr-1">
-                  Home Sections:
-                </span>
-                {[
-                  { id: "sec-hero", label: "1. Hero & Banner" },
-                  { id: "sec-packages", label: "2. Packages Showcase" },
-                  { id: "sec-menu", label: "3. Menu Teaser" },
-                  { id: "sec-process", label: "4. How It Works" },
-                  { id: "sec-testimonials", label: "5. Customer Review" },
-                  { id: "sec-faqs", label: "6. FAQ Showcase" },
-                  { id: "sec-contact", label: "7. Contact Strip" },
-                ].map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => {
-                      setActiveHomeSection(s.id);
-                      const el = document.getElementById(s.id);
-                      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-                    }}
-                    className={cn(
-                      "px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-colors shrink-0 cursor-pointer border",
-                      activeHomeSection === s.id
-                        ? "bg-natural-accent text-white border-natural-accent"
-                        : "bg-natural-bg/50 text-natural-text-main border-natural-border hover:bg-natural-bg"
-                    )}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-
               {/* SECTION 1: TOP ANNOUNCEMENT & HERO BANNER */}
               <div id="sec-hero" className="glass-card p-6 space-y-6 scroll-mt-20">
                 <div className="border-b border-natural-border pb-4 flex items-center justify-between flex-wrap gap-2">
