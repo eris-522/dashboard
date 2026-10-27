@@ -289,7 +289,6 @@ export function AnalyticsPage() {
         <div className="glass-card p-5 bg-white border-l-4 border-natural-accent">
           <div className="flex items-center justify-between text-natural-text-light mb-2">
             <span className="text-xs font-bold uppercase tracking-wider">Total Revenue</span>
-            <DollarSign className="w-4 h-4 text-natural-accent" />
           </div>
           <h4 className="text-xl font-bold font-serif text-natural-text-main">
             ₱{totalRevenue.toLocaleString()}
@@ -302,7 +301,6 @@ export function AnalyticsPage() {
         <div className="glass-card p-5 bg-white">
           <div className="flex items-center justify-between text-natural-text-light mb-2">
             <span className="text-xs font-bold uppercase tracking-wider">Avg. Event Value</span>
-            <TrendingUp className="w-4 h-4 text-[#6b8e23]" />
           </div>
           <h4 className="text-xl font-bold font-serif text-natural-text-main">
             ₱{Math.round(avgEventValue).toLocaleString()}
@@ -315,7 +313,6 @@ export function AnalyticsPage() {
         <div className="glass-card p-5 bg-white">
           <div className="flex items-center justify-between text-natural-text-light mb-2">
             <span className="text-xs font-bold uppercase tracking-wider">Total Guests (Pax)</span>
-            <Users className="w-4 h-4 text-blue-600" />
           </div>
           <h4 className="text-xl font-bold font-serif text-natural-text-main">
             {totalPaxServed.toLocaleString()}
@@ -328,7 +325,6 @@ export function AnalyticsPage() {
         <div className="glass-card p-5 bg-white">
           <div className="flex items-center justify-between text-natural-text-light mb-2">
             <span className="text-xs font-bold uppercase tracking-wider">Equipment Reserved</span>
-            <Boxes className="w-4 h-4 text-purple-600" />
           </div>
           <h4 className="text-xl font-bold font-serif text-natural-text-main">
             {totalAllocatedEquipment.toLocaleString()}
@@ -341,7 +337,6 @@ export function AnalyticsPage() {
         <div className="glass-card p-5 bg-white">
           <div className="flex items-center justify-between text-natural-text-light mb-2">
             <span className="text-xs font-bold uppercase tracking-wider">Equipment Monitoring Status</span>
-            <Package className="w-4 h-4 text-amber-600" />
           </div>
           <h4 className="text-xl font-bold font-serif text-natural-text-main">
             {lowStockCount === 0 ? "Optimal" : `${lowStockCount} Low`}
