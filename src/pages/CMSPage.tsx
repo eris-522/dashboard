@@ -991,9 +991,6 @@ export function CMSPage() {
               <div id="sec-hero" className="glass-card p-6 space-y-6 scroll-mt-20">
                 <div className="border-b border-natural-border pb-4 flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-600 font-bold">
-                      SECTION 1 OF 7
-                    </span>
                     <h3 className="text-base font-serif font-bold text-natural-text-main">
                       Announcement Banner & Hero Banner
                     </h3>
