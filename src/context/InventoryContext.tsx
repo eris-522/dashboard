@@ -119,6 +119,20 @@ export const getStatus = (stock: number, minStock: number): 'High' | 'Normal' | 
 };
 
 /**
+ * Accurately computes item status: preserves 'Archived' if archived, otherwise calculates based on stock vs minStock.
+ */
+export const computeItemStatus = (
+  stock: number,
+  minStock: number,
+  rawStatus?: string
+): 'High' | 'Normal' | 'Low' | 'Archived' => {
+  if (rawStatus && rawStatus.toLowerCase().trim() === 'archived') {
+    return 'Archived';
+  }
+  return getStatus(stock, minStock);
+};
+
+/**
  * Checks if a booking's event has concluded.
  * Returns true if:
  * 1. Event date is in the past (before today).
@@ -502,7 +516,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
           stock: Number(item.stock) || 0,
           minStock: Number(item.min_stock) || 0,
           unit: item.unit || 'pcs',
-          status: normalizeStockStatus(item.status || getStatus(Number(item.stock) || 0, Number(item.min_stock) || 0))
+          status: computeItemStatus(Number(item.stock) || 0, Number(item.min_stock) || 0, item.status)
         }));
         setItems(mapped);
       }
@@ -761,7 +775,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         stock: Number(item.stock) || 0,
         minStock: Number(item.min_stock) || 0,
         unit: item.unit || 'pcs',
-        status: normalizeStockStatus(item.status || getStatus(Number(item.stock) || 0, Number(item.min_stock) || 0))
+        status: computeItemStatus(Number(item.stock) || 0, Number(item.min_stock) || 0, item.status)
       }));
 
       const requirements = calculatePackageEquipment(packageName, guestCount, inclusions, freshItems);
@@ -902,7 +916,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       stock: Number(item.stock) || 0,
       minStock: Number(item.min_stock) || 0,
       unit: item.unit || 'pcs',
-      status: normalizeStockStatus(item.status || getStatus(Number(item.stock) || 0, Number(item.min_stock) || 0))
+      status: computeItemStatus(Number(item.stock) || 0, Number(item.min_stock) || 0, item.status)
     }));
 
     let recordsSource: BookingDeductionRecord[] = overrideRecords || await fetchDeductionsFromDb();
@@ -1034,7 +1048,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       stock: Number(item.stock) || 0,
       minStock: Number(item.min_stock) || 0,
       unit: item.unit || 'pcs',
-      status: normalizeStockStatus(item.status || getStatus(Number(item.stock) || 0, Number(item.min_stock) || 0))
+      status: computeItemStatus(Number(item.stock) || 0, Number(item.min_stock) || 0, item.status)
     }));
 
     for (const item of record.items) {
@@ -1109,7 +1123,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       // Use provided bookings list if available to avoid redundant egress, otherwise fetch minimal required columns
       const fetchBookingsPromise = (_bookingsList && _bookingsList.length > 0)
         ? Promise.resolve({ data: _bookingsList, error: null })
-        : supabase.from('bookings').select('id, status, guest_count, additional_pax, customerName, packages(name, inclusions), profiles(name, full_name)');
+        : supabase.from('bookings').select('id, status, guest_count, additional_pax, packages(name, inclusions), profiles(name)');
 
       const [bookingsRes, deductionsRes, invRes] = await Promise.all([
         fetchBookingsPromise,
@@ -1130,7 +1144,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         stock: Number(item.stock) || 0,
         minStock: Number(item.min_stock) || 0,
         unit: item.unit || 'pcs',
-        status: normalizeStockStatus(item.status || getStatus(Number(item.stock) || 0, Number(item.min_stock) || 0))
+        status: computeItemStatus(Number(item.stock) || 0, Number(item.min_stock) || 0, item.status)
       }));
 
       if (currentInvItems.length === 0) {

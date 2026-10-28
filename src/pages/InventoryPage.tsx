@@ -2,6 +2,10 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   Search,
   Plus,
+  ChevronDown,
+  Check,
+  Minus,
+  Equal,
   Filter,
   PackageSearch,
   ArrowUpRight,
@@ -28,6 +32,7 @@ import {
   InventoryItem,
   StockMovement,
   normalizeStockStatus,
+  computeItemStatus,
 } from "../context/InventoryContext";
 import { useBooking } from "../context/BookingContext";
 import { supabase } from "../utils/supabase";
@@ -255,8 +260,11 @@ export function InventoryPage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
   const [restockAmount, setRestockAmount] = useState<number | string>(10);
-  const [restockReason, setRestockReason] = useState<string>("Supplier delivery / Purchase");
+  const [restockReason, setRestockReason] = useState<string>("");
+  const [showReasonDropdown, setShowReasonDropdown] = useState<boolean>(false);
   const [adjustmentType, setAdjustmentType] = useState<StockMovement["type"]>("Restock");
+  const [adjustMode, setAdjustMode] = useState<"add" | "deduct">("add");
+  const [customReasonNote, setCustomReasonNote] = useState<string>("");
   const [formError, setFormError] = useState<string | null>(null);
   const [itemToArchive, setItemToArchive] = useState<string | number | null>(null);
 
@@ -331,37 +339,74 @@ export function InventoryPage() {
     });
   };
 
+      const REASON_PRESETS = {
+    add: [
+      "Supplier delivery / Purchase",
+      "Returned from event/rental",
+      "Spare inventory found",
+      "Restock from warehouse",
+    ],
+    deduct: [
+      "Broken during event",
+      "Lost / Unreturned",
+      "Damaged / Wear and tear",
+      "Disposed / Expired",
+    ],
+  };
+
+  const numInput = Number(restockAmount) || 0;
+  const effectiveChange = useMemo(() => {
+    if (!selectedItem) return 0;
+    return adjustMode === "add" ? Math.abs(numInput) : -Math.abs(numInput);
+  }, [adjustMode, numInput, selectedItem]);
+
+  const calculatedNewStock = useMemo(() => {
+    if (!selectedItem) return 0;
+    return Math.max(0, selectedItem.stock + effectiveChange);
+  }, [selectedItem, effectiveChange]);
+
+  const previewStatus = useMemo(() => {
+    if (!selectedItem) return "Normal";
+    return computeItemStatus(calculatedNewStock, selectedItem.minStock, selectedItem.status);
+  }, [selectedItem, calculatedNewStock]);
+
   // Handler: Restock / Adjust
   const handleApplyRestockOrAdjustment = async () => {
     if (!selectedItem) return;
 
-    const numAmount = Number(restockAmount) || 0;
-    if (numAmount === 0) {
-      setFormError("Please enter a non-zero adjustment amount.");
+    if (numInput <= 0) {
+      setFormError("Please enter a valid quantity greater than 0.");
       return;
     }
 
-    if (numAmount > 100000) {
-      setFormError("Adjustment quantity cannot exceed 100,000.");
+    if (!restockReason.trim()) {
+      setFormError("Reason is required. Please type a reason or select a preset.");
       return;
     }
 
-    const effectiveChange = adjustmentType === "Damaged/Loss" ? -Math.abs(numAmount) : (adjustmentType === "Restock" ? Math.abs(numAmount) : numAmount);
+    if (calculatedNewStock > 100000) {
+      setFormError("Total stock cannot exceed 100,000.");
+      return;
+    }
 
-    await updateStock(selectedItem.id, effectiveChange, restockReason, adjustmentType);
+    const finalReason = restockReason.trim();
+    const movementType: StockMovement["type"] = adjustMode === "add" ? "Restock" : "Damaged/Loss";
+
+    await updateStock(selectedItem.id, effectiveChange, finalReason, movementType);
 
     await logAuditAction({
-      action: adjustmentType === "Restock" ? "Restocked Equipment" : "Adjusted Equipment Stock",
+      action: adjustMode === "add" ? "Restocked Equipment" : "Deducted Equipment / Loss",
       target: selectedItem.name,
       type: "Update",
-      details: `${adjustmentType}: ${effectiveChange > 0 ? "+" : ""}${effectiveChange} ${selectedItem.unit} (${restockReason})`,
+      details: `${movementType}: ${effectiveChange >= 0 ? "+" : ""}${effectiveChange} ${selectedItem.unit} (From ${selectedItem.stock} to ${calculatedNewStock}) - ${finalReason}`,
     });
 
     setIsRestockModalOpen(false);
     setSelectedItem(null);
     setRestockAmount(10);
-    setRestockReason("Supplier delivery / Purchase");
-    setAdjustmentType("Restock");
+    setAdjustMode("add");
+    setRestockReason("");
+    setShowReasonDropdown(false);
     setFormError(null);
   };
 
@@ -417,7 +462,7 @@ export function InventoryPage() {
       const isArchived =
         item.status === "Archived" || item.status?.toLowerCase() === "archived";
       const matchesArchiveStatus = showArchived ? isArchived : !isArchived;
-      const normStatus = normalizeStockStatus(item.status);
+      const normStatus = item.status === "Archived" ? "Archived" : computeItemStatus(item.stock, item.minStock, item.status);
       const matchesStatusFilter =
         filterStatus === "All" ||
         normStatus === filterStatus ||
@@ -444,8 +489,8 @@ export function InventoryPage() {
         "Low Stock": 2,
         Healthy: 3,
       };
-      const valA = statusOrder[normalizeStockStatus(a.status)] || 5;
-      const valB = statusOrder[normalizeStockStatus(b.status)] || 5;
+      const valA = statusOrder[a.status === "Archived" ? "Archived" : computeItemStatus(a.stock, a.minStock, a.status)] || 5;
+      const valB = statusOrder[b.status === "Archived" ? "Archived" : computeItemStatus(b.stock, b.minStock, b.status)] || 5;
       if (valA < valB) return sortStatus === "asc" ? -1 : 1;
       if (valA > valB) return sortStatus === "asc" ? 1 : -1;
       return 0;
@@ -459,7 +504,7 @@ export function InventoryPage() {
   }, [items]);
 
   const lowStockItems = useMemo(() => {
-    return activeItems.filter((i) => normalizeStockStatus(i.status) === "Low");
+    return activeItems.filter((i) => computeItemStatus(i.stock, i.minStock, i.status) === "Low");
   }, [activeItems]);
 
   const stats = useMemo(() => {
@@ -584,7 +629,7 @@ export function InventoryPage() {
             </div>
             <div className="h-[7px] w-full bg-natural-bg border border-natural-border rounded-full overflow-hidden">
               {(() => {
-                const s = normalizeStockStatus(item.status);
+                const s = item.status === "Archived" ? "Archived" : computeItemStatus(item.stock, item.minStock, item.status);
                 return (
                   <div
                     className={cn(
@@ -593,7 +638,11 @@ export function InventoryPage() {
                         ? "bg-gray-400"
                         : item.stock === 0
                           ? "bg-gray-300 dark:bg-gray-700"
-                          : remainingPercent > 50
+                          : s === "Low"
+                            ? "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.4)]"
+                            : s === "Normal"
+                              ? "bg-amber-400"
+                              : remainingPercent > 50
                             ? "bg-[#6b8e23]"
                             : remainingPercent > 20
                               ? "bg-amber-400"
@@ -664,7 +713,7 @@ export function InventoryPage() {
     }
 
     if (colId === "stockStatus") {
-      const s = normalizeStockStatus(item.status);
+      const s = item.status === "Archived" ? "Archived" : computeItemStatus(item.stock, item.minStock, item.status);
       return (
         <td
           key="stockStatus"
@@ -1164,180 +1213,310 @@ export function InventoryPage() {
       {isRestockModalOpen && selectedItem && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="p-6 border-b border-natural-border flex items-center justify-between">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-natural-border flex items-center justify-between">
               <div>
-                <h3 className="text-xl font-serif font-bold text-natural-text-main">
+                <h3 className="text-lg font-serif font-bold text-natural-text-main flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-natural-accent" />
                   Stock Adjustment
                 </h3>
                 <p className="text-xs text-natural-text-light font-medium uppercase tracking-wider mt-0.5">
-                  {selectedItem.name} ({selectedItem.category})
+                  {selectedItem.name} <span className="opacity-50">•</span> {selectedItem.category}
                 </p>
               </div>
-              <button
-                onClick={() => {
-                  setIsRestockModalOpen(false);
-                  setSelectedItem(null);
-                  setFormError(null);
-                }}
-                className="p-1 hover:bg-natural-bg rounded-lg"
-              >
-                <X className="w-5 h-5 text-natural-text-light" />
-              </button>
+              <div className="flex items-center gap-2.5">
+                <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-natural-bg border border-natural-border text-natural-text-main">
+                  On Hand: <strong>{selectedItem.stock}</strong> {selectedItem.unit}
+                </span>
+                <button
+                  onClick={() => {
+                    setIsRestockModalOpen(false);
+                    setSelectedItem(null);
+                    setShowReasonDropdown(false);
+                    setFormError(null);
+                  }}
+                  className="p-1.5 hover:bg-natural-bg rounded-lg text-natural-text-light hover:text-natural-text-main transition-colors cursor-pointer"
+                  title="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
-            <div className="p-6 space-y-5">
+            <div className="p-5 space-y-4">
               {formError && (
-                <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 rounded-xl">
-                  <p className="text-xs font-bold text-red-600 dark:text-red-400">{formError}</p>
+                <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 rounded-xl flex items-center gap-2 text-xs font-bold text-red-600 dark:text-red-400">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{formError}</span>
                 </div>
               )}
 
-              {/* Action Type Selector */}
+              {/* 1. Adjustment Type: Add or Remove */}
               <div className="space-y-1">
-                <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
+                <label className="text-[11px] font-bold text-natural-text-light uppercase tracking-wider">
                   Adjustment Type
                 </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { type: "Restock", label: "Restock (+)" },
-                    { type: "Damaged/Loss", label: "Damage / Loss (-)" },
-                  ].map((btn) => (
-                    <button
-                      key={btn.type}
-                      type="button"
-                      onClick={() => {
-                        setAdjustmentType(btn.type as StockMovement["type"]);
-                        if (btn.type === "Restock") setRestockReason("Supplier delivery / Purchase");
-                        if (btn.type === "Damaged/Loss") setRestockReason("Broken during event");
-                      }}
-                      className={cn(
-                        "py-2.5 px-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all border",
-                        adjustmentType === btn.type
-                          ? "bg-natural-accent text-white border-natural-accent shadow-xs"
-                          : "bg-natural-bg/50 border-natural-border text-natural-text-main hover:bg-white"
-                      )}
-                    >
-                      {btn.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Amount Presets & Input */}
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
-                  Quantity ({selectedItem.unit})
-                </label>
-                <div className="flex items-center gap-2">
-                  {[10, 25, 50, 100].map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => setRestockAmount(preset)}
-                      className={cn(
-                        "flex-1 py-1.5 rounded-lg text-xs font-bold transition-all border",
-                        restockAmount === preset
-                          ? "bg-natural-accent/10 border-natural-accent text-natural-accent"
-                          : "bg-natural-bg/30 border-natural-border text-natural-text-main hover:bg-white"
-                      )}
-                    >
-                      +{preset}
-                    </button>
-                  ))}
-                </div>
-                <input
-                  type="number"
-                  min="1"
-                  max="100000"
-                  value={restockAmount}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (val === "") {
-                      setRestockAmount("");
+                <div className="grid grid-cols-2 gap-2 p-1 bg-natural-bg/60 rounded-xl border border-natural-border/70">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAdjustMode("add");
                       setFormError(null);
-                      return;
-                    }
-                    const num = Number(val);
-                    if (num > 100000) {
-                      setRestockAmount(100000);
-                      setFormError("Adjustment quantity cannot exceed 100,000.");
-                      return;
-                    }
-                    if (num < 0) {
-                      setRestockAmount(0);
-                      return;
-                    }
-                    setRestockAmount(num);
-                    setFormError(null);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") {
-                      e.preventDefault();
-                    }
-                  }}
-                  className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-center text-lg font-bold font-serif focus:bg-white focus:outline-none focus:ring-2 focus:ring-natural-accent/10"
-                />
+                    }}
+                    className={cn(
+                      "py-2.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border",
+                      adjustMode === "add"
+                        ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
+                        : "bg-transparent border-transparent text-natural-text-main hover:bg-white dark:hover:bg-natural-card"
+                    )}
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Add Stock</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAdjustMode("deduct");
+                      setFormError(null);
+                    }}
+                    className={cn(
+                      "py-2.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border",
+                      adjustMode === "deduct"
+                        ? "bg-red-600 text-white border-red-600 shadow-sm"
+                        : "bg-transparent border-transparent text-natural-text-main hover:bg-white dark:hover:bg-natural-card"
+                    )}
+                  >
+                    <Minus className="w-4 h-4" />
+                    <span>Remove / Loss</span>
+                  </button>
+                </div>
               </div>
 
-              {/* Stock Preview */}
-              <div className="p-3 bg-natural-bg/40 border border-natural-border rounded-xl flex items-center justify-between text-xs">
+              {/* 2. Stock Impact Preview (ABOVE QUANTITY AS REQUESTED) */}
+              <div className="p-3.5 bg-natural-bg/40 border border-natural-border rounded-xl flex items-center justify-between text-xs">
                 <div>
-                  <span className="text-xs text-natural-text-light uppercase font-bold block">
+                  <span className="text-[10px] text-natural-text-light uppercase font-bold tracking-wider block">
                     Current Stock
                   </span>
-                  <span className="font-bold text-natural-text-main">
+                  <span className="font-bold text-natural-text-main text-sm">
                     {selectedItem.stock.toLocaleString()} {selectedItem.unit}
                   </span>
                 </div>
-                <span className="text-natural-text-light font-bold text-sm">➔</span>
+                <div className="text-center px-2">
+                  <span className={cn(
+                    "font-bold text-xs px-2 py-0.5 rounded-md",
+                    adjustMode === "add"
+                      ? "text-emerald-700 bg-emerald-500/15"
+                      : "text-red-700 bg-red-500/15"
+                  )}>
+                    {adjustMode === "add" ? `+${numInput}` : `-${numInput}`} {selectedItem.unit}
+                  </span>
+                  <span className="block text-natural-text-light/70 text-xs mt-0.5">➔</span>
+                </div>
                 <div className="text-right">
-                  <span className="text-xs text-natural-text-light uppercase font-bold block">
+                  <span className="text-[10px] text-natural-text-light uppercase font-bold tracking-wider block">
                     New Stock After
                   </span>
-                  <span className="font-bold text-natural-accent text-sm">
-                    {Math.max(
-                      0,
-                      selectedItem.stock +
-                        (adjustmentType === "Damaged/Loss"
-                          ? -Math.abs(Number(restockAmount) || 0)
-                          : (Number(restockAmount) || 0))
-                    ).toLocaleString()}{" "}
-                    {selectedItem.unit}
-                  </span>
+                  <div className="flex items-center gap-1.5 justify-end">
+                    <span className="font-bold text-natural-text-main text-sm font-serif">
+                      {calculatedNewStock.toLocaleString()} {selectedItem.unit}
+                    </span>
+                    <span
+                      className={cn(
+                        "text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border",
+                        previewStatus === "High"
+                          ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/30"
+                          : previewStatus === "Normal"
+                          ? "bg-amber-500/10 text-amber-600 border-amber-500/30"
+                          : "bg-red-500/10 text-red-600 border-red-500/30"
+                      )}
+                    >
+                      {previewStatus}
+                    </span>
+                  </div>
                 </div>
               </div>
 
-              {/* Reason Input */}
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
-                  Reason / Memo Note
+              {/* 3. Quantity Stepper */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-natural-text-light uppercase tracking-wider">
+                  Quantity ({selectedItem.unit})
                 </label>
-                <input
-                  type="text"
-                  value={restockReason}
-                  onChange={(e) => setRestockReason(e.target.value)}
-                  className="w-full px-4 py-2 bg-natural-bg/50 border border-natural-border rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-natural-accent/10"
-                  placeholder="e.g. Purchased 50 new pieces from supplier"
-                />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cur = Number(restockAmount) || 0;
+                      const next = Math.max(1, cur - 1);
+                      setRestockAmount(next);
+                      setFormError(null);
+                    }}
+                    className="w-11 h-11 flex items-center justify-center rounded-xl bg-natural-bg/70 hover:bg-natural-bg border border-natural-border text-natural-text-main transition-colors cursor-pointer text-base font-bold shrink-0"
+                    title="Decrease by 1"
+                  >
+                    <Minus className="w-4 h-4" />
+                  </button>
+
+                  <div className="flex-1 relative">
+                    <input
+                      type="number"
+                      min="1"
+                      max="100000"
+                      value={restockAmount}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === "") {
+                          setRestockAmount("");
+                          setFormError(null);
+                          return;
+                        }
+                        const num = Number(val);
+                        if (num > 100000) {
+                          setRestockAmount(100000);
+                          setFormError("Quantity cannot exceed 100,000.");
+                          return;
+                        }
+                        if (num < 0) {
+                          setRestockAmount(0);
+                          return;
+                        }
+                        setRestockAmount(num);
+                        setFormError(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") {
+                          e.preventDefault();
+                        }
+                      }}
+                      className="w-full h-11 px-4 bg-natural-bg/50 border border-natural-border rounded-xl text-center text-lg font-bold font-serif focus:bg-white dark:focus:bg-natural-bg focus:outline-none focus:ring-2 focus:ring-natural-accent/20"
+                    />
+                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-semibold text-natural-text-light pointer-events-none">
+                      {selectedItem.unit}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cur = Number(restockAmount) || 0;
+                      const next = Math.min(100000, cur + 1);
+                      setRestockAmount(next);
+                      setFormError(null);
+                    }}
+                    className="w-11 h-11 flex items-center justify-center rounded-xl bg-natural-bg/70 hover:bg-natural-bg border border-natural-border text-natural-text-main transition-colors cursor-pointer text-base font-bold shrink-0"
+                    title="Increase by 1"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* 4. Reason Text Box (Required, Starts Blank, Dropdown Opens Upwards) */}
+              <div className="space-y-1.5 relative">
+                <label className="text-[11px] font-bold text-natural-text-light uppercase tracking-wider flex items-center justify-between">
+                  <span>
+                    Reason / Memo Note <span className="text-red-500">*</span>
+                  </span>
+                  <span className="text-[10px] font-medium text-red-500/90 lowercase">required</span>
+                </label>
+
+                {/* Combobox Textbox with Dropdown Trigger */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={restockReason}
+                    onChange={(e) => {
+                      setRestockReason(e.target.value);
+                      setFormError(null);
+                    }}
+                    placeholder="Enter reason for adjustment..."
+                    className="w-full px-3.5 py-2.5 pr-10 bg-natural-bg/50 border border-natural-border rounded-xl text-xs focus:bg-white dark:focus:bg-natural-bg focus:outline-none focus:ring-2 focus:ring-natural-accent/20 transition-all placeholder:text-natural-text-light/50"
+                  />
+
+                  {/* Dropdown Chevron Button INSIDE the textbox */}
+                  <button
+                    type="button"
+                    onClick={() => setShowReasonDropdown((prev) => !prev)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-natural-text-light hover:text-natural-text-main transition-colors cursor-pointer rounded-lg hover:bg-natural-bg"
+                    title="Select a preset reason"
+                  >
+                    <ChevronDown
+                      className={cn(
+                        "w-4 h-4 transition-transform duration-200",
+                        showReasonDropdown && "rotate-180 text-natural-accent"
+                      )}
+                    />
+                  </button>
+
+                  {/* Floating Dropdown Menu (OPENS UPWARDS TO PREVENT CUTOFF) */}
+                  {showReasonDropdown && (
+                    <>
+                      {/* Transparent backdrop click-away */}
+                      <div
+                        className="fixed inset-0 z-30"
+                        onClick={() => setShowReasonDropdown(false)}
+                      />
+
+                      <div className="absolute left-0 right-0 bottom-full mb-1.5 z-40 bg-white dark:bg-natural-card border border-natural-border rounded-xl shadow-2xl overflow-hidden py-1 max-h-56 overflow-y-auto custom-scrollbar animate-in fade-in-50 zoom-in-95 duration-150">
+                        <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-natural-text-light/70 border-b border-natural-border/40 bg-natural-bg/40">
+                          Choose Preset Reason ({adjustMode === "add" ? "Adding" : "Removing"})
+                        </div>
+                        {REASON_PRESETS[adjustMode].map((opt) => (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() => {
+                              setRestockReason(opt);
+                              setShowReasonDropdown(false);
+                              setFormError(null);
+                            }}
+                            className={cn(
+                              "w-full text-left px-3.5 py-2.5 text-xs flex items-center justify-between transition-colors cursor-pointer border-b border-natural-border/20 last:border-b-0",
+                              restockReason === opt
+                                ? "bg-natural-accent/10 text-natural-accent font-semibold"
+                                : "text-natural-text-main hover:bg-natural-bg"
+                            )}
+                          >
+                            <span>{opt}</span>
+                            {restockReason === opt && (
+                              <Check className="w-3.5 h-3.5 text-natural-accent shrink-0" />
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
 
-            <div className="p-6 bg-natural-bg/30 border-t border-natural-border flex gap-3">
+            {/* Modal Actions */}
+            <div className="p-5 bg-natural-bg/30 border-t border-natural-border flex gap-3">
               <button
+                type="button"
                 onClick={() => {
                   setIsRestockModalOpen(false);
                   setSelectedItem(null);
+                  setShowReasonDropdown(false);
                   setFormError(null);
                 }}
-                className="flex-1 px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest border border-natural-border text-natural-text-light hover:bg-white"
+                className="flex-1 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider border border-natural-border text-natural-text-light hover:bg-natural-bg transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleApplyRestockOrAdjustment}
-                className="flex-1 bg-natural-accent text-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 shadow-sm"
+                disabled={numInput <= 0}
+                className={cn(
+                  "flex-1 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider text-white transition-all shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed",
+                  adjustMode === "add"
+                    ? "bg-emerald-600 hover:bg-emerald-700"
+                    : "bg-red-600 hover:bg-red-700"
+                )}
               >
-                Confirm Update
+                {adjustMode === "add" ? `Confirm Add (+${numInput})` : `Confirm Remove (-${numInput})`}
               </button>
             </div>
           </div>
