@@ -75,12 +75,12 @@ interface InventoryContextType {
   updateStock: (id: string | number, quantity: number, reason?: string, type?: StockMovement['type']) => Promise<void>;
   archiveItem: (id: string | number) => Promise<void>;
   updateItem: (id: string | number, updates: Partial<InventoryItem>) => Promise<void>;
-  calculatePackageEquipment: (packageName: string, pax: number, inclusions?: string[]) => EquipmentRequirement[];
+  calculatePackageEquipment: (packageName: string, pax: number, inclusions?: string[], currentItemsList?: InventoryItem[], corkageData?: any) => EquipmentRequirement[];
   checkInventoryAvailability: (packageName: string, pax: number, inclusions?: string[]) => {
     isAvailable: boolean;
     requirements: (EquipmentRequirement & { availableStock: number; deficit: number })[];
   };
-  deductBookingInventory: (bookingId: string | number, bookingName: string, packageName: string, guestCount: number, inclusions?: string[]) => Promise<boolean>;
+  deductBookingInventory: (bookingId: string | number, bookingName: string, packageName: string, guestCount: number, inclusions?: string[], corkageData?: any) => Promise<boolean>;
   restoreBookingInventory: (bookingId: string | number, bookingName?: string, reason?: string) => Promise<boolean>;
   reconcileCompletedEvents: (bookingsList?: any[]) => Promise<number>;
   completeBookingAndReturnInventory: (bookingId: string | number, bookingName?: string) => Promise<boolean>;
@@ -663,7 +663,12 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     packageName: string,
     pax: number,
     inclusions?: string[],
-    currentItemsList?: InventoryItem[]
+    currentItemsList?: InventoryItem[],
+    corkageData?: {
+      hasLechonTable?: boolean;
+      alcoholicBeveragesCount?: number;
+      outsideFoodCount?: number;
+    }
   ): EquipmentRequirement[] => {
     const rules = getPackageRules(packageName, currentItemsList);
     const calculated: EquipmentRequirement[] = [];
@@ -684,6 +689,57 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         unit: rule.unit,
         type: rule.type
       });
+    }
+
+    // Auto-allocate extra equipment based on contract Corkage additions (Term 8):
+    if (corkageData) {
+      const extraChafing = (corkageData.hasLechonTable ? 1 : 0) + (Number(corkageData.outsideFoodCount) || 0);
+      const extraGlasses = (Number(corkageData.alcoholicBeveragesCount) || 0) * 4; // Glassware service per bottle
+      const extraPlates = corkageData.hasLechonTable ? 50 : 0; // 50 small plates for lechon setup
+
+      if (extraChafing > 0) {
+        const chafing = calculated.find(r => r.itemName.toLowerCase().includes('chafing') || r.itemName.toLowerCase().includes('warmer'));
+        if (chafing) {
+          chafing.quantity += extraChafing;
+        } else {
+          calculated.push({
+            itemName: 'Chafing dishes',
+            category: 'Event Equipment',
+            quantity: 5 + extraChafing,
+            unit: 'pcs',
+            type: 'fixed'
+          });
+        }
+      }
+
+      if (extraGlasses > 0) {
+        const glasses = calculated.find(r => r.itemName.toLowerCase() === 'glassware' || r.itemName.toLowerCase().includes('glass'));
+        if (glasses) {
+          glasses.quantity += extraGlasses;
+        } else {
+          calculated.push({
+            itemName: 'Glassware',
+            category: 'Tableware',
+            quantity: extraGlasses,
+            unit: 'pcs',
+            type: 'fixed'
+          });
+        }
+      }
+
+      if (extraPlates > 0) {
+        const plates = calculated.find(r => r.itemName.toLowerCase() === 'plates');
+        if (plates) {
+          plates.quantity += extraPlates;
+        }
+      }
+
+      if (corkageData.hasLechonTable) {
+        const buffetTable = calculated.find(r => r.itemName.toLowerCase().includes('buffet'));
+        if (buffetTable) {
+          buffetTable.quantity += 1;
+        }
+      }
     }
 
     return calculated;
@@ -734,7 +790,8 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     bookingName: string,
     packageName: string,
     guestCount: number,
-    inclusions?: string[]
+    inclusions?: string[],
+    corkageData?: any
   ): Promise<boolean> => {
     const idStr = String(bookingId);
 
@@ -778,7 +835,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         status: computeItemStatus(Number(item.stock) || 0, Number(item.min_stock) || 0, item.status)
       }));
 
-      const requirements = calculatePackageEquipment(packageName, guestCount, inclusions, freshItems);
+      const requirements = calculatePackageEquipment(packageName, guestCount, inclusions, freshItems, corkageData);
       const deductedItemsList: BookingDeductionRecord['items'] = [];
 
       // Prepare deduction record and reserve in Supabase `inventory_deductions`
@@ -1218,7 +1275,8 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         const additionalPax = Number(b.additional_pax ?? b.additionalPax ?? 0);
         const totalPax = guestCount + additionalPax;
         const inclusions = b.packages?.inclusions || b.inclusions || [];
-        const expectedReqs = calculatePackageEquipment(pkgName, totalPax, inclusions, currentInvItems);
+        const corkage = (b as any).corkage_info || (b as any).logistics_info?.corkage || null;
+        const expectedReqs = calculatePackageEquipment(pkgName, totalPax, inclusions, currentInvItems, corkage);
 
         let recordModified = false;
         for (const req of expectedReqs) {

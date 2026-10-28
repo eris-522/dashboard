@@ -133,6 +133,8 @@ export interface BookingLogisticsInfo {
   haulingFee: number;
   travelFee: number;
   notes?: string;
+  hasLechonTable?: boolean;
+  corkage?: any;
 }
 
 export const getBookingLogistics = (booking: any): BookingLogisticsInfo => {
@@ -170,6 +172,12 @@ export const getBookingLogistics = (booking: any): BookingLogisticsInfo => {
   const travelFee = Number(raw?.travelFee) || 0;
   const notes = raw?.notes || "";
 
+  const corkage = booking?.corkage_info || raw?.corkage || null;
+  const hasLechonTable = Boolean(
+    corkage?.hasLechonTable ||
+    (Array.isArray(booking?.selected_add_ons) && booking.selected_add_ons.some((a: string) => a.toLowerCase().includes("lechon")))
+  );
+
   return {
     isOutsideTaytay,
     isSecondFloorOrHigher,
@@ -180,6 +188,8 @@ export const getBookingLogistics = (booking: any): BookingLogisticsInfo => {
     haulingFee,
     travelFee,
     notes,
+    hasLechonTable,
+    corkage,
   };
 };
 
@@ -675,7 +685,8 @@ export function BookingPage() {
       }
 
       // Automatically deduct package equipment supplies from equipment monitoring
-      await deductBookingInventory(bookingId, confirmAction.bookingName, pkgName, totalPax, targetBooking?.packages?.inclusions || targetBooking?.inclusions);
+      const corkageData = targetBooking?.corkage_info || targetBooking?.logistics_info?.corkage || null;
+      await deductBookingInventory(bookingId, confirmAction.bookingName, pkgName, totalPax, targetBooking?.packages?.inclusions || targetBooking?.inclusions, corkageData);
 
       window.dispatchEvent(
         new CustomEvent("markAdminNotifRead", {
@@ -2449,10 +2460,90 @@ export function BookingPage() {
                               Staff Count
                             </p>
                             <p className="font-semibold text-natural-text-main mt-0.5">
-                              {autoWaiters} Waiters ({totalPax} Pax)
+                              {autoWaiters + (logistics.hasLechonTable ? 1 : 0)} Staff ({autoWaiters} Waiters{logistics.hasLechonTable ? " + 1 Chopper" : ""})
                             </p>
                           </div>
                         </div>
+
+                        {/* Event Crew Roster: Dedicated Lechon Chopper Assignment */}
+                        {logistics.hasLechonTable && (
+                          <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between gap-3 text-xs">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-500 flex items-center justify-center font-bold text-xs shrink-0">
+                                🍗
+                              </div>
+                              <div>
+                                <p className="font-bold text-natural-text-main">
+                                  1 Designated Lechon Chopper Waiter Assigned
+                                </p>
+                                <p className="text-[11px] text-natural-text-light">
+                                  Crew roster automatically allocated to the lechon carving station (Contract Term 8).
+                                </p>
+                              </div>
+                            </div>
+                            <span className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/30 shrink-0">
+                              Designated Crew
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Corkage & Outside Food Surcharges (Contract Term 8 & 15) */}
+                        {(() => {
+                          const corkage = selectedBooking.corkage_info || logistics.corkage || null;
+                          const hasCorkage = corkage && (corkage.hasLechonTable || corkage.alcoholicBeveragesCount > 0 || corkage.outsideFoodCount > 0);
+                          if (!hasCorkage) return null;
+
+                          return (
+                            <div className="p-3.5 bg-natural-card rounded-xl border border-natural-border space-y-2.5 text-xs">
+                              <div className="flex items-center justify-between border-b border-natural-border pb-2">
+                                <span className="font-bold text-natural-accent uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                                  <Wine className="w-3.5 h-3.5" /> Corkage &amp; Outside Food Services (Term 8)
+                                </span>
+                                <span className="font-serif font-bold text-natural-text-main text-xs">
+                                  Total Corkage: ₱{(corkage.totalCorkageFee || 0).toLocaleString()}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                {corkage.hasLechonTable && (
+                                  <div className="p-2 bg-natural-bg/60 border border-natural-border rounded-lg">
+                                    <div className="flex justify-between items-center font-bold text-natural-text-main">
+                                      <span>Lechon Table Setup</span>
+                                      <span className="text-natural-accent">₱1,500</span>
+                                    </div>
+                                    <p className="text-[10px] text-natural-text-light mt-0.5">
+                                      Half table, 50 plates, warmer, board &amp; 1 chopper waiter
+                                    </p>
+                                  </div>
+                                )}
+                                {corkage.alcoholicBeveragesCount > 0 && (
+                                  <div className="p-2 bg-natural-bg/60 border border-natural-border rounded-lg">
+                                    <div className="flex justify-between items-center font-bold text-natural-text-main">
+                                      <span>Alcoholic Corkage</span>
+                                      <span className="text-natural-accent">₱{(corkage.alcoholicBeveragesCount * 400).toLocaleString()}</span>
+                                    </div>
+                                    <p className="text-[10px] text-natural-text-light mt-0.5">
+                                      {corkage.alcoholicBeveragesCount} bottle(s) @ ₱400 (Ice, water, &amp; glassware included)
+                                    </p>
+                                  </div>
+                                )}
+                                {corkage.outsideFoodCount > 0 && (
+                                  <div className="p-2 bg-natural-bg/60 border border-natural-border rounded-lg">
+                                    <div className="flex justify-between items-center font-bold text-natural-text-main">
+                                      <span>Outside Food Corkage</span>
+                                      <span className="text-natural-accent">₱{(corkage.outsideFoodCount * 400).toLocaleString()}</span>
+                                    </div>
+                                    <p className="text-[10px] text-natural-text-light mt-0.5">
+                                      {corkage.outsideFoodCount} dish(es) @ ₱400 (Extra chafing warmer included)
+                                    </p>
+                                    <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold mt-1">
+                                      ✓ Health Risk Waiver Signed (Term 15)
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()}
 
                         {/* Custom Logistics Surcharge Inputs */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
@@ -3197,10 +3288,13 @@ export function BookingPage() {
                     const totalPax =
                       (Number(selectedBooking.guest_count) || 50) +
                       (Number(selectedBooking.additional_pax) || 0);
+                    const corkageInfo = selectedBooking.corkage_info || selectedBooking.logistics_info?.corkage || null;
                     const equipList = calculatePackageEquipment(
                       pkgName,
                       totalPax,
                       selectedBooking.packages?.inclusions || selectedBooking.inclusions,
+                      undefined,
+                      corkageInfo
                     );
 
                     const deductionRec = deductionRecords.find(
