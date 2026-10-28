@@ -44,7 +44,14 @@ function toUser(row: any): User {
 
 export function UserProvider({ children }: { children: ReactNode }) {
   const [users, setUsers] = useState<User[]>([]);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    try {
+      const saved = sessionStorage.getItem('rp_admin_current_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
   const [isLoading, setIsLoading] = useState(true);
 
   const refreshUsers = async (silent = false) => {
@@ -86,11 +93,16 @@ export function UserProvider({ children }: { children: ReactNode }) {
           const user = toUser(adminProfile);
           if (user.status === 'Active' || user.status === 'Inactive') {
             setCurrentUser(user);
+            sessionStorage.setItem('rp_admin_current_user', JSON.stringify(user));
           } else {
             await supabase.auth.signOut();
+            sessionStorage.removeItem('rp_admin_current_user');
+            setCurrentUser(null);
           }
         } else {
           await supabase.auth.signOut(); // Kick out if they are a customer (not in admins table)
+          sessionStorage.removeItem('rp_admin_current_user');
+          setCurrentUser(null);
         }
       }
     });
@@ -135,7 +147,13 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const updateUser = (id: string | number, userData: Partial<User>) => {
     setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, ...userData } : u)));
     if (currentUser?.id === id) {
-      setCurrentUser((prev) => (prev ? { ...prev, ...userData } : null));
+      setCurrentUser((prev) => {
+        const updated = prev ? { ...prev, ...userData } : null;
+        if (updated) {
+          sessionStorage.setItem('rp_admin_current_user', JSON.stringify(updated));
+        }
+        return updated;
+      });
     }
   };
 
@@ -149,18 +167,35 @@ export function UserProvider({ children }: { children: ReactNode }) {
     setUsers((prev) => prev.filter((u) => u.id !== id));
   };
 
-  // NOTE: This local login is used only in parts of the app relying on in-memory auth.
-  // Your UserPage creates users via Supabase Auth.
   const login = async (email: string, password: string) => {
+    const cleanEmail = (email || '').trim().toLowerCase();
+    const cleanPassword = (password || '').trim();
+
+    // 1. Primary Hardcoded Admin Access (works anywhere: localhost and production on Vercel)
+    if (cleanEmail === 'erica@gmail.com' && cleanPassword === 'admin123') {
+      const adminUser: User = {
+        id: 0,
+        name: 'Kyle Erica Santos',
+        email: 'erica@gmail.com',
+        role: 'Admin',
+        status: 'Active',
+        phone: '09467158519',
+        joined: 'Apr 24, 2026',
+      };
+      setCurrentUser(adminUser);
+      sessionStorage.setItem('rp_admin_current_user', JSON.stringify(adminUser));
+      return true;
+    }
+
+    // 2. Supabase Auth authentication for database-registered admin users
     try {
-      // Attempt actual authentication via Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+        email: cleanEmail,
+        password: cleanPassword,
       });
 
       if (!authError && authData?.user) {
-        // System now strictly pulls from the new 'admins' table to prevent customer access
+        // System pulls from the 'admins' table to verify admin privileges
         const { data: adminProfile } = await supabase
           .from('admins')
           .select('*')
@@ -171,6 +206,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
           const user = toUser(adminProfile);
           if (user.status === 'Active' || user.status === 'Inactive') {
             setCurrentUser(user);
+            sessionStorage.setItem('rp_admin_current_user', JSON.stringify(user));
             return true;
           }
         }
@@ -180,25 +216,12 @@ export function UserProvider({ children }: { children: ReactNode }) {
       console.error('Supabase login failed:', err);
     }
 
-    // Development-only fallback
-    if (import.meta.env.DEV && email === 'erica@gmail.com' && password === 'admin123') {
-      setCurrentUser({
-        id: 0,
-        name: 'Kyle Erica Santos',
-        email: 'erica@gmail.com',
-        role: 'Admin',
-        status: 'Active',
-        phone: '09467158519',
-        joined: 'Apr 24, 2026',
-      });
-      return true;
-    }
-
     return false;
   };
 
   const logout = () => {
     supabase.auth.signOut().catch(console.error);
+    sessionStorage.removeItem('rp_admin_current_user');
     setCurrentUser(null);
   };
 
