@@ -1,22 +1,12 @@
-import React from "react";
-import { supabase } from "./utils/supabase";
+import React, { Suspense, lazy } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { MetricCards } from "./components/MetricCards";
 import { RevenueChart } from "./components/RevenueChart";
 import { EventCalendar } from "./components/EventCalendar";
 import { InventorySummary } from "./components/InventorySummary";
 import { RecentActivities } from "./components/RecentActivities";
-import { UserPage } from "./pages/UserPage";
-import { BookingPage } from "./pages/BookingPage";
-import { MenuPage } from "./pages/MenuPage";
-import { PackagePage } from "./pages/PackagePage";
-import { InventoryPage } from "./pages/InventoryPage";
-import { AnalyticsPage } from "./pages/AnalyticsPage";
-import { AuditTrailPage } from "./pages/AuditTrailPage";
-import { SettingsPage } from "./pages/SettingsPage";
-import { CMSPage } from "./pages/CMSPage";
 import { NotificationCenter } from "./components/NotificationCenter";
-import { Bell, Mail, LogOut, Users, Sun, Moon } from "lucide-react";
+import { Bell, LogOut, Sun, Moon } from "lucide-react";
 import { cn } from "./lib/utils";
 import { InventoryProvider } from "./context/InventoryContext";
 import { BookingProvider, useBooking } from "./context/BookingContext";
@@ -25,7 +15,29 @@ import { MenuProvider } from "./context/MenuContext";
 import { ServicesProvider } from "./context/ServicesContext";
 import { PackageProvider } from "./context/PackageContext";
 import { ThemeProvider, useTheme } from "./context/ThemeContext";
-import { LoginPage } from "./pages/LoginPage";
+
+// Lazy-load individual management views on-demand to reduce initial bundle and Vercel bandwidth
+const UserPage = lazy(() => import("./pages/UserPage").then((m) => ({ default: m.UserPage })));
+const BookingPage = lazy(() => import("./pages/BookingPage").then((m) => ({ default: m.BookingPage })));
+const MenuPage = lazy(() => import("./pages/MenuPage").then((m) => ({ default: m.MenuPage })));
+const PackagePage = lazy(() => import("./pages/PackagePage").then((m) => ({ default: m.PackagePage })));
+const InventoryPage = lazy(() => import("./pages/InventoryPage").then((m) => ({ default: m.InventoryPage })));
+const AnalyticsPage = lazy(() => import("./pages/AnalyticsPage").then((m) => ({ default: m.AnalyticsPage })));
+const AuditTrailPage = lazy(() => import("./pages/AuditTrailPage").then((m) => ({ default: m.AuditTrailPage })));
+const SettingsPage = lazy(() => import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
+const CMSPage = lazy(() => import("./pages/CMSPage").then((m) => ({ default: m.CMSPage })));
+const LoginPage = lazy(() => import("./pages/LoginPage").then((m) => ({ default: m.LoginPage })));
+
+function SectionLoadingFallback() {
+  return (
+    <div className="p-20 text-center flex flex-col items-center justify-center space-y-3">
+      <div className="w-8 h-8 border-3 border-natural-accent/20 border-t-natural-accent rounded-full animate-spin" />
+      <span className="text-xs text-natural-text-light font-medium uppercase tracking-wider">
+        Loading Section...
+      </span>
+    </div>
+  );
+}
 
 /**
  * The primary dashboard view component.
@@ -99,7 +111,7 @@ function AppContent() {
     const handleMarkRead = (e: any) => {
       const { id, status } = e.detail;
       const key = `${id}-${status}`;
-      setDismissedIds((prev) => prev.includes(key) ? prev : [...prev, key]);
+      setDismissedIds((prev) => (prev.includes(key) ? prev : [...prev, key]));
     };
     window.addEventListener("markAdminNotifRead", handleMarkRead);
     return () => window.removeEventListener("markAdminNotifRead", handleMarkRead);
@@ -114,7 +126,10 @@ function AppContent() {
   const pendingCount = bookings.filter((b) => {
     const status = b.status || "Pending";
     const notifKey = `${b.id}-${status}`;
-    return (status === "Pending" || status === "Inquiry" || status === "Cancelled" || status === "Confirmed") && !dismissedIds.includes(notifKey);
+    return (
+      (status === "Pending" || status === "Inquiry" || status === "Cancelled" || status === "Confirmed") &&
+      !dismissedIds.includes(notifKey)
+    );
   }).length;
 
   React.useEffect(() => {
@@ -198,26 +213,23 @@ function AppContent() {
             {/* Notification Bell */}
             <div className="flex items-center gap-2 relative" ref={notificationRef}>
               <button
-                onClick={() =>
-                  setIsNotificationOpen(!isNotificationOpen)
-                }
+                onClick={() => setIsNotificationOpen(!isNotificationOpen)}
                 className={cn(
                   "p-2 bg-white border border-natural-border rounded-lg relative hover:bg-natural-bg transition-colors shadow-xs cursor-pointer",
-                  isNotificationOpen &&
-                    "ring-2 ring-natural-accent/20 bg-natural-bg",
+                  isNotificationOpen && "ring-2 ring-natural-accent/20 bg-natural-bg"
                 )}
               >
                 <Bell className="w-4 h-4 text-natural-text-main" />
                 {pendingCount > 0 && (
                   <span className="absolute -top-1.5 -right-1.5 flex items-center justify-center min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[9px] font-bold rounded-full border border-white shadow-sm">
-                    {pendingCount > 99 ? '99+' : pendingCount}
+                    {pendingCount > 99 ? "99+" : pendingCount}
                   </span>
                 )}
               </button>
 
-              <NotificationCenter 
-                isOpen={isNotificationOpen} 
-                onClose={() => setIsNotificationOpen(false)} 
+              <NotificationCenter
+                isOpen={isNotificationOpen}
+                onClose={() => setIsNotificationOpen(false)}
                 onManageBooking={() => setActiveTab("booking")}
                 onViewAllLogs={() => setActiveTab("audit-trail")}
                 dismissedIds={dismissedIds}
@@ -259,33 +271,35 @@ function AppContent() {
 
         {/* Content Area */}
         <div className="w-full max-w-none transition-all duration-300 min-w-0">
-          {activeTab === "dashboard" ? (
-            <Dashboard onNavigate={setActiveTab} />
-          ) : activeTab === "user" ? (
-            <UserPage />
-          ) : activeTab === "booking" ? (
-            <BookingPage />
-          ) : activeTab === "menu" ? (
-            <MenuPage />
-          ) : activeTab === "packages" ? (
-            <PackagePage />
-          ) : activeTab === "inventory" ? (
-            <InventoryPage />
-          ) : activeTab === "cms" ? (
-            <CMSPage />
-          ) : activeTab === "analytics" ? (
-            <AnalyticsPage />
-          ) : activeTab === "audit-trail" ? (
-            <AuditTrailPage />
-          ) : activeTab === "setting" ? (
-            <SettingsPage />
-          ) : (
-            <div className="p-20 text-center glass-card">
-              <p className="text-natural-text-light font-serif italic">
-                This section ({activeTab}) is under construction.
-              </p>
-            </div>
-          )}
+          <Suspense fallback={<SectionLoadingFallback />}>
+            {activeTab === "dashboard" ? (
+              <Dashboard onNavigate={setActiveTab} />
+            ) : activeTab === "user" ? (
+              <UserPage />
+            ) : activeTab === "booking" ? (
+              <BookingPage />
+            ) : activeTab === "menu" ? (
+              <MenuPage />
+            ) : activeTab === "packages" ? (
+              <PackagePage />
+            ) : activeTab === "inventory" ? (
+              <InventoryPage />
+            ) : activeTab === "cms" ? (
+              <CMSPage />
+            ) : activeTab === "analytics" ? (
+              <AnalyticsPage />
+            ) : activeTab === "audit-trail" ? (
+              <AuditTrailPage />
+            ) : activeTab === "setting" ? (
+              <SettingsPage />
+            ) : (
+              <div className="p-20 text-center glass-card">
+                <p className="text-natural-text-light font-serif italic">
+                  This section ({activeTab}) is under construction.
+                </p>
+              </div>
+            )}
+          </Suspense>
         </div>
 
         {/* Footer */}
@@ -307,7 +321,11 @@ function MainApp() {
   const { currentUser } = useUser();
 
   if (!currentUser) {
-    return <LoginPage />;
+    return (
+      <Suspense fallback={<div className="min-h-screen bg-natural-light flex items-center justify-center" />}>
+        <LoginPage />
+      </Suspense>
+    );
   }
 
   return (
