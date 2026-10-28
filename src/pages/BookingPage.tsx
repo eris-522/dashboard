@@ -630,30 +630,41 @@ export function BookingPage() {
       const pkgName = targetBooking?.packages?.name || (packages.find(p => p.id === targetBooking?.package_id)?.name) || targetBooking?.package || packages[0]?.name || "Event Package";
       const totalPax = (Number(targetBooking?.guest_count) || 50) + (Number(targetBooking?.additional_pax) || 0);
 
-      // Attempt to update with payment_status: "Verified"
+      const confirmedAt = new Date().toISOString();
+      const updatedLogisticsInfo = {
+        ...(targetBooking?.logistics_info || {}),
+        confirmed_at: confirmedAt,
+      };
+
+      // Attempt to update with payment_status: "Verified" and confirmed_at timestamp
       let { error: updateErr } = await supabase
         .from("bookings")
-        .update({ status: "Confirmed", payment_status: "Verified" })
+        .update({
+          status: "Confirmed",
+          payment_status: "Verified",
+          logistics_info: updatedLogisticsInfo,
+        })
         .eq("id", bookingId);
 
       if (updateErr) {
-        // Fallback if payment_status column does not exist yet
+        // Fallback if payment_status or logistics_info column does not exist yet
         const { error: fallbackErr } = await supabase
           .from("bookings")
           .update({ status: "Confirmed" })
           .eq("id", bookingId);
         updateErr = fallbackErr;
+      }
 
-        // Also update fallback metadata in food_allergies if present
-        if (!fallbackErr && targetBooking?.food_allergies?.includes("__PAYMENT_METADATA__:")) {
-          try {
-            const parts = targetBooking.food_allergies.split("__PAYMENT_METADATA__:");
-            const meta = JSON.parse(parts[1]);
-            meta.status = "Verified";
-            const updatedAllergies = `${parts[0]}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
-            await supabase.from("bookings").update({ food_allergies: updatedAllergies }).eq("id", bookingId);
-          } catch (e) {}
-        }
+      // Also keep fallback metadata in food_allergies in sync if present
+      if (!updateErr && targetBooking?.food_allergies?.includes("__PAYMENT_METADATA__:")) {
+        try {
+          const parts = targetBooking.food_allergies.split("__PAYMENT_METADATA__:");
+          const meta = JSON.parse(parts[1]);
+          meta.status = "Verified";
+          meta.logistics = { ...(meta.logistics || {}), confirmed_at: confirmedAt };
+          const updatedAllergies = `${parts[0]}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+          await supabase.from("bookings").update({ food_allergies: updatedAllergies }).eq("id", bookingId);
+        } catch (e) {}
       }
 
       if (updateErr) {
