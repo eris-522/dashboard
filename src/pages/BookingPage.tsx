@@ -30,6 +30,7 @@ import {
   ShieldCheck,
   FileText,
   Lock,
+  Wine,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { EventCalendar } from "../components/EventCalendar";
@@ -2536,7 +2537,7 @@ export function BookingPage() {
                                       {corkage.outsideFoodCount} dish(es) @ ₱400 (Extra chafing warmer included)
                                     </p>
                                     <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold mt-1">
-                                      ✓ Health Risk Waiver Signed (Term 15)
+                                      ✓ Health Risk Waiver Signed
                                     </p>
                                   </div>
                                 )}
