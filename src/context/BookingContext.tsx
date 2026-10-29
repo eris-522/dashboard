@@ -53,6 +53,12 @@ export interface Booking {
   final_balance_reference?: string;
   final_balance_receipt?: string;
   installment_schedule?: any;
+  selected_menu_items?: string[];
+  logistics_info?: any;
+  corkage_info?: any;
+  dish_substitutions?: any[];
+  modification_requests?: any[];
+  cancelled_by?: string;
   created_at?: string;
   updated_at?: string;
 }
@@ -107,6 +113,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
             setBookings((prev) => prev.filter((b) => String(b.id) !== String(payload.old.id)));
           }
           refreshBookings(true); // Refresh data silently only when a booking actually changes
+          window.dispatchEvent(new CustomEvent("bookingsRealtimeSync"));
         },
       )
       .subscribe((status: string, err?: Error) => {
@@ -183,6 +190,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
           let finalBalanceReference = booking.final_balance_reference || "";
           let finalBalanceReceipt = booking.final_balance_receipt || "";
           let installmentSchedule = booking.installment_schedule || null;
+          let logisticsInfo = booking.logistics_info || null;
 
           // Fallback extraction if embedded in food_allergies
           if (typeof booking.food_allergies === "string" && booking.food_allergies.includes("__PAYMENT_METADATA__:")) {
@@ -202,6 +210,9 @@ export function BookingProvider({ children }: { children: ReactNode }) {
               if (!finalBalanceReference) finalBalanceReference = parsed.finalBalanceRef || "";
               if (!finalBalanceReceipt) finalBalanceReceipt = parsed.finalBalanceReceipt || "";
               if (!installmentSchedule) installmentSchedule = parsed.installments || null;
+              if ((!logisticsInfo || Object.keys(logisticsInfo).length === 0) && parsed.logistics) {
+                logisticsInfo = parsed.logistics;
+              }
             } catch (e) {}
           }
 
@@ -228,8 +239,14 @@ export function BookingProvider({ children }: { children: ReactNode }) {
             venueName: booking.event_location?.split(" - ")[0] || "",
             venueAddress: booking.event_location?.split(" - ")[1] || "",
             menu: booking.selected_menu_items || [],
+            selected_menu_items: booking.selected_menu_items || [],
             additionalServices: booking.selected_add_ons || [],
             foodAllergies: cleanFoodAllergies,
+            logistics_info: logisticsInfo,
+            corkage_info: booking.corkage_info || logisticsInfo?.corkage || null,
+            dish_substitutions: Array.isArray(booking.dish_substitutions) ? booking.dish_substitutions : [],
+            modification_requests: Array.isArray(booking.modification_requests) ? booking.modification_requests : [],
+            cancelled_by: booking.cancelled_by || "",
             budget: (() => {
               const basePrice =
                 parseFloat(
@@ -245,8 +262,17 @@ export function BookingProvider({ children }: { children: ReactNode }) {
                     "",
                   ),
                 ) || 0;
-              const extraPax = booking.additional_pax || 0;
-              return basePrice + addPrice * extraPax;
+              const extraPax = Number(booking.additional_pax) || 0;
+              const travelFee = Number(logisticsInfo?.travelFee) || 0;
+              const haulingFee = Number(logisticsInfo?.haulingFee) || 0;
+              const corkageObj = booking.corkage_info || logisticsInfo?.corkage || null;
+              const corkageFee =
+                Number(corkageObj?.totalCorkageFee) ||
+                ((corkageObj?.hasLechonTable ? 1500 : 0) +
+                  Number(corkageObj?.alcoholicBeveragesCount || 0) * 400 +
+                  Number(corkageObj?.outsideFoodCount || 0) * 400) ||
+                0;
+              return basePrice + addPrice * extraPax + travelFee + haulingFee + corkageFee;
             })(),
             status: booking.status || "Pending",
             downpayment_amount: downpaymentAmount,

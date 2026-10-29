@@ -31,6 +31,9 @@ import {
   FileText,
   Lock,
   Wine,
+  AlertTriangle,
+  RefreshCw,
+  Sliders,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { EventCalendar } from "../components/EventCalendar";
@@ -137,6 +140,98 @@ export interface BookingLogisticsInfo {
   hasLechonTable?: boolean;
   corkage?: any;
 }
+
+export const hasLateModification = (booking: any): boolean => {
+  if (!booking) return false;
+  if (booking.logistics_info?.isLateModification) return true;
+  const modRequests = Array.isArray(booking.modification_requests)
+    ? booking.modification_requests
+    : [];
+  return modRequests.some(
+    (m: any) => m.is_late || (m.days_before_event !== undefined && m.days_before_event <= 14)
+  );
+};
+
+export const hasPendingModification = (booking: any): boolean => {
+  if (!booking) return false;
+  const modRequests = Array.isArray(booking.modification_requests)
+    ? booking.modification_requests
+    : [];
+  return modRequests.some((m: any) => m.status === "Pending");
+};
+
+export const hasAppliedModification = (booking: any): boolean => {
+  if (!booking) return false;
+  const modRequests = Array.isArray(booking.modification_requests)
+    ? booking.modification_requests
+    : [];
+  return modRequests.some((m: any) => m.status === "Applied");
+};
+
+// Standardized catering package category mapper (identical to customer-side)
+export const getRuleCategory = (dbCategory: string, itemName: string = ""): string => {
+  const cat = (dbCategory || "").toLowerCase();
+  const name = (itemName || "").toLowerCase();
+
+  // Smart overrides based on item name to rescue items lumped into combined categories
+  if (
+    name.includes("soup") ||
+    name.includes("broth") ||
+    name.includes("chowder") ||
+    name.includes("sinigang") ||
+    name.includes("nilaga") ||
+    name.includes("mami") ||
+    name.includes("sopas") ||
+    name.includes("tinola") ||
+    name.includes("lomi")
+  ) return "Soup";
+
+  if (
+    name.includes("vegetable") ||
+    name.includes("veggie") ||
+    name.includes("salad") ||
+    name.includes("pinakbet") ||
+    name.includes("pakbet") ||
+    name.includes("kangkong") ||
+    name.includes("laing")
+  ) return "Vegetable";
+
+  if (
+    name.includes("pasta") ||
+    name.includes("noodle") ||
+    name.includes("spaghetti") ||
+    name.includes("carbonara") ||
+    name.includes("pancit") ||
+    name.includes("palabok") ||
+    name.includes("bihon") ||
+    name.includes("sotanghon") ||
+    name.includes("canton") ||
+    name.includes("macaroni") ||
+    name.includes("lasagna")
+  ) return "Pasta";
+
+  if (name.includes("rice")) return "Rice";
+
+  if (cat.includes("appetizer")) return "Appetizer";
+  if (cat.includes("soup")) return "Soup";
+  if (cat.includes("pasta") || cat.includes("noodle")) return "Pasta";
+  if (cat.includes("vegetable") || cat.includes("veggie")) return "Vegetable";
+  if (cat.includes("rice")) return "Rice";
+  if (cat.includes("dessert") || cat.includes("sweet")) return "Dessert";
+  if (cat.includes("drink") || cat.includes("beverage")) return "Drinks";
+  return "Main Course";
+};
+
+export const categoryOrder = [
+  "Appetizer",
+  "Soup",
+  "Main Course",
+  "Pasta",
+  "Vegetable",
+  "Rice",
+  "Dessert",
+  "Drinks",
+];
 
 export const getBookingLogistics = (booking: any): BookingLogisticsInfo => {
   const loc = String(booking?.event_location || "").toLowerCase();
@@ -252,6 +347,21 @@ export function BookingPage() {
   const [customHaulingFeeInput, setCustomHaulingFeeInput] = useState<string>("0");
   const [customLogisticsNotes, setCustomLogisticsNotes] = useState<string>("");
   const [isSavingLogistics, setIsSavingLogistics] = useState<boolean>(false);
+  // Product Unavailability & Substitution Tool State
+  const [isSubModalOpen, setIsSubModalOpen] = useState<boolean>(false);
+  const [subOriginalDish, setSubOriginalDish] = useState<string>("");
+  const [subReplacementDish, setSubReplacementDish] = useState<string>("");
+  const [isCustomReplacement, setIsCustomReplacement] = useState<boolean>(false);
+  const [subCustomReplacement, setSubCustomReplacement] = useState<string>("");
+  const [subReason, setSubReason] = useState<string>("Ingredient shortage / Out of stock in market");
+  const [subClientNote, setSubClientNote] = useState<string>("");
+  const [isSavingSub, setIsSavingSub] = useState<boolean>(false);
+  const [subMessage, setSubMessage] = useState<string>("");
+
+  // Rejecting modification state
+  const [rejectingModId, setRejectingModId] = useState<string | null>(null);
+  const [rejectReasonInput, setRejectReasonInput] = useState<string>("");
+
   const [logisticsSaveMessage, setLogisticsSaveMessage] = useState<string>("");
   const [viewingReceipt, setViewingReceipt] = useState<{
     url: string;
@@ -335,9 +445,41 @@ export function BookingPage() {
     selectedBooking?.additionalPax,
   ]);
 
+  const pendingOpenBookingIdRef = React.useRef<string | number | null>(null);
+
+  useEffect(() => {
+    const handleOpenOverview = (e: any) => {
+      const targetId = e.detail?.bookingId;
+      if (!targetId) return;
+      setBookings((currentList) => {
+        const match = currentList.find((b) => String(b.id) === String(targetId));
+        if (match) {
+          setSelectedBooking(match);
+          pendingOpenBookingIdRef.current = null;
+        } else {
+          pendingOpenBookingIdRef.current = targetId;
+        }
+        return currentList;
+      });
+    };
+    window.addEventListener("openAdminBookingOverview", handleOpenOverview);
+    return () => window.removeEventListener("openAdminBookingOverview", handleOpenOverview);
+  }, []);
+
   useEffect(() => {
     // Fetch initial data
-    fetchAllData();
+    fetchAllData(false);
+
+    const handleSilentSync = () => {
+      if (document.visibilityState === "visible") {
+        fetchAllData(true);
+      }
+    };
+
+    window.addEventListener("bookingsUpdated", handleSilentSync);
+    window.addEventListener("bookingsRealtimeSync", handleSilentSync);
+    window.addEventListener("focus", handleSilentSync);
+    document.addEventListener("visibilitychange", handleSilentSync);
 
     // Subscribe to real-time changes on the bookings table
     const channel = supabase
@@ -345,9 +487,8 @@ export function BookingPage() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "bookings" },
-        (payload) => {
-          console.log("Booking change detected:", payload);
-          fetchAllData(); // Refresh data when any booking changes
+        () => {
+          fetchAllData(true); // Refresh silently when any booking changes
         },
       )
       .on(
@@ -365,15 +506,26 @@ export function BookingPage() {
       )
       .subscribe();
 
+    const pollInterval = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        fetchAllData(true);
+      }
+    }, 5000);
+
     // Cleanup subscription on unmount
     return () => {
+      window.removeEventListener("bookingsUpdated", handleSilentSync);
+      window.removeEventListener("bookingsRealtimeSync", handleSilentSync);
+      window.removeEventListener("focus", handleSilentSync);
+      document.removeEventListener("visibilitychange", handleSilentSync);
+      clearInterval(pollInterval);
       supabase.removeChannel(channel);
     };
   }, []);
 
-  const fetchAllData = async () => {
+  const fetchAllData = async (silent = false) => {
     try {
-      setIsLoading(true);
+      if (!silent) setIsLoading(true);
       setFetchError(null);
 
       const { data: bData, error: bError } = await supabase
@@ -394,10 +546,20 @@ export function BookingPage() {
         setBookings([]);
       } else {
         setBookings(bData || []);
-        setSelectedBooking((prev: any) => {
-          if (!prev) return null;
-          return (bData || []).find((b: any) => String(b.id) === String(prev.id)) || prev;
-        });
+        if (pendingOpenBookingIdRef.current) {
+          const targetMatch = (bData || []).find(
+            (b: any) => String(b.id) === String(pendingOpenBookingIdRef.current)
+          );
+          if (targetMatch) {
+            setSelectedBooking(targetMatch);
+            pendingOpenBookingIdRef.current = null;
+          }
+        } else {
+          setSelectedBooking((prev: any) => {
+            if (!prev) return null;
+            return (bData || []).find((b: any) => String(b.id) === String(prev.id)) || prev;
+          });
+        }
         setFetchError(null);
         if (bData && bData.length > 0) {
           reconcileCompletedEvents(bData);
@@ -496,7 +658,14 @@ export function BookingPage() {
     );
 
     const logistics = getBookingLogistics(booking);
-    return basePrice + additionalPaxTotal + servicesPrice + logistics.haulingFee + logistics.travelFee;
+    const corkageData = logistics.corkage;
+    const corkageFee =
+      Number(corkageData?.totalCorkageFee) ||
+      ((corkageData?.hasLechonTable ? 1500 : 0) +
+        Number(corkageData?.alcoholicBeveragesCount || 0) * 400 +
+        Number(corkageData?.outsideFoodCount || 0) * 400) ||
+      0;
+    return basePrice + additionalPaxTotal + servicesPrice + logistics.haulingFee + logistics.travelFee + corkageFee;
   };
 
   const filteredBookings = useMemo(() => {
@@ -859,7 +1028,8 @@ export function BookingPage() {
       return;
     }
 
-    await fetchAllData();
+    window.dispatchEvent(new CustomEvent("bookingsUpdated"));
+    await fetchAllData(true);
     setConfirmAction(null);
     setSelectedBooking(null);
   };
@@ -975,7 +1145,8 @@ export function BookingPage() {
       });
     }
 
-    await fetchAllData();
+    window.dispatchEvent(new CustomEvent("bookingsUpdated"));
+    await fetchAllData(true);
   };
 
   const handleVerifyInstallment = async (bookingId: number | string, milestoneIndex: number) => {
@@ -1057,7 +1228,8 @@ export function BookingPage() {
       });
     }
 
-    await fetchAllData();
+    window.dispatchEvent(new CustomEvent("bookingsUpdated"));
+    await fetchAllData(true);
   };
 
   const handleSaveLogisticsSurcharge = async (bookingId: number | string) => {
@@ -1194,8 +1366,447 @@ export function BookingPage() {
       });
     }
 
+    window.dispatchEvent(new CustomEvent("bookingsUpdated"));
     setLogisticsSaveMessage("Logistics surcharge saved & balance updated.");
     setTimeout(() => setLogisticsSaveMessage(""), 4000);
+  };
+
+  const handleOpenSubstituteModal = (dishToReplace?: string) => {
+    if (!selectedBooking) return;
+    const currentDishes: string[] = selectedBooking.selected_menu_items || [];
+    const initialDish = dishToReplace || currentDishes[0] || "";
+    setSubOriginalDish(initialDish);
+
+    const itemDef = menuItems.find((mi) => mi.name === initialDish);
+    const cat = getRuleCategory(itemDef?.category || "", initialDish);
+    const reasonableReplacements = menuItems.filter(
+      (mi) =>
+        mi.status !== "Archived" &&
+        mi.status !== "Not Available" &&
+        !currentDishes.includes(mi.name) &&
+        (!cat || getRuleCategory(mi.category, mi.name) === cat)
+    );
+    const chosen = reasonableReplacements[0]?.name || (menuItems.find((mi) => !currentDishes.includes(mi.name))?.name || "");
+    setSubReplacementDish(chosen);
+    setIsCustomReplacement(false);
+    setSubCustomReplacement("");
+    setSubReason("Ingredient shortage / Out of stock in market");
+    setSubClientNote(
+      `Due to fresh ingredient availability in the local market, "${initialDish}" has been substituted with "${chosen}" of equivalent quality.`
+    );
+    setSubMessage("");
+    setIsSubModalOpen(true);
+  };
+
+  const handleConfirmDishSubstitution = async () => {
+    const finalReplacement = (isCustomReplacement ? subCustomReplacement : subReplacementDish).trim();
+    if (!selectedBooking || !subOriginalDish || !finalReplacement) return;
+    setIsSavingSub(true);
+    setSubMessage("");
+
+    const clientName =
+      selectedBooking.profiles?.name || selectedBooking.profiles?.full_name || "Client";
+    const currentDishes: string[] = Array.isArray(selectedBooking.selected_menu_items)
+      ? [...selectedBooking.selected_menu_items]
+      : [];
+    const updatedMenu = currentDishes.map((d) => (d === subOriginalDish ? finalReplacement : d));
+
+    const newSubstitution = {
+      id: `sub-${Date.now()}`,
+      original_dish: subOriginalDish,
+      replacement_dish: finalReplacement,
+      reason: subReason.trim(),
+      client_note: subClientNote.trim(),
+      substituted_at: new Date().toISOString(),
+      admin_name: currentUser?.name || "Coordinator",
+    };
+
+    // Keep substitutions clean: if replacing a dish that was itself a previous replacement, collapse/prune stale entry
+    const existingSubs: any[] = Array.isArray(selectedBooking.dish_substitutions)
+      ? selectedBooking.dish_substitutions.filter(
+          (s: any) => s.replacement_dish !== subOriginalDish && updatedMenu.includes(s.replacement_dish)
+        )
+      : [];
+    const chainedPrev = Array.isArray(selectedBooking.dish_substitutions)
+      ? selectedBooking.dish_substitutions.find((s: any) => s.replacement_dish === subOriginalDish)
+      : null;
+    if (chainedPrev?.original_dish) {
+      newSubstitution.original_dish = chainedPrev.original_dish;
+    }
+    const updatedSubs = [...existingSubs, newSubstitution];
+
+    // Also auto-acknowledge any prior "Applied" client modifications so stale Revert/Confirm buttons don't overwrite this substitution
+    const existingMods: any[] = Array.isArray(selectedBooking.modification_requests)
+      ? selectedBooking.modification_requests
+      : [];
+    const updatedMods = existingMods.map((m: any) =>
+      m.status === "Applied"
+        ? {
+            ...m,
+            status: "Approved",
+            reviewed_at: new Date().toISOString(),
+            reviewed_by: currentUser?.name || "Coordinator",
+          }
+        : m
+    );
+
+    try {
+      const { error } = await supabase
+        .from("bookings")
+        .update({
+          selected_menu_items: updatedMenu,
+          dish_substitutions: updatedSubs,
+          modification_requests: updatedMods,
+        })
+        .eq("id", selectedBooking.id);
+
+      if (error) throw error;
+
+      await logAuditAction({
+        action: "Substituted Dish (Unavailability)",
+        target: clientName,
+        type: "Update",
+        details: `Admin substituted "${subOriginalDish}" with "${finalReplacement}" for ${clientName} (Booking #${selectedBooking.id}). Reason: ${subReason.trim()}`,
+      });
+
+      setBookings((prev) =>
+        prev.map((b) =>
+          String(b.id) === String(selectedBooking.id)
+            ? {
+                ...b,
+                selected_menu_items: updatedMenu,
+                dish_substitutions: updatedSubs,
+                modification_requests: updatedMods,
+              }
+            : b
+        )
+      );
+
+      setSelectedBooking({
+        ...selectedBooking,
+        selected_menu_items: updatedMenu,
+        dish_substitutions: updatedSubs,
+        modification_requests: updatedMods,
+      });
+
+      window.dispatchEvent(new CustomEvent("bookingsUpdated"));
+      setSubMessage("Substitution applied and notification sent to client!");
+      setTimeout(() => {
+        setIsSubModalOpen(false);
+        setSubMessage("");
+      }, 1400);
+    } catch (err: any) {
+      console.error("Error saving substitution:", err);
+      setSubMessage(`Failed: ${err.message}`);
+    } finally {
+      setIsSavingSub(false);
+    }
+  };
+
+  const handleApproveModification = async (reqId: string) => {
+    if (!selectedBooking) return;
+    const clientName =
+      selectedBooking.profiles?.name || selectedBooking.profiles?.full_name || "Client";
+
+    const modRequests: any[] = Array.isArray(selectedBooking.modification_requests)
+      ? selectedBooking.modification_requests
+      : [];
+    const targetReq = modRequests.find((m: any) => m.id === reqId);
+    if (!targetReq) return;
+
+    const updatedReqs = modRequests.map((m: any) =>
+      m.id === reqId
+        ? {
+            ...m,
+            status: "Approved",
+            reviewed_at: new Date().toISOString(),
+            reviewed_by: currentUser?.name || "Coordinator",
+          }
+        : m
+    );
+
+    // Keep guest_count strictly as base package pax so calculateBudget never double-counts additional_pax
+    const baseGuestCount =
+      Number(targetReq.base_guest_count) ||
+      Number(selectedBooking.guest_count) ||
+      50;
+    const isAlreadyApplied = targetReq.status === "Applied";
+    const newAdditionalPax = isAlreadyApplied
+      ? Number(selectedBooking.additional_pax) || 0
+      : targetReq.requested_additional_pax !== undefined
+      ? Number(targetReq.requested_additional_pax)
+      : Number(selectedBooking.additional_pax) || 0;
+    const newMenu = isAlreadyApplied
+      ? selectedBooking.selected_menu_items
+      : Array.isArray(targetReq.requested_menu_items) && targetReq.requested_menu_items.length > 0
+      ? targetReq.requested_menu_items
+      : selectedBooking.selected_menu_items;
+
+    const currentLogObj =
+      selectedBooking.logistics_info && typeof selectedBooking.logistics_info === "object"
+        ? { ...selectedBooking.logistics_info }
+        : {};
+    if (targetReq.notes && !currentLogObj.client_special_instructions) {
+      currentLogObj.client_special_instructions = targetReq.notes;
+    }
+
+    const tempBooking = {
+      ...selectedBooking,
+      guest_count: baseGuestCount,
+      additional_pax: newAdditionalPax,
+      selected_menu_items: newMenu,
+      logistics_info: currentLogObj,
+    };
+    const newBudget = calculateBudget(tempBooking);
+    const payment = getBookingPayment(selectedBooking);
+    const is50Percent = payment.payment_scheme === "Standard 50%";
+    const downpaymentDue =
+      payment.downpayment_amount > 0
+        ? payment.downpayment_amount
+        : Math.round(newBudget * (is50Percent ? 0.5 : 0.2));
+    const newRemainingBalance = Math.max(0, newBudget - downpaymentDue);
+
+    let updatedSchedule = payment.installment_schedule
+      ? payment.installment_schedule.map((m: any) => ({ ...m }))
+      : null;
+    if (updatedSchedule && updatedSchedule.length > 0) {
+      let paidTotal = 0;
+      const unpaidIndices: number[] = [];
+      updatedSchedule.forEach((m: any, idx: number) => {
+        if (m.status === "Verified" || m.status === "Paid") {
+          paidTotal += Number(m.amount) || 0;
+        } else {
+          unpaidIndices.push(idx);
+        }
+      });
+      if (unpaidIndices.length > 0) {
+        const remainingToDistribute = Math.max(0, newRemainingBalance - paidTotal);
+        const perMilestone = Math.floor(remainingToDistribute / unpaidIndices.length);
+        let acc = 0;
+        unpaidIndices.forEach((mIdx, i) => {
+          const isLast = i === unpaidIndices.length - 1;
+          const amt = isLast ? remainingToDistribute - acc : perMilestone;
+          acc += amt;
+          updatedSchedule![mIdx] = { ...updatedSchedule![mIdx], amount: amt };
+        });
+      }
+    }
+
+    let updatedAllergies = selectedBooking.food_allergies || "";
+    try {
+      if (updatedAllergies.includes("__PAYMENT_METADATA__:")) {
+        const parts = updatedAllergies.split("__PAYMENT_METADATA__:");
+        const meta = JSON.parse(parts[1]);
+        meta.balance = newRemainingBalance;
+        meta.logistics = currentLogObj;
+        if (updatedSchedule) meta.installments = updatedSchedule;
+        updatedAllergies = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+      }
+    } catch (e) {}
+
+    const updatePayload: any = {
+      guest_count: baseGuestCount,
+      additional_pax: newAdditionalPax,
+      selected_menu_items: newMenu,
+      final_balance_amount: newRemainingBalance,
+      logistics_info: currentLogObj,
+      modification_requests: updatedReqs,
+    };
+    if (updatedSchedule) updatePayload.installment_schedule = updatedSchedule;
+    if (updatedAllergies !== (selectedBooking.food_allergies || "")) {
+      updatePayload.food_allergies = updatedAllergies;
+    }
+
+    try {
+      const { error } = await supabase
+        .from("bookings")
+        .update(updatePayload)
+        .eq("id", selectedBooking.id);
+
+      if (error) throw error;
+
+      window.dispatchEvent(
+        new CustomEvent("markAdminNotifRead", {
+          detail: { key: `${selectedBooking.id}-client-mod-${reqId}` },
+        })
+      );
+      window.dispatchEvent(new CustomEvent("bookingsUpdated"));
+
+      await logAuditAction({
+        action: "Confirmed Client Modification",
+        target: clientName,
+        type: "Update",
+        details: `Admin confirmed modification for ${clientName}: ${baseGuestCount + newAdditionalPax} Total Guests (+${newAdditionalPax} extra), Budget ₱${newBudget.toLocaleString()}`,
+      });
+
+      setBookings((prev) =>
+        prev.map((b) =>
+          String(b.id) === String(selectedBooking.id)
+            ? {
+                ...b,
+                ...updatePayload,
+              }
+            : b
+        )
+      );
+
+      setSelectedBooking({
+        ...selectedBooking,
+        ...updatePayload,
+      });
+    } catch (err: any) {
+      console.error("Error approving modification:", err);
+      alert(`Failed to confirm modification: ${err.message}`);
+    }
+  };
+
+  const handleRejectModification = async (reqId: string, reasonText: string) => {
+    if (!selectedBooking) return;
+    const clientName =
+      selectedBooking.profiles?.name || selectedBooking.profiles?.full_name || "Client";
+
+    const modRequests: any[] = Array.isArray(selectedBooking.modification_requests)
+      ? selectedBooking.modification_requests
+      : [];
+    const targetReq = modRequests.find((m: any) => m.id === reqId);
+    if (!targetReq) return;
+
+    const finalReason =
+      reasonText.trim() || "Modifications could not be accommodated at this time.";
+
+    const updatedReqs = modRequests.map((m: any) =>
+      m.id === reqId
+        ? {
+            ...m,
+            status: "Rejected",
+            review_note: finalReason,
+            reviewed_at: new Date().toISOString(),
+            reviewed_by: currentUser?.name || "Coordinator",
+          }
+        : m
+    );
+
+    const updatePayload: any = {
+      modification_requests: updatedReqs,
+    };
+
+    // If modification was already Applied by the client, revert menu, additional_pax, and balance
+    if (targetReq.status === "Applied") {
+      const baseGuestCount =
+        Number(targetReq.base_guest_count) ||
+        Number(selectedBooking.guest_count) ||
+        50;
+      const revertedExtraPax = Number(targetReq.previous_additional_pax) || 0;
+      const revertedMenu =
+        Array.isArray(targetReq.previous_menu_items) && targetReq.previous_menu_items.length > 0
+          ? targetReq.previous_menu_items
+          : selectedBooking.selected_menu_items;
+
+      const tempBooking = {
+        ...selectedBooking,
+        guest_count: baseGuestCount,
+        additional_pax: revertedExtraPax,
+        selected_menu_items: revertedMenu,
+      };
+      const revertedBudget = calculateBudget(tempBooking);
+      const payment = getBookingPayment(selectedBooking);
+      const is50Percent = payment.payment_scheme === "Standard 50%";
+      const downpaymentDue =
+        payment.downpayment_amount > 0
+          ? payment.downpayment_amount
+          : Math.round(revertedBudget * (is50Percent ? 0.5 : 0.2));
+      const revertedBalance = Math.max(0, revertedBudget - downpaymentDue);
+
+      let updatedSchedule = payment.installment_schedule
+        ? payment.installment_schedule.map((m: any) => ({ ...m }))
+        : null;
+      if (updatedSchedule && updatedSchedule.length > 0) {
+        let paidTotal = 0;
+        const unpaidIndices: number[] = [];
+        updatedSchedule.forEach((m: any, idx: number) => {
+          if (m.status === "Verified" || m.status === "Paid") {
+            paidTotal += Number(m.amount) || 0;
+          } else {
+            unpaidIndices.push(idx);
+          }
+        });
+        if (unpaidIndices.length > 0) {
+          const remainingToDistribute = Math.max(0, revertedBalance - paidTotal);
+          const perMilestone = Math.floor(remainingToDistribute / unpaidIndices.length);
+          let acc = 0;
+          unpaidIndices.forEach((mIdx, i) => {
+            const isLast = i === unpaidIndices.length - 1;
+            const amt = isLast ? remainingToDistribute - acc : perMilestone;
+            acc += amt;
+            updatedSchedule![mIdx] = { ...updatedSchedule![mIdx], amount: amt };
+          });
+        }
+      }
+
+      let updatedAllergies = selectedBooking.food_allergies || "";
+      try {
+        if (updatedAllergies.includes("__PAYMENT_METADATA__:")) {
+          const parts = updatedAllergies.split("__PAYMENT_METADATA__:");
+          const meta = JSON.parse(parts[1]);
+          meta.balance = revertedBalance;
+          if (updatedSchedule) meta.installments = updatedSchedule;
+          updatedAllergies = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+        }
+      } catch (e) {}
+
+      updatePayload.guest_count = baseGuestCount;
+      updatePayload.additional_pax = revertedExtraPax;
+      updatePayload.selected_menu_items = revertedMenu;
+      updatePayload.final_balance_amount = revertedBalance;
+      if (updatedSchedule) updatePayload.installment_schedule = updatedSchedule;
+      if (updatedAllergies !== (selectedBooking.food_allergies || "")) {
+        updatePayload.food_allergies = updatedAllergies;
+      }
+    }
+
+    try {
+      const { error } = await supabase
+        .from("bookings")
+        .update(updatePayload)
+        .eq("id", selectedBooking.id);
+
+      if (error) throw error;
+
+      window.dispatchEvent(
+        new CustomEvent("markAdminNotifRead", {
+          detail: { key: `${selectedBooking.id}-client-mod-${reqId}` },
+        })
+      );
+      window.dispatchEvent(new CustomEvent("bookingsUpdated"));
+
+      await logAuditAction({
+        action: targetReq.status === "Applied" ? "Reverted & Declined Client Modification" : "Rejected Modification Request",
+        target: clientName,
+        type: "Update",
+        details: `Admin declined modification for ${clientName}. Reason: ${finalReason}`,
+      });
+
+      setBookings((prev) =>
+        prev.map((b) =>
+          String(b.id) === String(selectedBooking.id)
+            ? {
+                ...b,
+                ...updatePayload,
+              }
+            : b
+        )
+      );
+
+      setSelectedBooking({
+        ...selectedBooking,
+        ...updatePayload,
+      });
+      setRejectingModId(null);
+      setRejectReasonInput("");
+    } catch (err: any) {
+      console.error("Error rejecting modification:", err);
+      alert(`Failed to decline modification: ${err.message}`);
+    }
   };
 
   return (
@@ -1648,24 +2259,36 @@ export function BookingPage() {
                       })()}
                     </td>
                     <td className="px-6 py-5.5 border-b border-natural-border/50">
-                      <span
-                        className={cn(
-                          "text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-md border shadow-2xs inline-block text-center",
-                          (booking.status || "Pending") === "Confirmed"
-                            ? "bg-green-50 text-green-700 border-green-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60"
-                            : (booking.status || "Pending") === "Completed"
-                              ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60"
-                              : (booking.status || "Pending") === "Pending"
-                                ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60"
-                                : (booking.status || "Pending") === "Cancelled"
-                                  ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-800/60"
-                                  : (booking.status || "Pending") === "Archived"
-                                    ? "bg-gray-100 text-gray-600 border-gray-300 dark:bg-natural-bg/40 dark:text-natural-text-light dark:border-natural-border/60"
-                                    : "bg-gray-50 text-gray-700 border-gray-200 dark:bg-natural-bg/30 dark:text-natural-text-light dark:border-natural-border/50",
+                      <div className="flex flex-col items-start gap-1">
+                        <span
+                          className={cn(
+                            "text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-md border shadow-2xs inline-block text-center",
+                            (booking.status || "Pending") === "Confirmed"
+                              ? "bg-green-50 text-green-700 border-green-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60"
+                              : (booking.status || "Pending") === "Completed"
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60"
+                                : (booking.status || "Pending") === "Pending"
+                                  ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60"
+                                  : (booking.status || "Pending") === "Cancelled"
+                                    ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-800/60"
+                                    : (booking.status || "Pending") === "Archived"
+                                      ? "bg-gray-100 text-gray-600 border-gray-300 dark:bg-natural-bg/40 dark:text-natural-text-light dark:border-natural-border/60"
+                                      : "bg-gray-50 text-gray-700 border-gray-200 dark:bg-natural-bg/30 dark:text-natural-text-light dark:border-natural-border/50",
+                          )}
+                        >
+                          {booking.status || "Pending"}
+                        </span>
+                        {hasLateModification(booking) && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800/60 shadow-2xs">
+                            Late Mod (&lt;14d)
+                          </span>
                         )}
-                      >
-                        {booking.status || "Pending"}
-                      </span>
+                        {hasPendingModification(booking) && !hasAppliedModification(booking) && !hasLateModification(booking) && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800/60 shadow-2xs">
+                            Mod Requested
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-5.5 border-b border-natural-border/50">
                       <div className="flex items-center gap-2">
@@ -2200,6 +2823,26 @@ export function BookingPage() {
             </div>
 
             <div className="p-4 sm:p-5 xl:p-6 space-y-3.5 overflow-y-auto flex-1">
+              {/* Late Modification Warning Banner */}
+              {hasLateModification(selectedBooking) && (
+                <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl flex items-center justify-between gap-3 text-rose-700 dark:text-rose-300">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5 text-rose-500 shrink-0" />
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wider">
+                        Late Modification Flag (&lt;14 Days Before Event)
+                      </p>
+                      <p className="text-[11px] opacity-90">
+                        This booking has modifications requested under the 14-day cutoff window. Verify market inventory and logistics before approving.
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-rose-500/20 border border-rose-500/40 shrink-0">
+                    Late Action Required
+                  </span>
+                </div>
+              )}
+
               {/* Top Client Header & Logistics Bar */}
               <div className="p-3.5 bg-natural-card/60 border border-natural-border rounded-xl space-y-2.5 shadow-2xs">
                 {/* Client Row */}
@@ -3181,16 +3824,50 @@ export function BookingPage() {
                     );
                   })()}
 
+                  {/* Client Special Instructions / Modification Notes (if any) */}
+                  {(() => {
+                    const modList = Array.isArray(selectedBooking.modification_requests)
+                      ? selectedBooking.modification_requests.filter((r: any) => r.status !== "Superseded")
+                      : [];
+                    const latestModNote =
+                      modList.length > 0 ? (modList[modList.length - 1]?.notes || "").trim() : "";
+                    const specialInstructions =
+                      (selectedBooking.logistics_info?.client_special_instructions || "").trim() ||
+                      latestModNote;
+
+                    if (!specialInstructions) return null;
+
+                    return (
+                      <div className="p-3 bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200/70 dark:border-amber-800/40 rounded-xl flex items-start gap-2.5">
+                        <Sliders className="w-4 h-4 text-natural-accent shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-[10px] font-bold text-natural-accent uppercase tracking-wider mb-0.5">
+                            Client Special Instructions / Reason for Changes
+                          </p>
+                          <p className="text-xs text-natural-text-main font-medium leading-relaxed italic">
+                            "{specialInstructions}"
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   {/* Menu Selection & Additional Services */}
                   <div className="p-3.5 bg-natural-card/50 border border-natural-border rounded-xl space-y-2.5 shadow-2xs">
-                    <h5 className="text-[11px] font-bold text-natural-accent uppercase tracking-wider flex items-center justify-between">
-                      <span>Menu Selection</span>
-                      {selectedBooking.selected_menu_items && (
-                        <span className="text-[10px] font-normal text-natural-text-light">
-                          ({selectedBooking.selected_menu_items.length} items)
-                        </span>
-                      )}
-                    </h5>
+                    <div className="flex items-center justify-between pb-1 border-b border-natural-border/50">
+                      <h5 className="text-[11px] font-bold text-natural-accent uppercase tracking-wider">
+                        Menu Selection {selectedBooking.selected_menu_items ? `(${selectedBooking.selected_menu_items.length} items)` : ""}
+                      </h5>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenSubstituteModal()}
+                        className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-natural-accent/10 text-natural-accent hover:bg-natural-accent hover:text-white rounded border border-natural-accent/30 transition-colors flex items-center gap-1 cursor-pointer"
+                        title="If ingredient or dish is out of stock in market, select a reasonable replacement"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        Substitute Unavailable Dish
+                      </button>
+                    </div>
                     <div className="max-h-60 overflow-y-auto pr-1 custom-scrollbar">
                       {selectedBooking.selected_menu_items &&
                       selectedBooking.selected_menu_items.length > 0 ? (
@@ -3201,8 +3878,8 @@ export function BookingPage() {
                           selectedBooking.selected_menu_items.forEach(
                             (m: string) => {
                               const itemDef = menuItems.find((mi) => mi.name === m);
-                              if (itemDef && itemDef.category) {
-                                const cat = itemDef.category;
+                              const cat = getRuleCategory(itemDef?.category || "", m);
+                              if (cat) {
                                 if (!groupedMenu[cat]) groupedMenu[cat] = [];
                                 groupedMenu[cat].push(m);
                               } else {
@@ -3211,21 +3888,36 @@ export function BookingPage() {
                             },
                           );
 
+                          const sortedCategories = categoryOrder.filter(
+                            (cat) => groupedMenu[cat] && groupedMenu[cat].length > 0
+                          );
+                          Object.keys(groupedMenu).forEach((c) => {
+                            if (!sortedCategories.includes(c)) sortedCategories.push(c);
+                          });
+
                           return (
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                              {Object.entries(groupedMenu).map(([cat, items]) => (
+                              {sortedCategories.map((cat) => (
                                 <div key={cat} className="space-y-1">
                                   <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-wider border-b border-natural-border/40 pb-0.5">
-                                    {cat} ({items.length})
+                                    {cat} ({groupedMenu[cat].length})
                                   </p>
                                   <div className="flex flex-wrap gap-1">
-                                    {items.map((m) => (
-                                      <span
+                                    {groupedMenu[cat].map((m) => (
+                                      <div
                                         key={m}
-                                        className="px-2 py-0.5 bg-natural-bg border border-natural-border rounded-md text-[11px] font-semibold text-natural-text-main uppercase tracking-wider"
+                                        className="group/dish inline-flex items-center gap-1 px-2 py-0.5 bg-natural-bg border border-natural-border rounded-md text-[11px] font-semibold text-natural-text-main uppercase tracking-wider"
                                       >
-                                        {m}
-                                      </span>
+                                        <span>{m}</span>
+                                        <button
+                                          type="button"
+                                          title="Substitute out of stock dish"
+                                          onClick={() => handleOpenSubstituteModal(m)}
+                                          className="text-natural-text-light/40 group-hover/dish:text-natural-accent hover:scale-110 transition-all p-0.5 cursor-pointer"
+                                        >
+                                          <RefreshCw className="w-2.5 h-2.5" />
+                                        </button>
+                                      </div>
                                     ))}
                                   </div>
                                 </div>
@@ -3233,16 +3925,24 @@ export function BookingPage() {
                               {uncategorized.length > 0 && (
                                 <div key="Other" className="space-y-1">
                                   <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-wider border-b border-natural-border/40 pb-0.5">
-                                    Other
+                                    Other ({uncategorized.length})
                                   </p>
                                   <div className="flex flex-wrap gap-1">
                                     {uncategorized.map((m) => (
-                                      <span
+                                      <div
                                         key={m}
-                                        className="px-2 py-0.5 bg-natural-bg border border-natural-border rounded-md text-[11px] font-semibold text-natural-text-main uppercase tracking-wider"
+                                        className="group/dish inline-flex items-center gap-1 px-2 py-0.5 bg-natural-bg border border-natural-border rounded-md text-[11px] font-semibold text-natural-text-main uppercase tracking-wider"
                                       >
-                                        {m}
-                                      </span>
+                                        <span>{m}</span>
+                                        <button
+                                          type="button"
+                                          title="Substitute out of stock dish"
+                                          onClick={() => handleOpenSubstituteModal(m)}
+                                          className="text-natural-text-light/40 group-hover/dish:text-natural-accent hover:scale-110 transition-all p-0.5 cursor-pointer"
+                                        >
+                                          <RefreshCw className="w-2.5 h-2.5" />
+                                        </button>
+                                      </div>
                                     ))}
                                   </div>
                                 </div>
@@ -3256,6 +3956,42 @@ export function BookingPage() {
                         </span>
                       )}
                     </div>
+
+                    {/* Active Dish Substitutions Log (filtered to active menu items) */}
+                    {(() => {
+                      const activeMenu: string[] = Array.isArray(selectedBooking.selected_menu_items)
+                        ? selectedBooking.selected_menu_items
+                        : [];
+                      const activeSubs = Array.isArray(selectedBooking.dish_substitutions)
+                        ? selectedBooking.dish_substitutions.filter(
+                            (sub: any) => sub?.replacement_dish && activeMenu.includes(sub.replacement_dish)
+                          )
+                        : [];
+                      if (activeSubs.length === 0) return null;
+                      return (
+                        <div className="pt-2 border-t border-natural-border/60 space-y-1.5">
+                          <p className="text-[10px] font-bold text-natural-accent uppercase tracking-wider flex items-center gap-1">
+                            <RefreshCw className="w-3 h-3" />
+                            Active Dish Substitutions ({activeSubs.length})
+                          </p>
+                          <div className="space-y-1">
+                            {activeSubs.map((sub: any, idx: number) => (
+                              <div key={idx} className="p-1.5 bg-natural-bg/70 border border-natural-border/50 rounded text-[11px] flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                                <div>
+                                  <span className="line-through text-natural-text-light/60">{sub.original_dish}</span>
+                                  <span className="mx-1 text-natural-accent font-bold">➔</span>
+                                  <span className="font-bold text-natural-text-main">{sub.replacement_dish}</span>
+                                  {sub.reason && <span className="text-[10px] text-natural-text-light ml-1.5">({sub.reason})</span>}
+                                </div>
+                                <span className="text-[9px] text-natural-text-light shrink-0">
+                                  {sub.substituted_at ? new Date(sub.substituted_at).toLocaleDateString() : ""}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {selectedBooking.selected_add_ons &&
                       selectedBooking.selected_add_ons.length > 0 && (
@@ -3276,6 +4012,243 @@ export function BookingPage() {
                         </div>
                       )}
                   </div>
+
+                  {/* Client Modification Requests & History Card */}
+                  {(() => {
+                    const visibleModRequests = Array.isArray(selectedBooking.modification_requests)
+                      ? selectedBooking.modification_requests.filter((r: any) => r.status !== "Superseded")
+                      : [];
+                    if (visibleModRequests.length === 0) return null;
+
+                    return (
+                      <div className="p-3.5 bg-natural-card/50 border border-natural-border rounded-xl space-y-2.5 shadow-2xs">
+                        <div className="flex items-center justify-between pb-1 border-b border-natural-border/50">
+                          <h5 className="text-[11px] font-bold text-natural-accent uppercase tracking-wider flex items-center gap-1.5">
+                            <Sliders className="w-3.5 h-3.5" />
+                            Client Modifications &amp; History ({visibleModRequests.length})
+                          </h5>
+                          {hasLateModification(selectedBooking) && (
+                            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30">
+                              ⚠️ Under 14-Day Lockout
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1 custom-scrollbar">
+                          {[...visibleModRequests].reverse().map((req: any, revIdx: number) => {
+                            const origNum = visibleModRequests.length - revIdx;
+                            const isLate =
+                              req.is_late ||
+                              (req.days_before_event !== undefined && req.days_before_event <= 14);
+                            const isPending = req.status === "Pending";
+                            const isApplied = req.status === "Applied";
+                            const isActionable = isPending || isApplied;
+
+                            const prevMenu: string[] = Array.isArray(req.previous_menu_items)
+                              ? req.previous_menu_items
+                              : [];
+                            const reqMenu: string[] = Array.isArray(req.requested_menu_items)
+                              ? req.requested_menu_items
+                              : [];
+                            const addedDishes: string[] = Array.isArray(req.added_dishes)
+                              ? req.added_dishes
+                              : reqMenu.filter((d) => !prevMenu.includes(d));
+                            const removedDishes: string[] = Array.isArray(req.removed_dishes)
+                              ? req.removed_dishes
+                              : prevMenu.filter((d) => !reqMenu.includes(d));
+
+                            const basePaxVal =
+                              Number(req.base_guest_count) ||
+                              Number(selectedBooking.guest_count) ||
+                              50;
+                            const prevExtra = Number(req.previous_additional_pax) || 0;
+                            const reqExtra = Number(req.requested_additional_pax) || 0;
+
+                            return (
+                              <div
+                                key={req.id || revIdx}
+                                className="p-3 bg-natural-bg/60 border border-natural-border/60 rounded-lg space-y-2 text-xs"
+                              >
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-bold text-natural-text-main">
+                                      Modification #{origNum}
+                                    </span>
+                                    {req.created_at && (
+                                      <span className="text-[10px] text-natural-text-light">
+                                        {new Date(req.created_at).toLocaleString(undefined, {
+                                          month: "short",
+                                          day: "numeric",
+                                          hour: "2-digit",
+                                          minute: "2-digit",
+                                        })}
+                                      </span>
+                                    )}
+                                    {isLate && (
+                                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30">
+                                        ⚠️ Late ({req.days_before_event}d before event)
+                                      </span>
+                                    )}
+                                    {!isLate && req.days_before_event !== undefined && (
+                                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                                        {req.days_before_event}d before event
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                                      req.status === "Approved"
+                                        ? "bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-300 border border-green-300"
+                                        : req.status === "Applied"
+                                        ? "bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-300"
+                                        : req.status === "Rejected"
+                                        ? "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300 border border-red-300"
+                                        : "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-300"
+                                    }`}
+                                  >
+                                    {req.status === "Applied"
+                                      ? "Applied by Client"
+                                      : req.status === "Approved"
+                                      ? "Confirmed"
+                                      : req.status === "Rejected"
+                                      ? "Declined / Reverted"
+                                      : "Pending Review"}
+                                  </span>
+                                </div>
+
+                                <div className="space-y-1.5 text-natural-text-light text-[11px]">
+                                  {prevExtra !== reqExtra && (
+                                    <p>
+                                      <strong className="text-natural-text-main">Headcount Change:</strong>{" "}
+                                      {basePaxVal + prevExtra} Guests (+{prevExtra} extra) ➔{" "}
+                                      <strong className="text-natural-accent">
+                                        {basePaxVal + reqExtra} Guests (+{reqExtra} extra)
+                                      </strong>
+                                    </p>
+                                  )}
+
+                                  {(addedDishes.length > 0 || removedDishes.length > 0) && (
+                                    <div className="space-y-1">
+                                      <strong className="text-natural-text-main block">
+                                        Dish Swap:
+                                      </strong>
+                                      {removedDishes.length === 1 && addedDishes.length === 1 ? (
+                                        <p className="flex items-center gap-1.5 flex-wrap">
+                                          <span className="px-1.5 py-0.5 bg-rose-500/10 text-rose-600 dark:text-rose-300 border border-rose-500/30 rounded text-[10px] line-through">
+                                            {removedDishes[0]}
+                                          </span>
+                                          <span className="text-natural-accent font-bold">➔</span>
+                                          <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 rounded text-[10px] font-bold">
+                                            {addedDishes[0]}
+                                          </span>
+                                        </p>
+                                      ) : (
+                                        <div className="flex flex-wrap gap-1">
+                                          {removedDishes.map((d) => (
+                                            <span
+                                              key={`rem-${d}`}
+                                              className="px-1.5 py-0.5 bg-rose-500/10 text-rose-600 dark:text-rose-300 border border-rose-500/30 rounded text-[10px] line-through"
+                                            >
+                                              {d}
+                                            </span>
+                                          ))}
+                                          {addedDishes.map((d) => (
+                                            <span
+                                              key={`add-${d}`}
+                                              className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 rounded text-[10px] font-bold"
+                                            >
+                                              + {d}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {req.notes && (
+                                    <div className="p-2 bg-natural-card border border-natural-border rounded">
+                                      <span className="text-[9px] font-bold uppercase tracking-wider text-natural-accent block">
+                                        Special Instructions / Reason:
+                                      </span>
+                                      <p className="italic text-natural-text-main mt-0.5">
+                                        "{req.notes}"
+                                      </p>
+                                    </div>
+                                  )}
+
+                                  {req.review_note && (
+                                    <p className="text-rose-500 font-medium">
+                                      Coordinator Note: "{req.review_note}"
+                                    </p>
+                                  )}
+                                </div>
+
+                                {isActionable && (
+                                  <div className="pt-2 border-t border-natural-border/40 flex items-center justify-end gap-2">
+                                    {rejectingModId === req.id ? (
+                                      <div className="flex items-center gap-1 w-full">
+                                        <input
+                                          type="text"
+                                          placeholder={
+                                            isApplied
+                                              ? "Reason for reverting changes..."
+                                              : "Reason for declining..."
+                                          }
+                                          value={rejectReasonInput}
+                                          onChange={(e) => setRejectReasonInput(e.target.value)}
+                                          className="flex-1 bg-natural-card border border-natural-border px-2 py-1 text-xs rounded text-natural-text-main"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleRejectModification(req.id, rejectReasonInput)
+                                          }
+                                          className="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold uppercase rounded cursor-pointer"
+                                        >
+                                          Confirm
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setRejectingModId(null);
+                                            setRejectReasonInput("");
+                                          }}
+                                          className="px-2 py-1 bg-natural-border hover:bg-natural-border/80 text-natural-text-main text-[10px] rounded cursor-pointer"
+                                        >
+                                          Cancel
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setRejectingModId(req.id);
+                                            setRejectReasonInput("");
+                                          }}
+                                          className="px-2.5 py-1 text-rose-600 hover:bg-rose-500/10 border border-rose-500/30 rounded text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                                        >
+                                          {isApplied ? "Revert & Decline" : "Decline"}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleApproveModification(req.id)}
+                                          className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold uppercase tracking-wider transition-colors shadow-2xs cursor-pointer flex items-center gap-1"
+                                        >
+                                          <CheckCircle2 className="w-3 h-3" />
+                                          {isApplied ? "Acknowledge & Confirm" : "Approve & Apply"}
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Allocated Event Equipment Section */}
                   {/* Allocated Event Equipment Section */}
@@ -4240,6 +5213,245 @@ export function BookingPage() {
           </div>
         );
       })()}
+
+      {/* Product Unavailability & Substitution Tool Modal */}
+      {isSubModalOpen && selectedBooking && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-natural-card border border-natural-border rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="p-4 border-b border-natural-border flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <RefreshCw className="w-5 h-5 text-natural-accent" />
+                <div>
+                  <h4 className="text-base font-serif font-bold text-natural-text-main">
+                    Product Unavailability &amp; Substitution
+                  </h4>
+                  <p className="text-[11px] text-natural-text-light">
+                    Select a reasonable replacement and send notification to client
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSubModalOpen(false)}
+                className="p-1 hover:bg-natural-bg rounded-lg text-natural-text-light cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-5 space-y-4 text-xs">
+              {subMessage && (
+                <div className={`p-2.5 rounded text-xs ${
+                  subMessage.includes("Failed")
+                    ? "bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300 border border-rose-300"
+                    : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-300"
+                }`}>
+                  {subMessage}
+                </div>
+              )}
+
+              {/* Original Dish (Unavailable in market) */}
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-natural-text-main uppercase tracking-wider block">
+                  Unavailable Dish (Out of stock in market)
+                </label>
+                <select
+                  value={subOriginalDish}
+                  onChange={(e) => {
+                    const dish = e.target.value;
+                    setSubOriginalDish(dish);
+                    const itemDef = menuItems.find((mi) => mi.name === dish);
+                    const cat = getRuleCategory(itemDef?.category || "", dish);
+                    const cur = selectedBooking.selected_menu_items || [];
+                    const replacements = menuItems.filter(
+                      (mi) => mi.status !== "Archived" && !cur.includes(mi.name) && (!cat || getRuleCategory(mi.category, mi.name) === cat)
+                    );
+                    const chosen = replacements[0]?.name || "";
+                    setSubReplacementDish(chosen);
+                    setSubClientNote(
+                      `Due to fresh ingredient availability in the local market, "${dish}" has been substituted with "${chosen}" of equivalent quality.`
+                    );
+                  }}
+                  className="w-full bg-natural-bg border border-natural-border px-3 py-2 rounded-lg text-xs font-medium text-natural-text-main focus:border-natural-accent focus:outline-none"
+                >
+                  {(selectedBooking.selected_menu_items || []).map((m: string) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Reason for Unavailability */}
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-natural-text-main uppercase tracking-wider block">
+                  Reason for Unavailability
+                </label>
+                <select
+                  value={subReason}
+                  onChange={(e) => setSubReason(e.target.value)}
+                  className="w-full bg-natural-bg border border-natural-border px-3 py-2 rounded-lg text-xs font-medium text-natural-text-main focus:border-natural-accent focus:outline-none"
+                >
+                  <option value="Ingredient shortage / Out of stock in market">Ingredient shortage / Out of stock in market</option>
+                  <option value="Seasonal fresh produce unavailable">Seasonal fresh produce unavailable</option>
+                  <option value="Supplier delivery shipment delayed">Supplier delivery shipment delayed</option>
+                  <option value="Quality check failed / Market supply issue">Quality check failed / Market supply issue</option>
+                </select>
+              </div>
+
+              {/* Replacement Dish Selection */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-natural-text-main uppercase tracking-wider block">
+                    Reasonable Replacement Dish
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !isCustomReplacement;
+                      setIsCustomReplacement(next);
+                      if (next) {
+                        const val = subCustomReplacement || "";
+                        setSubReplacementDish(val);
+                        setSubClientNote(
+                          `Due to fresh ingredient availability in the local market, "${subOriginalDish}" has been substituted with "${val}" of equivalent quality.`
+                        );
+                      } else {
+                        const currentDef = menuItems.find((mi) => mi.name === subOriginalDish);
+                        const cat = currentDef?.category;
+                        const cur = selectedBooking.selected_menu_items || [];
+                        const reasonableReplacements = menuItems.filter(
+                          (mi) => mi.status !== "Archived" && mi.status !== "Not Available" && !cur.includes(mi.name) && (!cat || mi.category === cat)
+                        );
+                        const chosen = reasonableReplacements[0]?.name || (menuItems.find((mi) => !cur.includes(mi.name))?.name || "");
+                        setSubReplacementDish(chosen);
+                        setSubClientNote(
+                          `Due to fresh ingredient availability in the local market, "${subOriginalDish}" has been substituted with "${chosen}" of equivalent quality.`
+                        );
+                      }
+                    }}
+                    className="text-[11px] font-semibold text-natural-accent hover:underline cursor-pointer flex items-center gap-1"
+                  >
+                    {isCustomReplacement ? "← Select from Menu Catalog" : "+ Type Custom / Off-Menu Dish"}
+                  </button>
+                </div>
+
+                {isCustomReplacement ? (
+                  <div className="space-y-1.5 animate-in fade-in duration-150">
+                    <input
+                      type="text"
+                      autoFocus
+                      value={subCustomReplacement}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSubCustomReplacement(val);
+                        setSubReplacementDish(val);
+                        setSubClientNote(
+                          `Due to fresh ingredient availability in the local market, "${subOriginalDish}" has been substituted with "${val}" of equivalent quality.`
+                        );
+                      }}
+                      placeholder="Type custom replacement dish"
+                      className="w-full bg-natural-bg border border-natural-accent/50 px-3 py-2 rounded-lg text-xs font-medium text-natural-text-main focus:border-natural-accent focus:outline-none"
+                    />
+                    <p className="text-[10px] text-natural-text-light flex items-center gap-1">
+                      Type any off-menu or market alternative not found in the standard catalog.
+                    </p>
+                  </div>
+                ) : (
+                  <select
+                    value={subReplacementDish}
+                    onChange={(e) => {
+                      if (e.target.value === "__CUSTOM__") {
+                        setIsCustomReplacement(true);
+                        setSubCustomReplacement("");
+                        setSubReplacementDish("");
+                        return;
+                      }
+                      setSubReplacementDish(e.target.value);
+                      setSubClientNote(
+                        `Due to fresh ingredient availability in the local market, "${subOriginalDish}" has been substituted with "${e.target.value}" of equivalent quality.`
+                      );
+                    }}
+                    className="w-full bg-natural-bg border border-natural-border px-3 py-2 rounded-lg text-xs font-medium text-natural-text-main focus:border-natural-accent focus:outline-none"
+                  >
+                    <option value="" disabled>Select replacement dish...</option>
+                    <option value="__CUSTOM__">+ Type Custom Dish (Not on Menu)...</option>
+                    {(() => {
+                      const currentDef = menuItems.find((mi) => mi.name === subOriginalDish);
+                      const cat = getRuleCategory(currentDef?.category || "", subOriginalDish);
+                      const cur = selectedBooking.selected_menu_items || [];
+                      const sameCatDishes = menuItems.filter(
+                        (mi) => mi.status !== "Archived" && !cur.includes(mi.name) && getRuleCategory(mi.category, mi.name) === cat
+                      );
+                      const otherDishes = menuItems.filter(
+                        (mi) => mi.status !== "Archived" && !cur.includes(mi.name) && getRuleCategory(mi.category, mi.name) !== cat
+                      );
+
+                      return (
+                        <>
+                          {sameCatDishes.length > 0 && (
+                            <optgroup label={`Recommended (Same Category: ${cat || 'General'})`}>
+                              {sameCatDishes.map((r) => (
+                                <option key={r.id} value={r.name}>
+                                  {r.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                          {otherDishes.length > 0 && (
+                            <optgroup label="Other Available Dishes">
+                              {otherDishes.map((r) => (
+                                <option key={r.id} value={r.name}>
+                                  {r.name} ({r.category})
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </select>
+                )}
+              </div>
+
+              {/* Notification Note to Client */}
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-natural-text-main uppercase tracking-wider block">
+                  Notification Message to Client
+                </label>
+                <textarea
+                  rows={2}
+                  value={subClientNote}
+                  onChange={(e) => setSubClientNote(e.target.value)}
+                  className="w-full bg-natural-bg border border-natural-border p-2.5 rounded-lg text-xs text-natural-text-main focus:border-natural-accent focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-natural-border bg-natural-bg/50 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setIsSubModalOpen(false)}
+                className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-natural-text-light hover:bg-natural-bg rounded-lg cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSavingSub || !(isCustomReplacement ? subCustomReplacement.trim() : subReplacementDish.trim())}
+                onClick={handleConfirmDishSubstitution}
+                className="px-5 py-2 bg-natural-accent hover:bg-natural-accent/90 disabled:opacity-50 text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-all shadow-2xs cursor-pointer flex items-center gap-1.5"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSavingSub ? "animate-spin" : ""}`} />
+                {isSavingSub ? "Saving..." : "Confirm Substitution & Notify Client"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Proof of Payment Full Inspection Modal */}
       {viewingReceipt && (

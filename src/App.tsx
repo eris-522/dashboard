@@ -5,7 +5,7 @@ import { RevenueChart } from "./components/RevenueChart";
 import { EventCalendar } from "./components/EventCalendar";
 import { InventorySummary } from "./components/InventorySummary";
 import { RecentActivities } from "./components/RecentActivities";
-import { NotificationCenter } from "./components/NotificationCenter";
+import { NotificationCenter, buildAdminNotifications } from "./components/NotificationCenter";
 import { Bell, LogOut, Sun, Moon } from "lucide-react";
 import { cn } from "./lib/utils";
 import { InventoryProvider } from "./context/InventoryContext";
@@ -109,8 +109,8 @@ function AppContent() {
 
   React.useEffect(() => {
     const handleMarkRead = (e: any) => {
-      const { id, status } = e.detail;
-      const key = `${id}-${status}`;
+      const { id, status, key: explicitKey } = e.detail || {};
+      const key = explicitKey || `${id}-${status}`;
       setDismissedIds((prev) => (prev.includes(key) ? prev : [...prev, key]));
     };
     window.addEventListener("markAdminNotifRead", handleMarkRead);
@@ -123,14 +123,11 @@ function AppContent() {
     }
   }, [dismissedIds, currentUser]);
 
-  const pendingCount = bookings.filter((b) => {
-    const status = b.status || "Pending";
-    const notifKey = `${b.id}-${status}`;
-    return (
-      (status === "Pending" || status === "Inquiry" || status === "Cancelled" || status === "Confirmed") &&
-      !dismissedIds.includes(notifKey)
-    );
-  }).length;
+  const pendingCount = React.useMemo(() => {
+    return buildAdminNotifications(bookings).filter(
+      (item) => item.isActionable && !dismissedIds.includes(item.notifKey)
+    ).length;
+  }, [bookings, dismissedIds]);
 
   React.useEffect(() => {
     window.scrollTo(0, 0);
