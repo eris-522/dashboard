@@ -51,7 +51,7 @@ function Dashboard({ onNavigate }: { onNavigate: (id: string) => void }) {
   return (
     <div className="w-full space-y-8 animate-in fade-in duration-500 min-w-0">
       {/* Stats */}
-      <MetricCards />
+      <MetricCards onNavigate={onNavigate} />
 
       {/* Charts & Calendar Row */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 lg:gap-8 w-full">

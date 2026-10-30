@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import {
   Search,
   Plus,
@@ -259,7 +259,7 @@ export function InventoryPage() {
   const [isRestockModalOpen, setIsRestockModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
-  const [restockAmount, setRestockAmount] = useState<number | string>(10);
+  const [restockAmount, setRestockAmount] = useState<number | string>(0);
   const [restockReason, setRestockReason] = useState<string>("");
   const [showReasonDropdown, setShowReasonDropdown] = useState<boolean>(false);
   const [adjustmentType, setAdjustmentType] = useState<StockMovement["type"]>("Restock");
@@ -370,6 +370,51 @@ export function InventoryPage() {
     return computeItemStatus(calculatedNewStock, selectedItem.minStock, selectedItem.status);
   }, [selectedItem, calculatedNewStock]);
 
+  // Mode switcher that auto-switches reason note to match adjustment type
+  const handleSwitchAdjustMode = (newMode: "add" | "deduct") => {
+    setAdjustMode(newMode);
+    setFormError(null);
+    setRestockReason(REASON_PRESETS[newMode][0]);
+  };
+
+  // Continuous hold-to-step quantity handlers
+  const holdTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const holdIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const stopHold = useCallback(() => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+    if (holdIntervalRef.current) {
+      clearInterval(holdIntervalRef.current);
+      holdIntervalRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => stopHold();
+  }, [stopHold]);
+
+  const stepQuantity = useCallback((delta: number) => {
+    setRestockAmount((prev) => {
+      const cur = Number(prev) || 0;
+      const next = Math.max(0, Math.min(100000, cur + delta));
+      return next;
+    });
+    setFormError(null);
+  }, []);
+
+  const startHold = useCallback((delta: number) => {
+    stopHold();
+    stepQuantity(delta);
+    holdTimerRef.current = setTimeout(() => {
+      holdIntervalRef.current = setInterval(() => {
+        stepQuantity(delta);
+      }, 75);
+    }, 350);
+  }, [stepQuantity, stopHold]);
+
   // Handler: Restock / Adjust
   const handleApplyRestockOrAdjustment = async () => {
     if (!selectedItem) return;
@@ -403,7 +448,7 @@ export function InventoryPage() {
 
     setIsRestockModalOpen(false);
     setSelectedItem(null);
-    setRestockAmount(10);
+    setRestockAmount(0);
     setAdjustMode("add");
     setRestockReason("");
     setShowReasonDropdown(false);
@@ -998,9 +1043,10 @@ export function InventoryPage() {
                                 <button
                                   onClick={() => {
                                     setSelectedItem(item);
-                                    setRestockAmount(10);
+                                    setRestockAmount(0);
+                                    setAdjustMode("add");
                                     setAdjustmentType("Restock");
-                                    setRestockReason("Supplier delivery / Purchase");
+                                    setRestockReason(REASON_PRESETS.add[0]);
                                     setFormError(null);
                                     setIsRestockModalOpen(true);
                                   }}
@@ -1259,10 +1305,7 @@ export function InventoryPage() {
                 <div className="grid grid-cols-2 gap-2 p-1 bg-natural-bg/60 rounded-xl border border-natural-border/70">
                   <button
                     type="button"
-                    onClick={() => {
-                      setAdjustMode("add");
-                      setFormError(null);
-                    }}
+                    onClick={() => handleSwitchAdjustMode("add")}
                     className={cn(
                       "py-2.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border",
                       adjustMode === "add"
@@ -1276,10 +1319,7 @@ export function InventoryPage() {
 
                   <button
                     type="button"
-                    onClick={() => {
-                      setAdjustMode("deduct");
-                      setFormError(null);
-                    }}
+                    onClick={() => handleSwitchAdjustMode("deduct")}
                     className={cn(
                       "py-2.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border",
                       adjustMode === "deduct"
@@ -1310,7 +1350,7 @@ export function InventoryPage() {
                       ? "text-emerald-700 bg-emerald-500/15"
                       : "text-red-700 bg-red-500/15"
                   )}>
-                    {adjustMode === "add" ? `+${numInput}` : `-${numInput}`} {selectedItem.unit}
+                    {numInput === 0 ? `0 ${selectedItem.unit}` : adjustMode === "add" ? `+${numInput} ${selectedItem.unit}` : `-${numInput} ${selectedItem.unit}`}
                   </span>
                   <span className="block text-natural-text-light/70 text-xs mt-0.5">➔</span>
                 </div>
@@ -1346,14 +1386,18 @@ export function InventoryPage() {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => {
-                      const cur = Number(restockAmount) || 0;
-                      const next = Math.max(1, cur - 1);
-                      setRestockAmount(next);
-                      setFormError(null);
+                    onMouseDown={() => startHold(-1)}
+                    onMouseUp={stopHold}
+                    onMouseLeave={stopHold}
+                    onTouchStart={(e) => {
+                      e.preventDefault();
+                      startHold(-1);
                     }}
-                    className="w-11 h-11 flex items-center justify-center rounded-xl bg-natural-bg/70 hover:bg-natural-bg border border-natural-border text-natural-text-main transition-colors cursor-pointer text-base font-bold shrink-0"
-                    title="Decrease by 1"
+                    onTouchEnd={stopHold}
+                    onTouchCancel={stopHold}
+                    onContextMenu={(e) => e.preventDefault()}
+                    className="w-11 h-11 flex items-center justify-center rounded-xl bg-natural-bg/70 hover:bg-natural-bg border border-natural-border text-natural-text-main transition-colors cursor-pointer text-base font-bold shrink-0 select-none active:scale-95"
+                    title="Decrease quantity (click or hold)"
                   >
                     <Minus className="w-4 h-4" />
                   </button>
@@ -1361,7 +1405,7 @@ export function InventoryPage() {
                   <div className="flex-1 relative">
                     <input
                       type="number"
-                      min="1"
+                      min="0"
                       max="100000"
                       value={restockAmount}
                       onChange={(e) => {
@@ -1398,14 +1442,18 @@ export function InventoryPage() {
 
                   <button
                     type="button"
-                    onClick={() => {
-                      const cur = Number(restockAmount) || 0;
-                      const next = Math.min(100000, cur + 1);
-                      setRestockAmount(next);
-                      setFormError(null);
+                    onMouseDown={() => startHold(1)}
+                    onMouseUp={stopHold}
+                    onMouseLeave={stopHold}
+                    onTouchStart={(e) => {
+                      e.preventDefault();
+                      startHold(1);
                     }}
-                    className="w-11 h-11 flex items-center justify-center rounded-xl bg-natural-bg/70 hover:bg-natural-bg border border-natural-border text-natural-text-main transition-colors cursor-pointer text-base font-bold shrink-0"
-                    title="Increase by 1"
+                    onTouchEnd={stopHold}
+                    onTouchCancel={stopHold}
+                    onContextMenu={(e) => e.preventDefault()}
+                    className="w-11 h-11 flex items-center justify-center rounded-xl bg-natural-bg/70 hover:bg-natural-bg border border-natural-border text-natural-text-main transition-colors cursor-pointer text-base font-bold shrink-0 select-none active:scale-95"
+                    title="Increase quantity (click or hold)"
                   >
                     <Plus className="w-4 h-4" />
                   </button>
