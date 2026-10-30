@@ -11,17 +11,16 @@ export function InventorySummary({ onViewAll }: { onViewAll?: () => void }) {
   const activeItems = items.filter(item => item.status !== 'Archived' && item.status?.toLowerCase() !== 'archived');
   const totalOutsourced = activeItems.reduce((acc, i) => acc + getOutsourcedStock(i.id), 0);
 
-  // Prioritize items that have outsourced stock so they appear first in the overview
-  const prioritizedItems = [...activeItems].sort((a, b) => {
-    const aOut = getOutsourcedStock(a.id);
-    const bOut = getOutsourcedStock(b.id);
-    if (aOut > 0 && bOut <= 0) return -1;
-    if (bOut > 0 && aOut <= 0) return 1;
-    if (aOut > 0 && bOut > 0) return bOut - aOut;
-    return 0;
-  });
+  // Lowest stock first (by stock level vs. minimum required); ties fall back to name for a stable order
+  const stockRatio = (i: (typeof activeItems)[number]) => i.stock / Math.max(1, i.minStock);
+  const sortedItems = [...activeItems].sort((a, b) =>
+    stockRatio(a) - stockRatio(b) ||
+    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) ||
+    String(a.id).localeCompare(String(b.id))
+  );
 
-  const displayItems = prioritizedItems.slice(0, 5);
+  // Show enough rows to fill the card, matching the Recent Audit Trail height
+  const displayItems = sortedItems.slice(0, 9);
   const restockNeededCount = activeItems.filter(i => normalizeStockStatus(i.status) === 'Low').length;
   const totalAllocated = activeItems.reduce((acc, i) => acc + getAllocatedStock(i.id), 0);
 
@@ -40,7 +39,7 @@ export function InventorySummary({ onViewAll }: { onViewAll?: () => void }) {
         </button>
       </div>
 
-      <div className="flex-1 space-y-4">
+      <div className="flex-1 flex flex-col justify-between gap-3">
         {activeItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-6 text-natural-text-light opacity-60">
             <PackageSearch className="w-8 h-8 mb-2" />

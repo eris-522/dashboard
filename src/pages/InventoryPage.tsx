@@ -538,7 +538,11 @@ export function InventoryPage() {
       const valB = statusOrder[b.status === "Archived" ? "Archived" : computeItemStatus(b.stock, b.minStock, b.status)] || 5;
       if (valA < valB) return sortStatus === "asc" ? -1 : 1;
       if (valA > valB) return sortStatus === "asc" ? 1 : -1;
-      return 0;
+      // Within the same status, order by actual stock level vs. minimum required
+      const ratioA = a.stock / Math.max(1, a.minStock);
+      const ratioB = b.stock / Math.max(1, b.minStock);
+      if (ratioA !== ratioB) return sortStatus === "asc" ? ratioA - ratioB : ratioB - ratioA;
+      return a.name.localeCompare(b.name);
     });
   }, [filteredItems, sortStatus]);
 
@@ -657,19 +661,10 @@ export function InventoryPage() {
           <div className="flex flex-col gap-1.5 min-w-0">
             <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 w-full text-xs font-bold text-natural-text-main">
               <span>
-                {totalStock.toLocaleString()} {item.unit} Total
+                {item.stock.toLocaleString()} {item.unit} Available
               </span>
-              <span
-                className={cn(
-                  "text-xs font-bold",
-                  allocated > 0
-                    ? "text-red-500 dark:text-red-400"
-                    : "text-natural-text-light/50"
-                )}
-              >
-                {allocated > 0
-                  ? `-${allocated.toLocaleString()} Deducted`
-                  : "0 Deducted"}
+              <span className="text-[10px] font-medium text-natural-text-light opacity-75">
+                {remainingPercent}% on-hand
               </span>
             </div>
             <div className="h-[7px] w-full bg-natural-bg border border-natural-border rounded-full overflow-hidden">
@@ -700,13 +695,10 @@ export function InventoryPage() {
             </div>
             <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[11px] text-natural-text-light font-medium">
               <span>
-                Available:{" "}
+                Total:{" "}
                 <strong className="text-natural-text-main font-semibold">
-                  {item.stock.toLocaleString()} {item.unit}
+                  {totalStock.toLocaleString()} {item.unit}
                 </strong>
-              </span>
-              <span className="text-[10px] opacity-75">
-                {remainingPercent}% on-hand
               </span>
             </div>
           </div>

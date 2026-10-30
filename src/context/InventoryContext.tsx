@@ -419,7 +419,11 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   // Concurrency guards to prevent parallel double-deductions or overlapping reconciliations
   const pendingDeductions = useRef(new Set<string>());
   const isReconcilingRef = useRef(false);
+  const reconcileQueuedRef = useRef(false);
   const hasLoadedInitialDataRef = useRef(false);
+  // Always-current copy of custom package rules so async/timer callbacks never use a stale snapshot
+  const customPackageRulesRef = useRef<Record<string, PackageEquipmentRule[]>>({});
+  customPackageRulesRef.current = customPackageRules;
 
   const fetchDeductionsFromDb = async (): Promise<BookingDeductionRecord[]> => {
     const { data, error: err } = await supabase
@@ -550,11 +554,16 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   };
 
   // React to booking changes from BookingContext in real-time once initial Supabase load finishes
+  // Only reconcile when a booking's id/status/pax signature really changes (not on every poll refresh)
+  const bookingsSignature = (contextBookings || [])
+    .map((b: any) => `${b.id}:${b.status}:${b.guest_count ?? b.guestCount ?? ''}:${b.additional_pax ?? b.additionalPax ?? ''}`)
+    .sort()
+    .join('|');
   useEffect(() => {
     if (hasLoadedInitialDataRef.current && contextBookings && contextBookings.length > 0) {
-      reconcileCompletedEvents(contextBookings);
+      reconcileCompletedEvents();
     }
-  }, [contextBookings]);
+  }, [bookingsSignature]);
 
   useEffect(() => {
     refreshItems();
@@ -635,8 +644,9 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   };
 
   const getPackageRules = (packageName: string, currentItemsList?: InventoryItem[]): PackageEquipmentRule[] => {
-    if (customPackageRules[packageName] && customPackageRules[packageName].length > 0) {
-      return customPackageRules[packageName];
+    const latestRules = customPackageRulesRef.current;
+    if (latestRules[packageName] && latestRules[packageName].length > 0) {
+      return latestRules[packageName];
     }
     return deriveDynamicPackageRules(currentItemsList || items);
   };
@@ -1172,15 +1182,18 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
    */
   const reconcileCompletedEvents = async (_bookingsList?: any[]): Promise<number> => {
     if (isReconcilingRef.current) {
+      // Run once more after the current pass instead of silently dropping the request
+      reconcileQueuedRef.current = true;
       return 0;
     }
 
     isReconcilingRef.current = true;
     try {
-      // Use provided bookings list if available to avoid redundant egress, otherwise fetch minimal required columns
-      const fetchBookingsPromise = (_bookingsList && _bookingsList.length > 0)
-        ? Promise.resolve({ data: _bookingsList, error: null })
-        : supabase.from('bookings').select('id, status, guest_count, additional_pax, packages(name, inclusions), profiles(name)');
+      // Always read bookings straight from Supabase (never from transient/optimistic UI state)
+      // so a booking is only treated as Confirmed once that status is actually saved.
+      const fetchBookingsPromise = supabase
+        .from('bookings')
+        .select('*, packages(*), profiles(*)');
 
       const [bookingsRes, deductionsRes, invRes] = await Promise.all([
         fetchBookingsPromise,
@@ -1212,7 +1225,20 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
 
       // 1. Restore completed/cancelled/archived bookings, and purge orphaned deleted bookings
       for (const record of currentRecords) {
-        const matchedBooking = currentBookings.find((b: any) => String(b.id) === String(record.bookingId));
+        let matchedBooking = currentBookings.find((b: any) => String(b.id) === String(record.bookingId));
+
+        if (!matchedBooking) {
+          // Never trust a single list for deletions: confirm directly that the booking is really gone
+          const { data: verifyRow, error: verifyErr } = await supabase
+            .from('bookings')
+            .select('id, status')
+            .eq('id', record.bookingId)
+            .maybeSingle();
+          if (verifyErr) continue;
+          if (verifyRow) {
+            matchedBooking = verifyRow;
+          }
+        }
 
         if (!matchedBooking) {
           const success = await restoreBookingInventory(
@@ -1274,6 +1300,10 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         const guestCount = Number(b.guest_count ?? b.guestCount ?? 50);
         const additionalPax = Number(b.additional_pax ?? b.additionalPax ?? 0);
         const totalPax = guestCount + additionalPax;
+        // Only touch an existing allocation when the booking's pax actually changed.
+        // Otherwise unrelated changes (new inventory items, rule edits) would silently
+        // alter stock/outsourced numbers for bookings that were already confirmed.
+        if (rec.guestCount === totalPax) continue;
         const inclusions = b.packages?.inclusions || b.inclusions || [];
         const corkage = (b as any).corkage_info || (b as any).logistics_info?.corkage || null;
         const expectedReqs = calculatePackageEquipment(pkgName, totalPax, inclusions, currentInvItems, corkage);
@@ -1289,18 +1319,6 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
               it.outsourcedQuantity = Math.max(0, req.quantity - inHouse);
               recordModified = true;
             }
-          } else {
-            const invItem = currentInvItems.find(i => i.status !== 'Archived' && i.name.toLowerCase().trim() === req.itemName.toLowerCase().trim());
-            const available = invItem ? Math.max(0, invItem.stock) : 0;
-            const inHouse = Math.min(available, req.quantity);
-            rec.items.push({
-              itemId: invItem?.id || req.itemName,
-              itemName: req.itemName,
-              quantity: inHouse,
-              outsourcedQuantity: Math.max(0, req.quantity - inHouse),
-              unit: req.unit
-            });
-            recordModified = true;
           }
         }
         if (rec.guestCount !== totalPax) {
@@ -1318,6 +1336,10 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       return restoredCount;
     } finally {
       isReconcilingRef.current = false;
+      if (reconcileQueuedRef.current) {
+        reconcileQueuedRef.current = false;
+        setTimeout(() => { reconcileCompletedEvents(); }, 1500);
+      }
     }
   };
 
