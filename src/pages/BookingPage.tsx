@@ -398,6 +398,7 @@ export function BookingPage() {
   const [subMessage, setSubMessage] = useState<string>("");
   // Off-menu dishes scoped to the open booking (stored in booking_custom_dishes, never in menu_items)
   const [bookingCustomDishes, setBookingCustomDishes] = useState<any[]>([]);
+  const [restoringDish, setRestoringDish] = useState<string | null>(null);
 
   useEffect(() => {
     const bookingId = selectedBooking?.id;
@@ -1469,12 +1470,234 @@ export function BookingPage() {
     setIsSubModalOpen(true);
   };
 
+  const getBookingUnavailableEntries = (booking: any, customList: any[] = bookingCustomDishes) => {
+    if (!booking) return [];
+    const activeMenu: string[] = Array.isArray(booking.selected_menu_items)
+      ? booking.selected_menu_items
+      : [];
+    const unavailableMap = new Map<string, any>();
+    const restoredSet = new Set<string>();
+
+    (Array.isArray(booking.dish_substitutions) ? booking.dish_substitutions : []).forEach((s: any) => {
+      if (!s?.original_dish) return;
+      if (s.restored) {
+        unavailableMap.delete(s.original_dish);
+        restoredSet.add(s.original_dish);
+        return;
+      }
+      if (s.original_dish !== s.replacement_dish && !activeMenu.includes(s.original_dish)) {
+        restoredSet.delete(s.original_dish);
+        unavailableMap.set(s.original_dish, s);
+      }
+    });
+
+    customList.forEach((cd: any) => {
+      if (
+        cd?.replaces_dish &&
+        !activeMenu.includes(cd.replaces_dish) &&
+        !restoredSet.has(cd.replaces_dish) &&
+        !unavailableMap.has(cd.replaces_dish)
+      ) {
+        unavailableMap.set(cd.replaces_dish, {
+          id: `custom-unavail-${cd.id}`,
+          original_dish: cd.replaces_dish,
+          replacement_dish: cd.name,
+          category: cd.category,
+          reason: "Replaced with custom dish",
+        });
+      }
+    });
+
+    return Array.from(unavailableMap.values());
+  };
+
+  const handleMarkDishAvailableAgain = async (
+    dishToRestore: string,
+    opts?: { fromSubModal?: boolean }
+  ) => {
+    if (!selectedBooking || !dishToRestore) return;
+    setRestoringDish(dishToRestore);
+    if (opts?.fromSubModal) {
+      setIsSavingSub(true);
+      setSubMessage("");
+    }
+
+    const nowIso = new Date().toISOString();
+    const clientName =
+      selectedBooking.profiles?.name || selectedBooking.profiles?.full_name || "Client";
+    const currentDishes: string[] = Array.isArray(selectedBooking.selected_menu_items)
+      ? [...selectedBooking.selected_menu_items]
+      : [];
+
+    const relatedCustomNames = bookingCustomDishes
+      .filter((cd) => cd.replaces_dish === dishToRestore)
+      .map((cd) => cd.name);
+    const rawSubs: any[] = Array.isArray(selectedBooking.dish_substitutions)
+      ? selectedBooking.dish_substitutions
+      : [];
+    const subReplacementNames = rawSubs
+      .filter((s: any) => !s?.restored && s?.original_dish === dishToRestore && s?.replacement_dish && s.original_dish !== s.replacement_dish)
+      .map((s: any) => s.replacement_dish);
+
+    const candidatesToSwapBack = Array.from(new Set([...relatedCustomNames, ...subReplacementNames]));
+
+    let updatedMenu = [...currentDishes];
+    if (updatedMenu.includes(dishToRestore)) {
+      // Remove any lingering custom replacement dishes for this original dish
+      if (relatedCustomNames.length > 0) {
+        updatedMenu = updatedMenu.filter((d) => !relatedCustomNames.includes(d));
+      }
+    } else {
+      const idxInMenu = updatedMenu.findIndex((d) => candidatesToSwapBack.includes(d));
+      if (idxInMenu !== -1) {
+        updatedMenu[idxInMenu] = dishToRestore;
+        // Also ensure no duplicate custom dishes remain
+        if (relatedCustomNames.length > 0) {
+          updatedMenu = updatedMenu.filter((d, idx) => idx === idxInMenu || !relatedCustomNames.includes(d));
+        }
+      }
+    }
+
+    let matchedSub = false;
+    const updatedSubs = rawSubs
+      .filter((s: any) => s?.restored || s?.original_dish !== s?.replacement_dish)
+      .map((s: any) => {
+        if (!s?.restored && s?.original_dish === dishToRestore) {
+          matchedSub = true;
+          return {
+            ...s,
+            restored: true,
+            restored_at: nowIso,
+            restored_by: currentUser?.name || "Coordinator",
+            restored_to_menu: updatedMenu.includes(dishToRestore),
+          };
+        }
+        return s;
+      });
+
+    if (!matchedSub) {
+      updatedSubs.push({
+        id: `sub-restored-${Date.now()}`,
+        original_dish: dishToRestore,
+        replacement_dish: dishToRestore,
+        restored: true,
+        restored_at: nowIso,
+        restored_by: currentUser?.name || "Coordinator",
+        restored_to_menu: updatedMenu.includes(dishToRestore),
+      });
+    }
+
+    const existingMods: any[] = Array.isArray(selectedBooking.modification_requests)
+      ? selectedBooking.modification_requests
+      : [];
+    const updatedMods = existingMods.map((m: any) =>
+      m.status === "Applied"
+        ? {
+            ...m,
+            status: "Approved",
+            reviewed_at: nowIso,
+            reviewed_by: currentUser?.name || "Coordinator",
+          }
+        : m
+    );
+
+    try {
+      // Remove any custom replacement dish created for this original dish so it is hidden from choices
+      const { error: delErr } = await supabase
+        .from("booking_custom_dishes")
+        .delete()
+        .eq("booking_id", selectedBooking.id)
+        .eq("replaces_dish", dishToRestore);
+      if (delErr) throw delErr;
+
+      setBookingCustomDishes((prev) => prev.filter((cd) => cd.replaces_dish !== dishToRestore));
+
+      const { error } = await supabase
+        .from("bookings")
+        .update({
+          selected_menu_items: updatedMenu,
+          dish_substitutions: updatedSubs,
+          modification_requests: updatedMods,
+        })
+        .eq("id", selectedBooking.id);
+      if (error) throw error;
+
+      await logAuditAction({
+        action: "Set Dish Available Again",
+        target: clientName,
+        type: "Update",
+        details: `Admin marked "${dishToRestore}" available again${updatedMenu.includes(dishToRestore) ? " and restored it to the menu" : ""} for ${clientName} (Booking #${selectedBooking.id}).`,
+      });
+
+      setBookings((prev) =>
+        prev.map((b) =>
+          String(b.id) === String(selectedBooking.id)
+            ? {
+                ...b,
+                selected_menu_items: updatedMenu,
+                dish_substitutions: updatedSubs,
+                modification_requests: updatedMods,
+              }
+            : b
+        )
+      );
+
+      setSelectedBooking((prev: any) =>
+        prev
+          ? {
+              ...prev,
+              selected_menu_items: updatedMenu,
+              dish_substitutions: updatedSubs,
+              modification_requests: updatedMods,
+            }
+          : prev
+      );
+
+      window.dispatchEvent(new CustomEvent("bookingsUpdated"));
+      if (opts?.fromSubModal) {
+        setSubMessage(`"${dishToRestore}" marked available again & restored to client's menu!`);
+        setTimeout(() => {
+          setIsSubModalOpen(false);
+          setSubMessage("");
+        }, 1400);
+      }
+    } catch (err: any) {
+      console.error("Error restoring dish availability:", err);
+      if (opts?.fromSubModal) {
+        setSubMessage(`Failed: ${err.message}`);
+      }
+    } finally {
+      setRestoringDish(null);
+      if (opts?.fromSubModal) {
+        setIsSavingSub(false);
+      }
+    }
+  };
+
   const handleConfirmDishSubstitution = async () => {
     const finalReplacement = (isCustomReplacement ? subCustomReplacement : subReplacementDish).trim();
     if (!selectedBooking || !subOriginalDish || !finalReplacement) return;
+
+    const rawSubs: any[] = Array.isArray(selectedBooking.dish_substitutions)
+      ? selectedBooking.dish_substitutions
+      : [];
+    const chainedPrev = rawSubs.find(
+      (s: any) => !s?.restored && s?.replacement_dish === subOriginalDish
+    );
+    const chainedCustom = bookingCustomDishes.find((cd) => cd.name === subOriginalDish);
+    const effectiveOriginal =
+      chainedPrev?.original_dish || chainedCustom?.replaces_dish || subOriginalDish;
+
+    // If coordinator is replacing the substitute right back with the original dish, treat as "Set Available Again"
+    if (effectiveOriginal === finalReplacement) {
+      await handleMarkDishAvailableAgain(finalReplacement, { fromSubModal: true });
+      return;
+    }
+
     setIsSavingSub(true);
     setSubMessage("");
 
+    const nowIso = new Date().toISOString();
     const clientName =
       selectedBooking.profiles?.name || selectedBooking.profiles?.full_name || "Client";
     const currentDishes: string[] = Array.isArray(selectedBooking.selected_menu_items)
@@ -1488,27 +1711,36 @@ export function BookingPage() {
 
     const newSubstitution: any = {
       id: `sub-${Date.now()}`,
-      original_dish: subOriginalDish,
+      original_dish: effectiveOriginal,
       replacement_dish: finalReplacement,
       category: resolvedCategory,
       reason: subReason.trim(),
       client_note: subClientNote.trim(),
-      substituted_at: new Date().toISOString(),
+      substituted_at: nowIso,
       admin_name: currentUser?.name || "Coordinator",
     };
 
-    // Keep substitutions clean: if replacing a dish that was itself a previous replacement, collapse/prune stale entry
-    const existingSubs: any[] = Array.isArray(selectedBooking.dish_substitutions)
-      ? selectedBooking.dish_substitutions.filter(
-          (s: any) => s.replacement_dish !== subOriginalDish && updatedMenu.includes(s.replacement_dish)
-        )
-      : [];
-    const chainedPrev = Array.isArray(selectedBooking.dish_substitutions)
-      ? selectedBooking.dish_substitutions.find((s: any) => s.replacement_dish === subOriginalDish)
-      : null;
-    if (chainedPrev?.original_dish) {
-      newSubstitution.original_dish = chainedPrev.original_dish;
-    }
+    // Keep substitutions clean: collapse chained substitute, drop broken self-subs, and if finalReplacement was previously unavailable, mark it restored
+    const existingSubs: any[] = rawSubs
+      .filter(
+        (s: any) =>
+          (s?.restored || s?.original_dish !== s?.replacement_dish) &&
+          !(
+            !s?.restored &&
+            s?.replacement_dish === subOriginalDish
+          )
+      )
+      .map((s: any) =>
+        !s?.restored && s?.original_dish === finalReplacement
+          ? {
+              ...s,
+              restored: true,
+              restored_at: nowIso,
+              restored_by: currentUser?.name || "Coordinator",
+              restored_to_menu: true,
+            }
+          : s
+      );
     const updatedSubs = [...existingSubs, newSubstitution];
 
     // Also auto-acknowledge any prior "Applied" client modifications so stale Revert/Confirm buttons don't overwrite this substitution
@@ -1520,13 +1752,31 @@ export function BookingPage() {
         ? {
             ...m,
             status: "Approved",
-            reviewed_at: new Date().toISOString(),
+            reviewed_at: nowIso,
             reviewed_by: currentUser?.name || "Coordinator",
           }
         : m
     );
 
     try {
+      // If subOriginalDish was a custom dish being replaced, or if finalReplacement was previously replaced by a custom dish, clean up stale custom rows
+      if (chainedCustom && subOriginalDish !== finalReplacement) {
+        await supabase
+          .from("booking_custom_dishes")
+          .delete()
+          .eq("booking_id", selectedBooking.id)
+          .eq("name", subOriginalDish);
+        setBookingCustomDishes((prev) => prev.filter((cd) => cd.name !== subOriginalDish));
+      }
+      if (bookingCustomDishes.some((cd) => cd.replaces_dish === finalReplacement)) {
+        await supabase
+          .from("booking_custom_dishes")
+          .delete()
+          .eq("booking_id", selectedBooking.id)
+          .eq("replaces_dish", finalReplacement);
+        setBookingCustomDishes((prev) => prev.filter((cd) => cd.replaces_dish !== finalReplacement));
+      }
+
       const isOffMenu = isCustomReplacement || !menuItems.some((mi) => mi.name === finalReplacement);
       if (isOffMenu) {
         const { data: savedCustom, error: customErr } = await supabase
@@ -4057,37 +4307,75 @@ export function BookingPage() {
                       )}
                     </div>
 
-                    {/* Active Dish Substitutions Log (filtered to active menu items) */}
+                    {/* Unavailable & Substituted Dishes Log with "Set Available Again" control */}
                     {(() => {
                       const activeMenu: string[] = Array.isArray(selectedBooking.selected_menu_items)
                         ? selectedBooking.selected_menu_items
                         : [];
-                      const activeSubs = Array.isArray(selectedBooking.dish_substitutions)
-                        ? selectedBooking.dish_substitutions.filter(
-                            (sub: any) => sub?.replacement_dish && activeMenu.includes(sub.replacement_dish)
-                          )
-                        : [];
-                      if (activeSubs.length === 0) return null;
+                      const unavailableEntries = getBookingUnavailableEntries(selectedBooking);
+                      if (unavailableEntries.length === 0) return null;
                       return (
                         <div className="pt-2 border-t border-natural-border/60 space-y-1.5">
                           <p className="text-[10px] font-bold text-natural-accent uppercase tracking-wider flex items-center gap-1">
                             <RefreshCw className="w-3 h-3" />
-                            Active Dish Substitutions ({activeSubs.length})
+                            Unavailable &amp; Substituted Dishes ({unavailableEntries.length})
                           </p>
                           <div className="space-y-1">
-                            {activeSubs.map((sub: any, idx: number) => (
-                              <div key={idx} className="p-1.5 bg-natural-bg/70 border border-natural-border/50 rounded text-[11px] flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                                <div>
-                                  <span className="line-through text-natural-text-light/60">{sub.original_dish}</span>
-                                  <span className="mx-1 text-natural-accent font-bold">➔</span>
-                                  <span className="font-bold text-natural-text-main">{sub.replacement_dish}</span>
-                                  {sub.reason && <span className="text-[10px] text-natural-text-light ml-1.5">({sub.reason})</span>}
+                            {unavailableEntries.map((sub: any, idx: number) => {
+                              const isReplacementActive =
+                                sub?.replacement_dish && activeMenu.includes(sub.replacement_dish);
+                              const isRestoring = restoringDish === sub.original_dish;
+                              return (
+                                <div
+                                  key={sub.id || idx}
+                                  className="p-1.5 bg-natural-bg/70 border border-natural-border/50 rounded text-[11px] flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                                >
+                                  <div>
+                                    <span className="line-through text-natural-text-light/60">
+                                      {sub.original_dish}
+                                    </span>
+                                    {isReplacementActive ? (
+                                      <>
+                                        <span className="mx-1 text-natural-accent font-bold">➔</span>
+                                        <span className="font-bold text-natural-text-main">
+                                          {sub.replacement_dish}
+                                        </span>
+                                      </>
+                                    ) : (
+                                      <span className="text-[10px] text-natural-text-light ml-1.5 italic">
+                                        (Marked unavailable · Client chose another dish)
+                                      </span>
+                                    )}
+                                    {sub.reason && isReplacementActive && (
+                                      <span className="text-[10px] text-natural-text-light ml-1.5">
+                                        ({sub.reason})
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    {sub.substituted_at && (
+                                      <span className="text-[9px] text-natural-text-light">
+                                        {new Date(sub.substituted_at).toLocaleDateString()}
+                                      </span>
+                                    )}
+                                    <button
+                                      type="button"
+                                      disabled={isRestoring}
+                                      onClick={() => handleMarkDishAvailableAgain(sub.original_dish)}
+                                      title={
+                                        isReplacementActive
+                                          ? `Mark "${sub.original_dish}" available again, restore it to the menu, and hide any custom replacement dish`
+                                          : `Mark "${sub.original_dish}" available again for the client and hide any custom replacement dish`
+                                      }
+                                      className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-emerald-600/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-600 hover:text-white rounded border border-emerald-600/30 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                                    >
+                                      <CheckCircle2 className="w-3 h-3" />
+                                      {isRestoring ? "Restoring..." : "Set Available Again"}
+                                    </button>
+                                  </div>
                                 </div>
-                                <span className="text-[9px] text-natural-text-light shrink-0">
-                                  {sub.substituted_at ? new Date(sub.substituted_at).toLocaleDateString() : ""}
-                                </span>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
                       );
@@ -5351,6 +5639,36 @@ export function BookingPage() {
                   {subMessage}
                 </div>
               )}
+
+              {(() => {
+                const unavailableInModal = getBookingUnavailableEntries(selectedBooking);
+                if (unavailableInModal.length === 0) return null;
+                return (
+                  <div className="p-2.5 bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50 rounded-lg space-y-1.5">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
+                      Back in Stock? Restore Previously Unavailable Dish:
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {unavailableInModal.map((u: any) => (
+                        <button
+                          key={u.original_dish}
+                          type="button"
+                          disabled={restoringDish === u.original_dish || isSavingSub}
+                          onClick={() =>
+                            handleMarkDishAvailableAgain(u.original_dish, { fromSubModal: true })
+                          }
+                          className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        >
+                          <CheckCircle2 className="w-3 h-3" />
+                          {restoringDish === u.original_dish
+                            ? "Restoring..."
+                            : `Set "${u.original_dish}" Available Again`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Original Dish (Unavailable in market) */}
               <div className="space-y-1">
