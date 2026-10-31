@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Mail, Lock, LogIn, Utensils, AlertCircle, Loader2 } from 'lucide-react';
+import { Mail, Lock, LogIn, Utensils, AlertCircle, Loader2, Eye, EyeOff } from 'lucide-react';
 import { useUser } from '../context/UserContext';
 import { motion } from 'motion/react';
 
 export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const { login, currentUser } = useUser();
@@ -98,14 +99,23 @@ export function LoginPage() {
               <label className="text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest pl-1">Password</label>
               <div className="relative">
                 <input 
-                  type="password" 
+                  type={showPassword ? "text" : "password"} 
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 bg-white/50 border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white transition-all shadow-xs"
+                  className="w-full pl-10 pr-10 py-3 bg-white/50 border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white transition-all shadow-xs"
                   placeholder="••••••••"
                 />
                 <Lock className="absolute left-3.5 top-3.5 w-4 h-4 text-natural-text-light" />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute right-3.5 top-3.5 text-natural-text-light hover:text-natural-accent transition-colors cursor-pointer"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  title={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
             </div>
 
