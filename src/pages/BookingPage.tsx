@@ -41,6 +41,13 @@ import { supabase } from "../utils/supabase";
 import { useUser } from "../context/UserContext";
 import { useInventory } from "../context/InventoryContext";
 import { logAuditAction } from "../utils/auditLogger";
+import {
+  OVERTIME_SERVICE_RATES,
+  calculateServiceWindow,
+  calculateDayOfOvertime,
+  timeStringToMinutes,
+  minutesTo12h,
+} from "../utils/overtimeBilling";
 
 type SortField =
   | "customerName"
@@ -385,6 +392,12 @@ export function BookingPage() {
   const [customHaulingFeeInput, setCustomHaulingFeeInput] = useState<string>("0");
   const [customLogisticsNotes, setCustomLogisticsNotes] = useState<string>("");
   const [isSavingLogistics, setIsSavingLogistics] = useState<boolean>(false);
+  // Feature: Day-of Event Timer & OT Calculator State (Contract Rule: 1 min = 1 hr OT)
+  const [actualEndTimeInput, setActualEndTimeInput] = useState<string>("");
+  const [selectedOTServices, setSelectedOTServices] = useState<string[]>(["catering"]);
+  const [otCoordinatorCount, setOtCoordinatorCount] = useState<number>(2);
+  const [isSavingOvertime, setIsSavingOvertime] = useState<boolean>(false);
+  const [overtimeSaveMessage, setOvertimeSaveMessage] = useState<string>("");
   // Product Unavailability & Substitution Tool State
   const [isSubModalOpen, setIsSubModalOpen] = useState<boolean>(false);
   const [subOriginalDish, setSubOriginalDish] = useState<string>("");
@@ -3295,6 +3308,16 @@ export function BookingPage() {
                             {formatEventDate(selectedBooking.event_date)} at{" "}
                             {formatEventTime(selectedBooking.event_time)}
                           </p>
+                          {(() => {
+                            const preCatering = Number(selectedBooking.overtime_info?.prebooked?.catering_hours) || 0;
+                            const win = calculateServiceWindow(selectedBooking.event_time, preCatering);
+                            return (
+                              <p className="text-[10px] text-natural-accent font-semibold mt-0.5 flex items-center gap-1">
+                                <Clock className="w-3 h-3 shrink-0" />
+                                {win.standardWindowText} ({4 + preCatering}h window)
+                              </p>
+                            );
+                          })()}
                         </div>
                       </div>
 
@@ -3628,7 +3651,251 @@ export function BookingPage() {
                     );
                   })()}
 
-              {/* Payment Scheme & Installment Ledger Section (Catering Contract Clause 1 & Clause 16) */}
+              {/* Day-of Event Timer & OT Calculator Card (Contract Term: 1 minute = 1 hour OT) */}
+                  {(() => {
+                    const prebookedCatering = Number(selectedBooking.overtime_info?.prebooked?.catering_hours) || 0;
+                    const serviceWin = calculateServiceWindow(selectedBooking.event_time, prebookedCatering);
+                    const scheduledEndTime = serviceWin.extendedEndTimeLabel;
+
+                    const otCalculation = actualEndTimeInput.trim()
+                      ? calculateDayOfOvertime(
+                          scheduledEndTime,
+                          actualEndTimeInput.trim(),
+                          selectedOTServices,
+                          otCoordinatorCount
+                        )
+                      : { minutesOver: 0, billableOtHours: 0, servicesBilled: [], totalFee: 0, isOvertime: false };
+
+                    const dayOfInfo = selectedBooking.overtime_info?.day_of;
+                    const isAlreadyApplied = Boolean(dayOfInfo?.total_day_of_fee !== undefined && dayOfInfo?.applied_at);
+
+                    const toggleService = (serviceId: string) => {
+                      setSelectedOTServices((prev) =>
+                        prev.includes(serviceId)
+                          ? prev.filter((id) => id !== serviceId)
+                          : [...prev, serviceId]
+                      );
+                    };
+
+                    return (
+                      <div className="p-4 bg-natural-card/60 border border-natural-border rounded-2xl space-y-3.5 shadow-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-lg bg-natural-accent/10 flex items-center justify-center text-natural-accent shrink-0">
+                              <Clock className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <h5 className="text-xs font-bold text-natural-text-main uppercase tracking-wider">
+                                Day-of Event Timer &amp; Overtime Calculator
+                              </h5>
+                              <p className="text-[10px] text-natural-text-light">
+                                Catering Contract Rule: &ldquo;1 minute equals 1 hour OT&rdquo;
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                              1 min = 1 hr OT Rule
+                            </span>
+                            {isAlreadyApplied && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                                OT Applied (₱{(dayOfInfo.total_day_of_fee || 0).toLocaleString()})
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Timing Overview Grid */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 p-3 bg-natural-card rounded-xl border border-natural-border text-xs">
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
+                              Start Time
+                            </p>
+                            <p className="font-semibold text-natural-text-main mt-0.5">
+                              {serviceWin.startTimeLabel}
+                            </p>
+                            <p className="text-[10px] text-natural-text-light">Standard 4h package</p>
+                          </div>
+
+                          <div className="border-y sm:border-y-0 sm:border-x border-natural-border py-1 sm:py-0 sm:px-2.5">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
+                              Scheduled End Time
+                            </p>
+                            <p className="font-semibold text-natural-text-main mt-0.5">
+                              {scheduledEndTime}
+                            </p>
+                            <p className="text-[10px] text-natural-text-light">
+                              {prebookedCatering > 0 ? `4h + ${prebookedCatering}h pre-booked` : "4-hour service window"}
+                            </p>
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-natural-accent block">
+                              Actual End Time *
+                            </label>
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="text"
+                                placeholder="e.g. 11:30 PM"
+                                value={actualEndTimeInput}
+                                onChange={(e) => setActualEndTimeInput(e.target.value)}
+                                className="w-full px-2.5 py-1.5 text-xs font-semibold bg-natural-bg border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                              />
+                            </div>
+                            {/* Quick times preset buttons */}
+                            <div className="flex flex-wrap gap-1 pt-1">
+                              {[
+                                scheduledEndTime,
+                                minutesTo12h(timeStringToMinutes(scheduledEndTime) + 15),
+                                minutesTo12h(timeStringToMinutes(scheduledEndTime) + 30),
+                                minutesTo12h(timeStringToMinutes(scheduledEndTime) + 60),
+                                minutesTo12h(timeStringToMinutes(scheduledEndTime) + 120),
+                              ].map((preset) => (
+                                <button
+                                  key={preset}
+                                  type="button"
+                                  onClick={() => setActualEndTimeInput(preset)}
+                                  className="text-[9px] px-1.5 py-0.5 rounded bg-natural-bg hover:bg-natural-accent/10 border border-natural-border text-natural-text-light hover:text-natural-accent transition-colors"
+                                >
+                                  {preset}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Live Overtime Calculation Callout */}
+                        {actualEndTimeInput.trim() !== "" && (
+                          <div className={`p-3 rounded-xl border text-xs space-y-1 ${
+                            otCalculation.isOvertime
+                              ? "bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-200"
+                              : "bg-emerald-500/10 border-emerald-500/30 text-emerald-800 dark:text-emerald-200"
+                          }`}>
+                            {otCalculation.isOvertime ? (
+                              <div>
+                                <div className="flex items-center gap-1.5 font-bold text-amber-700 dark:text-amber-300">
+                                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                                  <span>Overtime Detected: {otCalculation.minutesOver} Minutes Past Scheduled End</span>
+                                </div>
+                                <p className="text-[11px] mt-1 leading-relaxed text-natural-text-main">
+                                  Applying contract rule (<em>1 minute = 1 hour OT</em>):{" "}
+                                  <strong className="text-amber-600 dark:text-amber-400 font-bold">
+                                    {otCalculation.billableOtHours} billable overtime hour{otCalculation.billableOtHours > 1 ? "s" : ""}
+                                  </strong>.
+                                </p>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1.5 font-bold text-emerald-700 dark:text-emerald-300">
+                                <CheckCheck className="w-4 h-4 shrink-0" />
+                                <span>Event Ended On Schedule ({otCalculation.minutesOver} mins overtime • ₱0 fee)</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Services Billed Checkbox Selector */}
+                        {otCalculation.isOvertime && (
+                          <div className="space-y-2 pt-1">
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block">
+                              Select Overtime Services to Bill ({otCalculation.billableOtHours} hr{otCalculation.billableOtHours > 1 ? "s" : ""}):
+                            </label>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                              {OVERTIME_SERVICE_RATES.map((srv) => {
+                                const isChecked = selectedOTServices.includes(srv.id);
+                                const count = srv.perPerson ? Math.max(1, otCoordinatorCount) : 1;
+                                const subtotal = isChecked ? otCalculation.billableOtHours * srv.rate * count : 0;
+
+                                return (
+                                  <div
+                                    key={srv.id}
+                                    onClick={() => toggleService(srv.id)}
+                                    className={`p-2.5 rounded-xl border cursor-pointer transition-all flex items-start justify-between gap-2 ${
+                                      isChecked
+                                        ? "bg-natural-accent/10 border-natural-accent/40 text-natural-text-main"
+                                        : "bg-natural-card border-natural-border text-natural-text-light hover:border-natural-border-hover"
+                                    }`}
+                                  >
+                                    <div className="flex items-start gap-2 min-w-0">
+                                      <input
+                                        type="checkbox"
+                                        checked={isChecked}
+                                        onChange={() => {}} // handled by parent onClick
+                                        className="mt-0.5 rounded accent-natural-accent"
+                                      />
+                                      <div>
+                                        <p className="font-bold text-xs leading-tight">{srv.name}</p>
+                                        <p className="text-[10px] text-natural-text-light">
+                                          ₱{srv.rate.toLocaleString()}/{srv.perPerson ? "hr/pax" : "hr"}
+                                        </p>
+                                        {srv.perPerson && isChecked && (
+                                          <div
+                                            className="flex items-center gap-1 mt-1 text-[10px]"
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            <span className="text-natural-text-light">Staff:</span>
+                                            <input
+                                              type="number"
+                                              min="1"
+                                              max="10"
+                                              value={otCoordinatorCount}
+                                              onChange={(e) => setOtCoordinatorCount(Math.max(1, parseInt(e.target.value) || 1))}
+                                              className="w-12 px-1 py-0.5 bg-natural-bg border border-natural-border rounded text-center text-[10px] font-bold"
+                                            />
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    <div className="text-right shrink-0">
+                                      <span className="text-[10px] block text-natural-text-light">Charge</span>
+                                      <span className={`font-serif font-bold text-xs ${isChecked ? "text-natural-accent" : "text-natural-text-light"}`}>
+                                        {isChecked ? `₱${subtotal.toLocaleString()}` : "₱0"}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Actions and Save Status */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-natural-border">
+                          <div className="text-xs">
+                            {overtimeSaveMessage ? (
+                              <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                                {overtimeSaveMessage}
+                              </span>
+                            ) : (
+                              <span className="text-natural-text-light">
+                                Day-of Overtime Fee:{" "}
+                                <strong className="text-natural-text-main font-serif text-sm">
+                                  ₱{otCalculation.totalFee.toLocaleString()}
+                                </strong>
+                              </span>
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={isSavingOvertime || !actualEndTimeInput.trim()}
+                            onClick={() => handleApplyDayOfOvertime(selectedBooking.id)}
+                            className="px-4 py-2 bg-natural-accent hover:bg-natural-accent/90 disabled:opacity-50 text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-all shadow-2xs cursor-pointer shrink-0"
+                          >
+                            {isSavingOvertime
+                              ? "Applying..."
+                              : isAlreadyApplied
+                                ? "Update Overtime Surcharge"
+                                : "Apply Overtime to Final Invoice"}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Payment Scheme & Installment Ledger Section (Catering Contract Clause 1 & Clause 16) */}
               {(() => {
                 const payment = getBookingPayment(selectedBooking);
                 const totalBudget = calculateBudget(selectedBooking);
@@ -3694,6 +3961,28 @@ export function BookingPage() {
                         {payment.payment_scheme}
                       </span>
                     </div>
+
+                    {/* Overtime Fee Summary in Payment Ledger */}
+                    {(() => {
+                      const preOT = selectedBooking.overtime_info?.prebooked;
+                      const dayOT = selectedBooking.overtime_info?.day_of;
+                      const preFee = Number(preOT?.total_prebooked_fee) || 0;
+                      const dayFee = Number(dayOT?.total_day_of_fee) || 0;
+                      if (preFee === 0 && dayFee === 0) return null;
+                      return (
+                        <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400 font-bold text-[11px] uppercase tracking-wider">
+                            <Clock className="w-3.5 h-3.5" />
+                            Overtime Billed to Final Invoice
+                          </div>
+                          <div className="flex items-center gap-2 text-xs font-medium text-natural-text-main">
+                            {preFee > 0 && <span>Pre-Booked: <strong>+₱{preFee.toLocaleString()}</strong></span>}
+                            {preFee > 0 && dayFee > 0 && <span>•</span>}
+                            {dayFee > 0 && <span>Day-of OT ({dayOT?.billable_ot_hours}h): <strong className="text-amber-600 dark:text-amber-400">+₱{dayFee.toLocaleString()}</strong></span>}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* Cost Overview Grid */}
                     <div className="grid grid-cols-3 gap-3 p-3 bg-natural-card rounded-xl border border-natural-border text-center shadow-2xs">
