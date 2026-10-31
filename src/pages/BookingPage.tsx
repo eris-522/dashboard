@@ -222,6 +222,37 @@ export const getRuleCategory = (dbCategory: string, itemName: string = ""): stri
   return "Main Course";
 };
 
+export const getBookingDishCategory = (
+  dishName: string,
+  booking?: any,
+  menuItemsList: any[] = []
+): string => {
+  if (!dishName) return "Main Course";
+
+  // 1. Check if this dish is an active replacement in booking.dish_substitutions
+  if (booking && Array.isArray(booking.dish_substitutions)) {
+    const sub = booking.dish_substitutions.find((s: any) => s.replacement_dish === dishName);
+    if (sub) {
+      if (sub.category) return sub.category;
+      if (sub.original_dish) {
+        const origDef = menuItemsList.find((mi: any) => mi.name === sub.original_dish);
+        if (origDef) {
+          return getRuleCategory(origDef.category, origDef.name);
+        }
+      }
+    }
+  }
+
+  // 2. Check if dish is in the menuItems database
+  const def = menuItemsList.find((mi: any) => mi.name === dishName);
+  if (def) {
+    return getRuleCategory(def.category, def.name);
+  }
+
+  // 3. Fallback to name heuristic in getRuleCategory
+  return getRuleCategory("", dishName);
+};
+
 export const categoryOrder = [
   "Appetizer",
   "Soup",
@@ -353,6 +384,7 @@ export function BookingPage() {
   const [subReplacementDish, setSubReplacementDish] = useState<string>("");
   const [isCustomReplacement, setIsCustomReplacement] = useState<boolean>(false);
   const [subCustomReplacement, setSubCustomReplacement] = useState<string>("");
+  const [subCustomCategory, setSubCustomCategory] = useState<string>("Appetizer");
   const [subReason, setSubReason] = useState<string>("Ingredient shortage / Out of stock in market");
   const [subClientNote, setSubClientNote] = useState<string>("");
   const [isSavingSub, setIsSavingSub] = useState<boolean>(false);
