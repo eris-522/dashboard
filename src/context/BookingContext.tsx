@@ -244,6 +244,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
             foodAllergies: cleanFoodAllergies,
             logistics_info: logisticsInfo,
             corkage_info: booking.corkage_info || logisticsInfo?.corkage || null,
+            overtime_info: booking.overtime_info || null,
             dish_substitutions: Array.isArray(booking.dish_substitutions) ? booking.dish_substitutions : [],
             modification_requests: Array.isArray(booking.modification_requests) ? booking.modification_requests : [],
             cancelled_by: booking.cancelled_by || "",
@@ -272,7 +273,17 @@ export function BookingProvider({ children }: { children: ReactNode }) {
                   Number(corkageObj?.alcoholicBeveragesCount || 0) * 400 +
                   Number(corkageObj?.outsideFoodCount || 0) * 400) ||
                 0;
-              return basePrice + addPrice * extraPax + travelFee + haulingFee + corkageFee;
+              let otData = booking.overtime_info;
+              if (typeof otData === "string") {
+                try {
+                  otData = JSON.parse(otData);
+                } catch (e) {}
+              }
+              const prebookedOTFee = Number(otData?.prebooked?.total_prebooked_fee) || 0;
+              const dayOfOTFee = Number(otData?.day_of?.total_day_of_fee) || 0;
+              const totalOTFee = Number(otData?.total_overtime_fee) || (prebookedOTFee + dayOfOTFee);
+
+              return basePrice + addPrice * extraPax + travelFee + haulingFee + corkageFee + totalOTFee;
             })(),
             status: booking.status || "Pending",
             downpayment_amount: downpaymentAmount,

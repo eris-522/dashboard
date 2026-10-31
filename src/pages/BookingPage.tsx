@@ -33,6 +33,7 @@ import {
   Wine,
   AlertTriangle,
   RefreshCw,
+  RotateCcw,
   Sliders,
 } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -398,6 +399,8 @@ export function BookingPage() {
   const [selectedOTServices, setSelectedOTServices] = useState<string[]>(["catering"]);
   const [otCoordinatorCount, setOtCoordinatorCount] = useState<number>(2);
   const [isSavingOvertime, setIsSavingOvertime] = useState<boolean>(false);
+  const [isRevertingOvertime, setIsRevertingOvertime] = useState<boolean>(false);
+  const [showRevertOTConfirm, setShowRevertOTConfirm] = useState<boolean>(false);
   const [overtimeSaveMessage, setOvertimeSaveMessage] = useState<string>("");
   // Product Unavailability & Substitution Tool State
   const [isSubModalOpen, setIsSubModalOpen] = useState<boolean>(false);
@@ -413,6 +416,15 @@ export function BookingPage() {
   // Off-menu dishes scoped to the open booking (stored in booking_custom_dishes, never in menu_items)
   const [bookingCustomDishes, setBookingCustomDishes] = useState<any[]>([]);
   const [restoringDish, setRestoringDish] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (selectedBooking?.overtime_info?.day_of?.actual_end_time) {
+      setActualEndTimeInput(selectedBooking.overtime_info.day_of.actual_end_time);
+    } else {
+      setActualEndTimeInput("");
+    }
+    setShowRevertOTConfirm(false);
+  }, [selectedBooking?.id]);
 
   useEffect(() => {
     const bookingId = selectedBooking?.id;
@@ -751,7 +763,65 @@ export function BookingPage() {
         Number(corkageData?.alcoholicBeveragesCount || 0) * 400 +
         Number(corkageData?.outsideFoodCount || 0) * 400) ||
       0;
-    return basePrice + additionalPaxTotal + servicesPrice + logistics.haulingFee + logistics.travelFee + corkageFee;
+
+    let otData = booking?.overtime_info;
+    if (typeof otData === "string") {
+      try {
+        otData = JSON.parse(otData);
+      } catch (e) {}
+    }
+    if (
+      !otData &&
+      typeof booking?.food_allergies === "string" &&
+      booking.food_allergies.includes("__PAYMENT_METADATA__:")
+    ) {
+      try {
+        const meta = JSON.parse(
+          booking.food_allergies.split("__PAYMENT_METADATA__:")[1]
+        );
+        if (meta?.overtime) otData = meta.overtime;
+      } catch (e) {}
+    }
+
+    const prebookedOTFee = Number(otData?.prebooked?.total_prebooked_fee) || 0;
+    const dayOfOTFee = Number(otData?.day_of?.total_day_of_fee) || 0;
+    const totalOvertimeFee =
+      Number(otData?.total_overtime_fee) || (prebookedOTFee + dayOfOTFee);
+
+    return (
+      basePrice +
+      additionalPaxTotal +
+      servicesPrice +
+      logistics.haulingFee +
+      logistics.travelFee +
+      corkageFee +
+      totalOvertimeFee
+    );
+  };
+
+
+
+  const getInitialDownpaymentDue = (
+    booking: any,
+    payment: BookingPaymentInfo,
+    totalBudget: number
+  ): number => {
+    if (payment.downpayment_amount > 0) {
+      return payment.downpayment_amount;
+    }
+    const is50Percent = payment.payment_scheme === "Standard 50%";
+    const logistics = getBookingLogistics(booking);
+    const travelFee = Number(logistics?.travelFee) || 0;
+    let otData = booking?.overtime_info;
+    if (typeof otData === "string") {
+      try {
+        otData = JSON.parse(otData);
+      } catch (e) {}
+    }
+    const dayOfFee = Number(otData?.day_of?.total_day_of_fee) || 0;
+    // Initial security deposit strictly excludes post-booking additions
+    const initialBase = Math.max(0, totalBudget - travelFee - dayOfFee);
+    return Math.round(initialBase * (is50Percent ? 0.5 : 0.2));
   };
 
   const filteredBookings = useMemo(() => {
@@ -1348,11 +1418,7 @@ export function BookingPage() {
       logistics_info: updatedLogistics,
     };
     const newTotalBudget = calculateBudget(tempBooking);
-    const is50Percent = payment.payment_scheme === "Standard 50%";
-    const downpaymentDue =
-      payment.downpayment_amount > 0
-        ? payment.downpayment_amount
-        : Math.round(newTotalBudget * (is50Percent ? 0.5 : 0.2));
+    const downpaymentDue = getInitialDownpaymentDue(tempBooking, payment, newTotalBudget);
     const newRemainingBalance = Math.max(0, newTotalBudget - downpaymentDue);
 
     let updatedSchedule = payment.installment_schedule
@@ -1455,6 +1521,283 @@ export function BookingPage() {
     window.dispatchEvent(new CustomEvent("bookingsUpdated"));
     setLogisticsSaveMessage("Logistics surcharge saved & balance updated.");
     setTimeout(() => setLogisticsSaveMessage(""), 4000);
+  };
+
+  const handleApplyDayOfOvertime = async (bookingId: number | string) => {
+    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId)) || selectedBooking;
+    if (!targetBooking) return;
+
+    const clientName =
+      targetBooking.profiles?.name ||
+      targetBooking.profiles?.full_name ||
+      "Client";
+
+    const prebookedCatering = Number(targetBooking.overtime_info?.prebooked?.catering_hours) || 0;
+    const serviceWin = calculateServiceWindow(targetBooking.event_time, prebookedCatering);
+    const scheduledEndTime = serviceWin.extendedEndTimeLabel;
+
+    if (!actualEndTimeInput.trim()) {
+      setOvertimeSaveMessage("Please select or enter the actual event end time.");
+      return;
+    }
+
+    const otResult = calculateDayOfOvertime(
+      scheduledEndTime,
+      actualEndTimeInput.trim(),
+      selectedOTServices,
+      otCoordinatorCount
+    );
+
+    if (!otResult.valid) {
+      setOvertimeSaveMessage(otResult.error || "Please enter a valid actual end time.");
+      return;
+    }
+
+    setIsSavingOvertime(true);
+    setOvertimeSaveMessage("");
+
+    const updatedOvertimeInfo = {
+      ...(targetBooking.overtime_info || {}),
+      prebooked: targetBooking.overtime_info?.prebooked || null,
+      day_of: {
+        scheduled_end_time: scheduledEndTime,
+        actual_end_time: actualEndTimeInput.trim(),
+        minutes_over: otResult.minutesOver,
+        billable_ot_hours: otResult.billableOtHours,
+        services_billed: otResult.servicesBilled,
+        total_day_of_fee: otResult.totalFee,
+        applied_at: new Date().toISOString(),
+        applied_by: currentUser?.name || "Admin",
+      },
+      total_overtime_fee:
+        (Number(targetBooking.overtime_info?.prebooked?.total_prebooked_fee) || 0) +
+        otResult.totalFee,
+    };
+
+    const tempBookingWithOT = {
+      ...targetBooking,
+      overtime_info: updatedOvertimeInfo,
+    };
+    const newTotalBudget = calculateBudget(tempBookingWithOT);
+    const existingPayment = getBookingPayment(targetBooking);
+    const downpaymentPaid = getInitialDownpaymentDue(
+      tempBookingWithOT,
+      existingPayment,
+      newTotalBudget
+    );
+    const updatedFinalBalance = Math.max(0, newTotalBudget - downpaymentPaid);
+    const prevDayOfFee = Number(targetBooking.overtime_info?.day_of?.total_day_of_fee) || 0;
+    const feeDiff = otResult.totalFee - prevDayOfFee;
+
+    // Recalculate installment schedule if present
+    const rawSchedule = targetBooking.installment_schedule || null;
+    let updatedSchedule = Array.isArray(rawSchedule) ? rawSchedule.map((m: any) => ({ ...m })) : null;
+    if (updatedSchedule && updatedSchedule.length > 0 && feeDiff !== 0) {
+      let paidTotal = 0;
+      let unpaidIndices: number[] = [];
+      updatedSchedule.forEach((m: any, idx: number) => {
+        if (m.status === "Verified" || m.status === "Paid") {
+          paidTotal += Number(m.amount) || 0;
+        } else {
+          unpaidIndices.push(idx);
+        }
+      });
+      if (unpaidIndices.length > 0) {
+        const remainingToDistribute = Math.max(0, updatedFinalBalance - paidTotal);
+        const perMilestone = Math.floor(remainingToDistribute / unpaidIndices.length);
+        let acc = 0;
+        unpaidIndices.forEach((mIdx, i) => {
+          const isLast = i === unpaidIndices.length - 1;
+          const amt = isLast ? remainingToDistribute - acc : perMilestone;
+          acc += amt;
+          updatedSchedule![mIdx] = { ...updatedSchedule![mIdx], amount: amt };
+        });
+      }
+    }
+
+    const updatePayload: any = {
+      overtime_info: updatedOvertimeInfo,
+      final_balance_amount: updatedFinalBalance,
+    };
+    if (updatedSchedule) {
+      updatePayload.installment_schedule = updatedSchedule;
+    }
+
+    let updatedAllergies = targetBooking.food_allergies || "";
+    try {
+      if (updatedAllergies.includes("__PAYMENT_METADATA__:")) {
+        const parts = updatedAllergies.split("__PAYMENT_METADATA__:");
+        const meta = JSON.parse(parts[1]);
+        meta.overtime = updatedOvertimeInfo;
+        meta.balance = updatedFinalBalance;
+        if (updatedSchedule) meta.installments = updatedSchedule;
+        updatedAllergies = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+        updatePayload.food_allergies = updatedAllergies;
+      }
+    } catch (e) {}
+
+    const { error: dbError } = await supabase
+      .from("bookings")
+      .update(updatePayload)
+      .eq("id", bookingId);
+
+    setIsSavingOvertime(false);
+
+    if (dbError) {
+      setOvertimeSaveMessage(`Failed to save overtime: ${dbError.message}`);
+      return;
+    }
+
+    await logAuditAction({
+      action: "Applied Day-of Overtime",
+      target: clientName,
+      type: "Update",
+      details: `Admin applied day-of overtime for ${clientName} (Booking #${bookingId}): End time ${actualEndTimeInput.trim()} (${otResult.minutesOver} mins over, ${otResult.billableOtHours}h billed). Total OT Fee: ₱${otResult.totalFee.toLocaleString()}. New Final Balance: ₱${updatedFinalBalance.toLocaleString()}`,
+    });
+
+    setOvertimeSaveMessage(
+      otResult.isOvertime
+        ? `✓ Applied ${otResult.billableOtHours}h overtime (+₱${otResult.totalFee.toLocaleString()}) to final balance!`
+        : "✓ End time recorded (Event ended on time - No overtime fee)."
+    );
+
+    const updatedBookingObj = {
+      ...targetBooking,
+      overtime_info: updatedOvertimeInfo,
+      final_balance_amount: updatedFinalBalance,
+      installment_schedule: updatedSchedule || targetBooking.installment_schedule,
+      food_allergies: updatePayload.food_allergies || targetBooking.food_allergies,
+    };
+
+    setBookings((prev) =>
+      prev.map((b) => (String(b.id) === String(bookingId) ? updatedBookingObj : b))
+    );
+    setSelectedBooking(updatedBookingObj);
+    window.dispatchEvent(new CustomEvent("bookingsUpdated"));
+  };
+
+  const handleRevertDayOfOvertime = async (bookingId: number | string) => {
+    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId)) || selectedBooking;
+    if (!targetBooking) return;
+
+    const currentDayOf = targetBooking.overtime_info?.day_of;
+    const prevDayOfFee = Number(currentDayOf?.total_day_of_fee) || 0;
+    if (prevDayOfFee === 0 && !currentDayOf) {
+      setOvertimeSaveMessage("No day-of overtime surcharge to revert.");
+      return;
+    }
+
+    const clientName =
+      targetBooking.profiles?.name ||
+      targetBooking.profiles?.full_name ||
+      "Client";
+
+    setIsRevertingOvertime(true);
+    setOvertimeSaveMessage("");
+
+    const updatedOvertimeInfo = {
+      ...(targetBooking.overtime_info || {}),
+      prebooked: targetBooking.overtime_info?.prebooked || null,
+      day_of: null,
+      total_overtime_fee: Number(targetBooking.overtime_info?.prebooked?.total_prebooked_fee) || 0,
+    };
+
+    const tempBookingReverted = {
+      ...targetBooking,
+      overtime_info: updatedOvertimeInfo,
+    };
+    const newTotalBudget = calculateBudget(tempBookingReverted);
+    const existingPayment = getBookingPayment(targetBooking);
+    const downpaymentPaid = getInitialDownpaymentDue(
+      tempBookingReverted,
+      existingPayment,
+      newTotalBudget
+    );
+    const updatedFinalBalance = Math.max(0, newTotalBudget - downpaymentPaid);
+
+    const rawSchedule = targetBooking.installment_schedule || null;
+    let updatedSchedule = Array.isArray(rawSchedule) ? rawSchedule.map((m: any) => ({ ...m })) : null;
+    if (updatedSchedule && updatedSchedule.length > 0) {
+      let paidTotal = 0;
+      let unpaidIndices: number[] = [];
+      updatedSchedule.forEach((m: any, idx: number) => {
+        if (m.status === "Verified" || m.status === "Paid") {
+          paidTotal += Number(m.amount) || 0;
+        } else {
+          unpaidIndices.push(idx);
+        }
+      });
+      if (unpaidIndices.length > 0) {
+        const remainingToDistribute = Math.max(0, updatedFinalBalance - paidTotal);
+        const perMilestone = Math.floor(remainingToDistribute / unpaidIndices.length);
+        let acc = 0;
+        unpaidIndices.forEach((mIdx, i) => {
+          const isLast = i === unpaidIndices.length - 1;
+          const amt = isLast ? remainingToDistribute - acc : perMilestone;
+          acc += amt;
+          updatedSchedule![mIdx] = { ...updatedSchedule![mIdx], amount: amt };
+        });
+      }
+    }
+
+    const updatePayload: any = {
+      overtime_info: updatedOvertimeInfo,
+      final_balance_amount: updatedFinalBalance,
+    };
+    if (updatedSchedule) {
+      updatePayload.installment_schedule = updatedSchedule;
+    }
+
+    let updatedAllergies = targetBooking.food_allergies || "";
+    try {
+      if (updatedAllergies.includes("__PAYMENT_METADATA__:")) {
+        const parts = updatedAllergies.split("__PAYMENT_METADATA__:");
+        const meta = JSON.parse(parts[1]);
+        meta.overtime = updatedOvertimeInfo;
+        meta.balance = updatedFinalBalance;
+        if (updatedSchedule) meta.installments = updatedSchedule;
+        updatedAllergies = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+        updatePayload.food_allergies = updatedAllergies;
+      }
+    } catch (e) {}
+
+    const { error: dbError } = await supabase
+      .from("bookings")
+      .update(updatePayload)
+      .eq("id", bookingId);
+
+    setIsRevertingOvertime(false);
+    setShowRevertOTConfirm(false);
+
+    if (dbError) {
+      setOvertimeSaveMessage(`Failed to revert overtime: ${dbError.message}`);
+      return;
+    }
+
+    await logAuditAction({
+      action: "Reverted Day-of Overtime",
+      target: clientName,
+      type: "Update",
+      details: `Admin reverted day-of overtime surcharge of ₱${prevDayOfFee.toLocaleString()} for ${clientName} (Booking #${bookingId}). Restored Final Balance to ₱${updatedFinalBalance.toLocaleString()}`,
+    });
+
+    setOvertimeSaveMessage(`✓ Reverted overtime surcharge (-₱${prevDayOfFee.toLocaleString()}). Final balance restored.`);
+    setActualEndTimeInput("");
+
+    const updatedBookingObj = {
+      ...targetBooking,
+      overtime_info: updatedOvertimeInfo,
+      final_balance_amount: updatedFinalBalance,
+      installment_schedule: updatedSchedule || targetBooking.installment_schedule,
+      food_allergies: updatePayload.food_allergies || targetBooking.food_allergies,
+    };
+
+    setBookings((prev) =>
+      prev.map((b) => (String(b.id) === String(bookingId) ? updatedBookingObj : b))
+    );
+    setSelectedBooking(updatedBookingObj);
+    window.dispatchEvent(new CustomEvent("bookingsUpdated"));
+    setTimeout(() => setOvertimeSaveMessage(""), 4500);
   };
 
   const handleOpenSubstituteModal = (dishToReplace?: string) => {
@@ -2508,10 +2851,8 @@ export function BookingPage() {
                         const payment = getBookingPayment(booking);
                         const estBudget = calculateBudget(booking);
                         const is50Percent = payment.payment_scheme === "Standard 50%";
-                        const downpaymentDue =
-                          payment.downpayment_amount > 0
-                            ? payment.downpayment_amount
-                            : Math.round(estBudget * (is50Percent ? 0.5 : 0.2));
+                        const downpaymentDue = getInitialDownpaymentDue(booking, payment, estBudget);
+                        const effectiveBalance = Math.max(0, estBudget - downpaymentDue);
                         const isVerified =
                           payment.payment_status === "Verified" ||
                           (booking.status || "Pending") === "Confirmed";
@@ -2568,12 +2909,12 @@ export function BookingPage() {
                             )}
 
                             {/* 15-Day Final Balance Settlement Row (Only for Standard 50% Scheme) */}
-                            {is50Percent && payment.final_balance_amount > 0 && (
+                            {is50Percent && effectiveBalance > 0 && (
                               <div className="pt-2 mt-1 border-t border-natural-border/50 flex flex-col gap-1.5">
                                 <div className="flex items-center justify-between gap-1.5 text-xs">
                                   <span className="text-natural-text-light font-medium">15-Day Balance:</span>
                                   <span className="font-bold text-natural-text-main font-serif">
-                                    ₱{payment.final_balance_amount.toLocaleString()}
+                                    ₱{effectiveBalance.toLocaleString()}
                                   </span>
                                 </div>
                                 <div className="flex items-center gap-1">
@@ -3658,14 +3999,21 @@ export function BookingPage() {
                     const serviceWin = calculateServiceWindow(selectedBooking.event_time, prebookedCatering);
                     const scheduledEndTime = serviceWin.extendedEndTimeLabel;
 
-                    const otCalculation = actualEndTimeInput.trim()
+                    const otCalculation: import("../utils/overtimeBilling").DayOfOvertimeResult = actualEndTimeInput.trim()
                       ? calculateDayOfOvertime(
                           scheduledEndTime,
                           actualEndTimeInput.trim(),
                           selectedOTServices,
                           otCoordinatorCount
                         )
-                      : { minutesOver: 0, billableOtHours: 0, servicesBilled: [], totalFee: 0, isOvertime: false };
+                      : {
+                          valid: true,
+                          minutesOver: 0,
+                          billableOtHours: 0,
+                          servicesBilled: [],
+                          totalFee: 0,
+                          isOvertime: false,
+                        };
 
                     const dayOfInfo = selectedBooking.overtime_info?.day_of;
                     const isAlreadyApplied = Boolean(dayOfInfo?.total_day_of_fee !== undefined && dayOfInfo?.applied_at);
@@ -3679,7 +4027,7 @@ export function BookingPage() {
                     };
 
                     return (
-                      <div className="p-4 bg-natural-card/60 border border-natural-border rounded-2xl space-y-3.5 shadow-sm">
+                      <div id="day-of-ot-calculator-section" className="p-4 bg-natural-card/60 border border-natural-border rounded-2xl space-y-3.5 shadow-sm">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
                             <div className="w-8 h-8 rounded-lg bg-natural-accent/10 flex items-center justify-center text-natural-accent shrink-0">
@@ -3741,9 +4089,20 @@ export function BookingPage() {
                                 placeholder="e.g. 11:30 PM"
                                 value={actualEndTimeInput}
                                 onChange={(e) => setActualEndTimeInput(e.target.value)}
-                                className="w-full px-2.5 py-1.5 text-xs font-semibold bg-natural-bg border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                                className={cn(
+                                  "w-full px-2.5 py-1.5 text-xs font-semibold bg-natural-bg border rounded-lg text-natural-text-main focus:outline-none transition-colors",
+                                  actualEndTimeInput.trim() !== "" && !otCalculation.valid
+                                    ? "border-red-500 focus:border-red-500 text-red-500"
+                                    : "border-natural-border focus:border-natural-accent"
+                                )}
                               />
                             </div>
+                            {actualEndTimeInput.trim() !== "" && !otCalculation.valid && (
+                              <p className="text-[10px] text-red-500 font-medium flex items-center gap-1 mt-1">
+                                <AlertCircle className="w-3 h-3 shrink-0" />
+                                {otCalculation.error || "Invalid time format (e.g. 03:00 PM)"}
+                              </p>
+                            )}
                             {/* Quick times preset buttons */}
                             <div className="flex flex-wrap gap-1 pt-1">
                               {[
@@ -3768,35 +4127,42 @@ export function BookingPage() {
 
                         {/* Live Overtime Calculation Callout */}
                         {actualEndTimeInput.trim() !== "" && (
-                          <div className={`p-3 rounded-xl border text-xs space-y-1 ${
-                            otCalculation.isOvertime
-                              ? "bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-200"
-                              : "bg-emerald-500/10 border-emerald-500/30 text-emerald-800 dark:text-emerald-200"
-                          }`}>
-                            {otCalculation.isOvertime ? (
-                              <div>
-                                <div className="flex items-center gap-1.5 font-bold text-amber-700 dark:text-amber-300">
-                                  <AlertTriangle className="w-4 h-4 shrink-0" />
-                                  <span>Overtime Detected: {otCalculation.minutesOver} Minutes Past Scheduled End</span>
+                          otCalculation.valid ? (
+                            <div className={`p-3 rounded-xl border text-xs space-y-1 ${
+                              otCalculation.isOvertime
+                                ? "bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-200"
+                                : "bg-emerald-500/10 border-emerald-500/30 text-emerald-800 dark:text-emerald-200"
+                            }`}>
+                              {otCalculation.isOvertime ? (
+                                <div>
+                                  <div className="flex items-center gap-1.5 font-bold text-amber-700 dark:text-amber-300">
+                                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                                    <span>Overtime Detected: {otCalculation.minutesOver} Minutes Past Scheduled End</span>
+                                  </div>
+                                  <p className="text-[11px] mt-1 leading-relaxed text-natural-text-main">
+                                    Applying contract rule (<em>1 minute = 1 hour OT</em>):{" "}
+                                    <strong className="text-amber-600 dark:text-amber-400 font-bold">
+                                      {otCalculation.billableOtHours} billable overtime hour{otCalculation.billableOtHours > 1 ? "s" : ""}
+                                    </strong>.
+                                  </p>
                                 </div>
-                                <p className="text-[11px] mt-1 leading-relaxed text-natural-text-main">
-                                  Applying contract rule (<em>1 minute = 1 hour OT</em>):{" "}
-                                  <strong className="text-amber-600 dark:text-amber-400 font-bold">
-                                    {otCalculation.billableOtHours} billable overtime hour{otCalculation.billableOtHours > 1 ? "s" : ""}
-                                  </strong>.
-                                </p>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-1.5 font-bold text-emerald-700 dark:text-emerald-300">
-                                <CheckCheck className="w-4 h-4 shrink-0" />
-                                <span>Event Ended On Schedule ({otCalculation.minutesOver} mins overtime • ₱0 fee)</span>
-                              </div>
-                            )}
-                          </div>
+                              ) : (
+                                <div className="flex items-center gap-1.5 font-bold text-emerald-700 dark:text-emerald-300">
+                                  <CheckCheck className="w-4 h-4 shrink-0" />
+                                  <span>Event Ended On Schedule ({otCalculation.minutesOver} mins overtime • ₱0 fee)</span>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-xs text-red-700 dark:text-red-300 flex items-center gap-2">
+                              <AlertCircle className="w-4 h-4 shrink-0" />
+                              <span>{otCalculation.error || "Please enter a valid time (e.g. 03:00 PM or 15:00)."}</span>
+                            </div>
+                          )
                         )}
 
                         {/* Services Billed Checkbox Selector */}
-                        {otCalculation.isOvertime && (
+                        {otCalculation.valid && otCalculation.isOvertime && (
                           <div className="space-y-2 pt-1">
                             <label className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block">
                               Select Overtime Services to Bill ({otCalculation.billableOtHours} hr{otCalculation.billableOtHours > 1 ? "s" : ""}):
@@ -3873,35 +4239,80 @@ export function BookingPage() {
                         )}
 
                         {/* Actions and Save Status */}
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-natural-border">
-                          <div className="text-xs">
-                            {overtimeSaveMessage ? (
-                              <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
-                                {overtimeSaveMessage}
+                        {showRevertOTConfirm ? (
+                          <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs w-full">
+                            <div className="flex items-center gap-2 text-rose-700 dark:text-rose-300">
+                              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500" />
+                              <span>
+                                Revert and remove <strong>₱{(dayOfInfo?.total_day_of_fee || 0).toLocaleString()}</strong> overtime surcharge? This will deduct it from the final balance.
                               </span>
-                            ) : (
-                              <span className="text-natural-text-light">
-                                Day-of Overtime Fee:{" "}
-                                <strong className="text-natural-text-main font-serif text-sm">
-                                  ₱{otCalculation.totalFee.toLocaleString()}
-                                </strong>
-                              </span>
-                            )}
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                disabled={isRevertingOvertime}
+                                onClick={() => handleRevertDayOfOvertime(selectedBooking.id)}
+                                className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-colors shadow-2xs flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                              >
+                                <RotateCcw className={`w-3.5 h-3.5 ${isRevertingOvertime ? "animate-spin" : ""}`} />
+                                {isRevertingOvertime ? "Reverting..." : "Yes, Revert OT"}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isRevertingOvertime}
+                                onClick={() => setShowRevertOTConfirm(false)}
+                                className="px-3 py-1.5 border border-natural-border text-natural-text-light hover:bg-natural-bg rounded-lg text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                              >
+                                Cancel
+                              </button>
+                            </div>
                           </div>
+                        ) : (
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-natural-border">
+                            <div className="text-xs">
+                              {overtimeSaveMessage ? (
+                                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                                  {overtimeSaveMessage}
+                                </span>
+                              ) : (
+                                <span className="text-natural-text-light">
+                                  Day-of Overtime Fee:{" "}
+                                  <strong className="text-natural-text-main font-serif text-sm">
+                                    ₱{otCalculation.totalFee.toLocaleString()}
+                                  </strong>
+                                </span>
+                              )}
+                            </div>
 
-                          <button
-                            type="button"
-                            disabled={isSavingOvertime || !actualEndTimeInput.trim()}
-                            onClick={() => handleApplyDayOfOvertime(selectedBooking.id)}
-                            className="px-4 py-2 bg-natural-accent hover:bg-natural-accent/90 disabled:opacity-50 text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-all shadow-2xs cursor-pointer shrink-0"
-                          >
-                            {isSavingOvertime
-                              ? "Applying..."
-                              : isAlreadyApplied
-                                ? "Update Overtime Surcharge"
-                                : "Apply Overtime to Final Invoice"}
-                          </button>
-                        </div>
+                            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                              {isAlreadyApplied && (
+                                <button
+                                  type="button"
+                                  disabled={isSavingOvertime || isRevertingOvertime}
+                                  onClick={() => setShowRevertOTConfirm(true)}
+                                  className="px-3 py-2 border border-rose-500/30 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                                  title="Remove day-of overtime surcharge and restore original balance"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                  Revert Overtime
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                disabled={isSavingOvertime || isRevertingOvertime || !actualEndTimeInput.trim() || !otCalculation.valid}
+                                onClick={() => handleApplyDayOfOvertime(selectedBooking.id)}
+                                className="px-4 py-2 bg-natural-accent hover:bg-natural-accent/90 disabled:opacity-50 text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-all shadow-2xs cursor-pointer"
+                              >
+                                {isSavingOvertime
+                                  ? "Applying..."
+                                  : isAlreadyApplied
+                                    ? "Update Overtime Surcharge"
+                                    : "Apply Overtime to Final Invoice"}
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
@@ -3912,16 +4323,9 @@ export function BookingPage() {
                 const totalBudget = calculateBudget(selectedBooking);
                 const is50Percent = payment.payment_scheme === "Standard 50%";
 
-                const downpaymentDue =
-                  payment.downpayment_amount > 0
-                    ? payment.downpayment_amount
-                    : Math.round(totalBudget * (is50Percent ? 0.5 : 0.2));
-
+                const downpaymentDue = getInitialDownpaymentDue(selectedBooking, payment, totalBudget);
                 const balanceDue = Math.max(0, totalBudget - downpaymentDue);
-                const finalBalanceAmount =
-                  payment.final_balance_amount > 0
-                    ? payment.final_balance_amount
-                    : balanceDue;
+                const finalBalanceAmount = balanceDue;
 
                 const isDepositVerified =
                   payment.payment_status === "Verified" ||
@@ -3973,23 +4377,152 @@ export function BookingPage() {
                       </span>
                     </div>
 
-                    {/* Overtime Fee Summary in Payment Ledger */}
+                    {/* Overtime Fee Summary in Payment Ledger - Bulleted & Balanced */}
                     {(() => {
                       const preOT = selectedBooking.overtime_info?.prebooked;
                       const dayOT = selectedBooking.overtime_info?.day_of;
                       const preFee = Number(preOT?.total_prebooked_fee) || 0;
                       const dayFee = Number(dayOT?.total_day_of_fee) || 0;
                       if (preFee === 0 && dayFee === 0) return null;
+
+                      const hasBoth = preFee > 0 && dayFee > 0;
+
+                      const prebookedItems: { label: string; fee?: number }[] = [
+                        preOT?.catering_hours > 0 ? { label: `Catering Service (${preOT.catering_hours}h)`, fee: preOT.catering_fee || preOT.catering_hours * 4000 } : null,
+                        preOT?.sounds_lights_hours > 0 ? { label: `Sounds & Lights (${preOT.sounds_lights_hours}h)`, fee: preOT.sounds_lights_fee || preOT.sounds_lights_hours * 1500 } : null,
+                        preOT?.photo_booth_hours > 0 ? { label: `Photo Booth (${preOT.photo_booth_hours}h)`, fee: preOT.photo_booth_fee || preOT.photo_booth_hours * 1000 } : null,
+                        preOT?.emcee_hours > 0 ? { label: `Emcee / Host (${preOT.emcee_hours}h)`, fee: preOT.emcee_fee || preOT.emcee_hours * 500 } : null,
+                        preOT?.coordinators_hours > 0 ? { label: `Coordinators (${preOT.coordinators_hours}h)`, fee: preOT.coordinators_fee || (preOT.coordinators_hours * (preOT.coordinators_count || 2) * 300) } : null,
+                        preOT?.photo_video_hours > 0 ? { label: `Photo & Video (${preOT.photo_video_hours}h)`, fee: preOT.photo_video_fee || preOT.photo_video_hours * 2500 } : null,
+                        preOT?.mobile_bar_hours > 0 ? { label: `Mobile Bar (${preOT.mobile_bar_hours}h)`, fee: preOT.mobile_bar_fee || preOT.mobile_bar_hours * 1500 } : null,
+                      ].filter(Boolean) as { label: string; fee?: number }[];
+
+                      if (prebookedItems.length === 0 && Array.isArray(selectedBooking.selected_add_ons)) {
+                        selectedBooking.selected_add_ons.forEach((a: string) => {
+                          if (typeof a === "string" && a.toLowerCase().includes("overtime")) {
+                            prebookedItems.push({ label: a.replace(/Overtime:\s*/i, "").trim() });
+                          }
+                        });
+                      }
+
                       return (
-                        <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400 font-bold text-[11px] uppercase tracking-wider">
-                            <Clock className="w-3.5 h-3.5" />
-                            Overtime Billed to Final Invoice
+                        <div className="space-y-2 pt-1 pb-1">
+                          <div className="flex items-center justify-between text-xs px-0.5">
+                            <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400 font-bold text-[11px] uppercase tracking-wider">
+                              <Clock className="w-3.5 h-3.5" />
+                              <span>Overtime Billed to Final Invoice</span>
+                            </div>
+                            <span className="text-[11px] font-bold text-natural-text-light font-mono">
+                              Total OT: <strong className="text-amber-600 dark:text-amber-400 font-serif text-xs font-bold">+₱{(preFee + dayFee).toLocaleString()}</strong>
+                            </span>
                           </div>
-                          <div className="flex items-center gap-2 text-xs font-medium text-natural-text-main">
-                            {preFee > 0 && <span>Pre-Booked: <strong>+₱{preFee.toLocaleString()}</strong></span>}
-                            {preFee > 0 && dayFee > 0 && <span>•</span>}
-                            {dayFee > 0 && <span>Day-of OT ({dayOT?.billable_ot_hours}h): <strong className="text-amber-600 dark:text-amber-400">+₱{dayFee.toLocaleString()}</strong></span>}
+
+                          <div className={`grid gap-2.5 ${hasBoth ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"}`}>
+                            {/* Pre-Booked Overtime Card */}
+                            {preFee > 0 && (
+                              <div className="p-3 bg-natural-card rounded-xl border border-natural-border shadow-2xs flex flex-col justify-between gap-2.5">
+                                <div className="space-y-1.5">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="text-[10px] font-bold uppercase tracking-wider text-natural-accent px-1.5 py-0.5 rounded bg-natural-accent/10 border border-natural-accent/20">
+                                        Pre-Booked
+                                      </span>
+                                      <span className="text-xs font-semibold text-natural-text-main">
+                                        Contract Add-ons
+                                      </span>
+                                    </div>
+                                    <span className="font-serif font-bold text-natural-text-main text-sm shrink-0">
+                                      +₱{preFee.toLocaleString()}
+                                    </span>
+                                  </div>
+
+                                  {/* Bulleted list of pre-booked overtime add-ons */}
+                                  {prebookedItems.length > 0 ? (
+                                    <ul className="space-y-1 pt-0.5">
+                                      {prebookedItems.map((item, idx) => (
+                                        <li key={idx} className="flex items-center justify-between text-xs">
+                                          <div className="flex items-center gap-1.5 text-natural-text-main">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-natural-accent shrink-0" />
+                                            <span className="text-[11px] font-medium">{item.label}</span>
+                                          </div>
+                                          {item.fee ? (
+                                            <span className="text-natural-text-light font-mono text-[10px]">
+                                              +₱{item.fee.toLocaleString()}
+                                            </span>
+                                          ) : null}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  ) : (
+                                    <p className="text-[10px] text-natural-text-light leading-snug">
+                                      Extended service window pre-booked at contract rates
+                                    </p>
+                                  )}
+                                </div>
+
+                                <div className="pt-2 border-t border-natural-border flex items-center justify-between text-[10px] text-natural-text-light">
+                                  <span>Secured at initial booking</span>
+                                  <span className="font-semibold text-natural-text-main">
+                                    {prebookedItems.length > 0 ? `${prebookedItems.length} Service${prebookedItems.length === 1 ? "" : "s"}` : "Contract Add-on"}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Day-of Event Overtime Card */}
+                            {dayFee > 0 && (
+                              <div className="p-3 bg-amber-500/10 border border-amber-500/25 rounded-xl shadow-2xs flex flex-col justify-between gap-2.5">
+                                <div className="space-y-1.5">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/30">
+                                        Day-of Event OT
+                                      </span>
+                                      <span className="text-xs font-semibold text-natural-text-main">
+                                        {dayOT?.billable_ot_hours}h Billable OT
+                                      </span>
+                                    </div>
+                                    <span className="font-serif font-bold text-amber-600 dark:text-amber-400 text-sm shrink-0">
+                                      +₱{dayFee.toLocaleString()}
+                                    </span>
+                                  </div>
+                                  <p className="text-[10px] text-natural-text-light leading-snug">
+                                    Actual End: <strong className="text-natural-text-main">{dayOT?.actual_end_time}</strong> ({dayOT?.minutes_over} mins past scheduled end)
+                                  </p>
+
+                                  {/* Bulleted list of day-of billed overtime services */}
+                                  {Array.isArray(dayOT?.services_billed) && dayOT.services_billed.length > 0 && (
+                                    <ul className="space-y-1 pt-0.5">
+                                      {dayOT.services_billed.map((s: any, idx: number) => (
+                                        <li key={idx} className="flex items-center justify-between text-xs">
+                                          <div className="flex items-center gap-1.5 text-natural-text-main">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                                            <span className="text-[11px] font-medium">{s.name}</span>
+                                          </div>
+                                          <span className="text-amber-700 dark:text-amber-300 font-mono text-[10px]">
+                                            +₱{Number(s.subtotal).toLocaleString()}
+                                          </span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                </div>
+
+                                <div className="pt-2 border-t border-amber-500/20 flex items-center justify-between text-[10px] text-natural-text-light">
+                                  <div className="flex items-center gap-1.5">
+                                    <span>Billed under 1 min = 1 hr rule</span>
+                                  </div>
+                                  <span className="font-semibold text-natural-text-main">
+                                    {(() => {
+                                      const count = Array.isArray(dayOT?.services_billed) && dayOT.services_billed.length > 0
+                                        ? dayOT.services_billed.length
+                                        : 1;
+                                      return `${count} Service${count === 1 ? "" : "s"}`;
+                                    })()}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
@@ -4018,7 +4551,7 @@ export function BookingPage() {
                           {is50Percent ? "50% Final Balance" : "Remaining Balance"}
                         </p>
                         <p className="text-sm font-bold text-natural-text-main font-serif">
-                          ₱{balanceDue.toLocaleString()}
+                          ₱{finalBalanceAmount.toLocaleString()}
                         </p>
                       </div>
                     </div>
@@ -5346,14 +5879,8 @@ export function BookingPage() {
                   const payment = targetBooking ? getBookingPayment(targetBooking) : null;
                   const totalBudget = targetBooking ? calculateBudget(targetBooking) : 0;
                   const is50Percent = payment?.payment_scheme === "Standard 50%";
-                  const downpaymentDue =
-                    payment?.downpayment_amount && payment.downpayment_amount > 0
-                      ? payment.downpayment_amount
-                      : Math.round(totalBudget * (is50Percent ? 0.5 : 0.2));
-                  const finalBalanceAmount =
-                    payment?.final_balance_amount && payment.final_balance_amount > 0
-                      ? payment.final_balance_amount
-                      : Math.max(0, totalBudget - downpaymentDue);
+                  const downpaymentDue = payment ? getInitialDownpaymentDue(targetBooking, payment, totalBudget) : 0;
+                  const finalBalanceAmount = Math.max(0, totalBudget - downpaymentDue);
 
                   return (
                     <div className="space-y-3 mb-5">
@@ -5431,14 +5958,8 @@ export function BookingPage() {
                   const payment = targetBooking ? getBookingPayment(targetBooking) : null;
                   const totalBudget = targetBooking ? calculateBudget(targetBooking) : 0;
                   const is50Percent = payment?.payment_scheme === "Standard 50%";
-                  const downpaymentDue =
-                    payment?.downpayment_amount && payment.downpayment_amount > 0
-                      ? payment.downpayment_amount
-                      : Math.round(totalBudget * (is50Percent ? 0.5 : 0.2));
-                  const finalBalanceAmount =
-                    payment?.final_balance_amount && payment.final_balance_amount > 0
-                      ? payment.final_balance_amount
-                      : Math.max(0, totalBudget - downpaymentDue);
+                  const downpaymentDue = payment ? getInitialDownpaymentDue(targetBooking, payment, totalBudget) : 0;
+                  const finalBalanceAmount = Math.max(0, totalBudget - downpaymentDue);
 
                   return (
                     <div className="space-y-3 mb-5 text-left">
@@ -5716,10 +6237,7 @@ export function BookingPage() {
                   const payment = targetBooking ? getBookingPayment(targetBooking) : null;
                   const totalBudget = targetBooking ? calculateBudget(targetBooking) : 0;
                   const is50Percent = payment?.payment_scheme === "Standard 50%";
-                  const downpaymentDue =
-                    payment?.downpayment_amount && payment.downpayment_amount > 0
-                      ? payment.downpayment_amount
-                      : Math.round(totalBudget * (is50Percent ? 0.5 : 0.2));
+                  const downpaymentDue = payment ? getInitialDownpaymentDue(targetBooking, payment, totalBudget) : 0;
 
                   return (
                     <div className="space-y-3 mb-4">
