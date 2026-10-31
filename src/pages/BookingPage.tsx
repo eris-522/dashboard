@@ -225,9 +225,16 @@ export const getRuleCategory = (dbCategory: string, itemName: string = ""): stri
 export const getBookingDishCategory = (
   dishName: string,
   booking?: any,
-  menuItemsList: any[] = []
+  menuItemsList: any[] = [],
+  customDishesList: any[] = []
 ): string => {
   if (!dishName) return "Main Course";
+
+  // 0. Booking-scoped custom (off-menu) dishes from booking_custom_dishes are the source of truth
+  const custom = customDishesList.find(
+    (cd: any) => cd.name === dishName && (!booking || String(cd.booking_id) === String(booking.id))
+  );
+  if (custom?.category) return custom.category;
 
   // 1. Check if this dish is an active replacement in booking.dish_substitutions
   if (booking && Array.isArray(booking.dish_substitutions)) {
@@ -389,6 +396,38 @@ export function BookingPage() {
   const [subClientNote, setSubClientNote] = useState<string>("");
   const [isSavingSub, setIsSavingSub] = useState<boolean>(false);
   const [subMessage, setSubMessage] = useState<string>("");
+  // Off-menu dishes scoped to the open booking (stored in booking_custom_dishes, never in menu_items)
+  const [bookingCustomDishes, setBookingCustomDishes] = useState<any[]>([]);
+
+  useEffect(() => {
+    const bookingId = selectedBooking?.id;
+    if (!bookingId) {
+      setBookingCustomDishes([]);
+      return;
+    }
+    let active = true;
+    const load = () =>
+      supabase
+        .from("booking_custom_dishes")
+        .select("id, booking_id, name, category, replaces_dish")
+        .eq("booking_id", bookingId)
+        .then(({ data }) => {
+          if (active) setBookingCustomDishes(data || []);
+        });
+    load();
+    const channel = supabase
+      .channel(`booking-custom-dishes-${bookingId}-${Date.now()}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "booking_custom_dishes", filter: `booking_id=eq.${bookingId}` },
+        () => load()
+      )
+      .subscribe();
+    return () => {
+      active = false;
+      supabase.removeChannel(channel);
+    };
+  }, [selectedBooking?.id]);
 
   // Rejecting modification state
   const [rejectingModId, setRejectingModId] = useState<string | null>(null);
@@ -1409,14 +1448,14 @@ export function BookingPage() {
     const initialDish = dishToReplace || currentDishes[0] || "";
     setSubOriginalDish(initialDish);
 
-    const itemDef = menuItems.find((mi) => mi.name === initialDish);
-    const cat = getRuleCategory(itemDef?.category || "", initialDish);
+    const cat = getBookingDishCategory(initialDish, selectedBooking, menuItems, bookingCustomDishes);
+    setSubCustomCategory(cat || "Main Course");
     const reasonableReplacements = menuItems.filter(
       (mi) =>
         mi.status !== "Archived" &&
         mi.status !== "Not Available" &&
         !currentDishes.includes(mi.name) &&
-        (!cat || getRuleCategory(mi.category, mi.name) === cat)
+        (!cat || getBookingDishCategory(mi.name, selectedBooking, menuItems, bookingCustomDishes) === cat)
     );
     const chosen = reasonableReplacements[0]?.name || (menuItems.find((mi) => !currentDishes.includes(mi.name))?.name || "");
     setSubReplacementDish(chosen);
@@ -1443,10 +1482,15 @@ export function BookingPage() {
       : [];
     const updatedMenu = currentDishes.map((d) => (d === subOriginalDish ? finalReplacement : d));
 
-    const newSubstitution = {
+    const resolvedCategory = isCustomReplacement
+      ? subCustomCategory
+      : getBookingDishCategory(finalReplacement, selectedBooking, menuItems, bookingCustomDishes);
+
+    const newSubstitution: any = {
       id: `sub-${Date.now()}`,
       original_dish: subOriginalDish,
       replacement_dish: finalReplacement,
+      category: resolvedCategory,
       reason: subReason.trim(),
       client_note: subClientNote.trim(),
       substituted_at: new Date().toISOString(),
@@ -1483,6 +1527,31 @@ export function BookingPage() {
     );
 
     try {
+      const isOffMenu = isCustomReplacement || !menuItems.some((mi) => mi.name === finalReplacement);
+      if (isOffMenu) {
+        const { data: savedCustom, error: customErr } = await supabase
+          .from("booking_custom_dishes")
+          .upsert(
+            {
+              booking_id: selectedBooking.id,
+              name: finalReplacement,
+              category: resolvedCategory,
+              replaces_dish: newSubstitution.original_dish,
+              created_by: currentUser?.name || "Coordinator",
+            },
+            { onConflict: "booking_id,name" }
+          )
+          .select("id, booking_id, name, category, replaces_dish")
+          .single();
+        if (customErr) throw customErr;
+        if (savedCustom) {
+          setBookingCustomDishes((prev) => [
+            ...prev.filter((cd) => cd.name !== savedCustom.name),
+            savedCustom,
+          ]);
+        }
+      }
+
       const { error } = await supabase
         .from("bookings")
         .update({
@@ -3909,8 +3978,7 @@ export function BookingPage() {
 
                           selectedBooking.selected_menu_items.forEach(
                             (m: string) => {
-                              const itemDef = menuItems.find((mi) => mi.name === m);
-                              const cat = getRuleCategory(itemDef?.category || "", m);
+                              const cat = getBookingDishCategory(m, selectedBooking, menuItems, bookingCustomDishes);
                               if (cat) {
                                 if (!groupedMenu[cat]) groupedMenu[cat] = [];
                                 groupedMenu[cat].push(m);
@@ -5294,11 +5362,11 @@ export function BookingPage() {
                   onChange={(e) => {
                     const dish = e.target.value;
                     setSubOriginalDish(dish);
-                    const itemDef = menuItems.find((mi) => mi.name === dish);
-                    const cat = getRuleCategory(itemDef?.category || "", dish);
+                    const cat = getBookingDishCategory(dish, selectedBooking, menuItems, bookingCustomDishes);
+                    setSubCustomCategory(cat || "Main Course");
                     const cur = selectedBooking.selected_menu_items || [];
                     const replacements = menuItems.filter(
-                      (mi) => mi.status !== "Archived" && !cur.includes(mi.name) && (!cat || getRuleCategory(mi.category, mi.name) === cat)
+                      (mi) => mi.status !== "Archived" && !cur.includes(mi.name) && (!cat || getBookingDishCategory(mi.name, selectedBooking, menuItems, bookingCustomDishes) === cat)
                     );
                     const chosen = replacements[0]?.name || "";
                     setSubReplacementDish(chosen);
@@ -5351,11 +5419,11 @@ export function BookingPage() {
                           `Due to fresh ingredient availability in the local market, "${subOriginalDish}" has been substituted with "${val}" of equivalent quality.`
                         );
                       } else {
-                        const currentDef = menuItems.find((mi) => mi.name === subOriginalDish);
-                        const cat = currentDef?.category;
+                        const cat = getBookingDishCategory(subOriginalDish, selectedBooking, menuItems, bookingCustomDishes);
+                        setSubCustomCategory(cat || "Main Course");
                         const cur = selectedBooking.selected_menu_items || [];
                         const reasonableReplacements = menuItems.filter(
-                          (mi) => mi.status !== "Archived" && mi.status !== "Not Available" && !cur.includes(mi.name) && (!cat || mi.category === cat)
+                          (mi) => mi.status !== "Archived" && mi.status !== "Not Available" && !cur.includes(mi.name) && (!cat || getBookingDishCategory(mi.name, selectedBooking, menuItems, bookingCustomDishes) === cat)
                         );
                         const chosen = reasonableReplacements[0]?.name || (menuItems.find((mi) => !cur.includes(mi.name))?.name || "");
                         setSubReplacementDish(chosen);
@@ -5371,7 +5439,7 @@ export function BookingPage() {
                 </div>
 
                 {isCustomReplacement ? (
-                  <div className="space-y-1.5 animate-in fade-in duration-150">
+                  <div className="space-y-2 animate-in fade-in duration-150">
                     <input
                       type="text"
                       autoFocus
@@ -5387,6 +5455,22 @@ export function BookingPage() {
                       placeholder="Type custom replacement dish"
                       className="w-full bg-natural-bg border border-natural-accent/50 px-3 py-2 rounded-lg text-xs font-medium text-natural-text-main focus:border-natural-accent focus:outline-none"
                     />
+                    <div className="flex items-center gap-2">
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light whitespace-nowrap">
+                        Category:
+                      </label>
+                      <select
+                        value={subCustomCategory}
+                        onChange={(e) => setSubCustomCategory(e.target.value)}
+                        className="w-full bg-natural-bg border border-natural-border px-2.5 py-1.5 rounded-lg text-xs font-medium text-natural-text-main focus:border-natural-accent focus:outline-none"
+                      >
+                        {categoryOrder.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                     <p className="text-[10px] text-natural-text-light flex items-center gap-1">
                       Type any off-menu or market alternative not found in the standard catalog.
                     </p>
@@ -5411,14 +5495,13 @@ export function BookingPage() {
                     <option value="" disabled>Select replacement dish...</option>
                     <option value="__CUSTOM__">+ Type Custom Dish (Not on Menu)...</option>
                     {(() => {
-                      const currentDef = menuItems.find((mi) => mi.name === subOriginalDish);
-                      const cat = getRuleCategory(currentDef?.category || "", subOriginalDish);
+                      const cat = getBookingDishCategory(subOriginalDish, selectedBooking, menuItems, bookingCustomDishes);
                       const cur = selectedBooking.selected_menu_items || [];
                       const sameCatDishes = menuItems.filter(
-                        (mi) => mi.status !== "Archived" && !cur.includes(mi.name) && getRuleCategory(mi.category, mi.name) === cat
+                        (mi) => mi.status !== "Archived" && !cur.includes(mi.name) && getBookingDishCategory(mi.name, selectedBooking, menuItems, bookingCustomDishes) === cat
                       );
                       const otherDishes = menuItems.filter(
-                        (mi) => mi.status !== "Archived" && !cur.includes(mi.name) && getRuleCategory(mi.category, mi.name) !== cat
+                        (mi) => mi.status !== "Archived" && !cur.includes(mi.name) && getBookingDishCategory(mi.name, selectedBooking, menuItems, bookingCustomDishes) !== cat
                       );
 
                       return (
