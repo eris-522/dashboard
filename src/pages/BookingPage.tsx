@@ -47,6 +47,7 @@ import {
   calculateDayOfOvertime,
   timeStringToMinutes,
   minutesTo12h,
+  isServiceIncludedInPackage,
 } from "../utils/overtimeBilling";
 
 type SortField =
@@ -3802,7 +3803,16 @@ export function BookingPage() {
                             </label>
 
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                              {OVERTIME_SERVICE_RATES.map((srv) => {
+                              {(() => {
+                                const bookingPkg = selectedBooking?.packages || packages.find((p) => p.id === selectedBooking?.package_id);
+                                const eligibleServices = OVERTIME_SERVICE_RATES.filter((srv) => {
+                                  const isPrebooked = Boolean(
+                                    (selectedBooking?.overtime_info?.prebooked as any)?.[srv.id] > 0 ||
+                                    (srv.id === "coordinators" && (selectedBooking?.overtime_info?.prebooked?.coordinators_hours || 0) > 0)
+                                  );
+                                  return isServiceIncludedInPackage(srv.id, bookingPkg) || isPrebooked;
+                                });
+                                return eligibleServices.map((srv) => {
                                 const isChecked = selectedOTServices.includes(srv.id);
                                 const count = srv.perPerson ? Math.max(1, otCoordinatorCount) : 1;
                                 const subtotal = isChecked ? otCalculation.billableOtHours * srv.rate * count : 0;
@@ -3856,7 +3866,8 @@ export function BookingPage() {
                                     </div>
                                   </div>
                                 );
-                              })}
+                              });
+                            })()}
                             </div>
                           </div>
                         )}
