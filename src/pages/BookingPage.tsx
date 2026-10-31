@@ -837,7 +837,7 @@ export function BookingPage() {
       const currentStatus = booking.status || "Pending";
       let matchesStatus = false;
       if (statusFilter === "All Status") {
-        matchesStatus = currentStatus !== "Archived" && currentStatus !== "Cancelled";
+        matchesStatus = currentStatus !== "Archived";
       } else if (statusFilter === "15-Day Billing Due") {
         if (currentStatus === "Cancelled" || currentStatus === "Archived") {
           matchesStatus = false;
@@ -1391,6 +1391,11 @@ export function BookingPage() {
   const handleSaveLogisticsSurcharge = async (bookingId: number | string) => {
     const targetBooking = bookings.find((b) => String(b.id) === String(bookingId));
     if (!targetBooking) return;
+
+    if ((targetBooking.status || "Pending") === "Cancelled") {
+      setLogisticsSaveMessage("Cannot update logistics: Booking has been cancelled.");
+      return;
+    }
 
     setIsSavingLogistics(true);
     setLogisticsSaveMessage("");
@@ -3745,6 +3750,7 @@ export function BookingPage() {
                   {/* Venue Coverage & Custom Logistics Surcharge Card */}
                   {(() => {
                     const logistics = getBookingLogistics(selectedBooking);
+                    const isCancelled = (selectedBooking.status || "Pending") === "Cancelled";
                     const totalPax =
                       (Number(selectedBooking.guest_count) || 0) +
                       (Number(selectedBooking.additional_pax) || 0);
@@ -3915,10 +3921,15 @@ export function BookingPage() {
                               type="number"
                               min="0"
                               step="100"
+                              disabled={isCancelled || isSavingLogistics}
                               value={customTravelFeeInput}
                               onChange={(e) => setCustomTravelFeeInput(e.target.value)}
                               placeholder="0"
-                              className="w-full px-3 py-2 text-xs font-semibold bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                              className={cn(
+                                "w-full px-3 py-2 text-xs font-semibold bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent",
+                                (isCancelled || isSavingLogistics) &&
+                                  "opacity-60 cursor-not-allowed bg-natural-bg/50"
+                              )}
                             />
                             <p className="text-[10px] text-natural-text-light">
                               {logistics.isOutsideTaytay
@@ -3932,7 +3943,8 @@ export function BookingPage() {
                               <label className="block text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
                                 Hauling / Stairs Fee (₱)
                               </label>
-                              {recommendedHauling > 0 &&
+                              {!isCancelled &&
+                                recommendedHauling > 0 &&
                                 Number(customHaulingFeeInput) !== recommendedHauling && (
                                   <button
                                     type="button"
@@ -3949,10 +3961,15 @@ export function BookingPage() {
                               type="number"
                               min="0"
                               step="150"
+                              disabled={isCancelled || isSavingLogistics}
                               value={customHaulingFeeInput}
                               onChange={(e) => setCustomHaulingFeeInput(e.target.value)}
                               placeholder="0"
-                              className="w-full px-3 py-2 text-xs font-semibold bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                              className={cn(
+                                "w-full px-3 py-2 text-xs font-semibold bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent",
+                                (isCancelled || isSavingLogistics) &&
+                                  "opacity-60 cursor-not-allowed bg-natural-bg/50"
+                              )}
                             />
                             <p className="text-[10px] text-natural-text-light">
                               Standard: ₱150 / floor / waiter
@@ -3962,7 +3979,11 @@ export function BookingPage() {
 
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
                           <div className="text-xs">
-                            {logisticsSaveMessage ? (
+                            {isCancelled ? (
+                              <span className="text-amber-700 dark:text-amber-400 font-semibold text-[11px] flex items-center gap-1">
+                                <Lock className="w-3.5 h-3.5" /> Logistics locked (Booking is cancelled)
+                              </span>
+                            ) : logisticsSaveMessage ? (
                               <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
                                 {logisticsSaveMessage}
                               </span>
@@ -3980,13 +4001,15 @@ export function BookingPage() {
                           </div>
                           <button
                             type="button"
-                            disabled={isSavingLogistics}
+                            disabled={isSavingLogistics || isCancelled}
                             onClick={() => handleSaveLogisticsSurcharge(selectedBooking.id)}
-                            className="px-3.5 py-2 bg-natural-accent hover:bg-natural-accent/90 disabled:opacity-50 text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-all shadow-2xs cursor-pointer shrink-0"
+                            className="px-3.5 py-2 bg-natural-accent hover:bg-natural-accent/90 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-all shadow-2xs shrink-0"
                           >
                             {isSavingLogistics
                               ? "Saving..."
-                              : "Update Logistics Surcharge"}
+                              : isCancelled
+                                ? "Booking Cancelled"
+                                : "Update Logistics Surcharge"}
                           </button>
                         </div>
                       </div>
