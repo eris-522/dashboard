@@ -20,6 +20,7 @@ import { cn } from "../lib/utils";
 import { supabase } from "../utils/supabase"; // Database connection
 import { useInventory } from "../context/InventoryContext";
 import { logAuditAction } from "../utils/auditLogger";
+import { subscribeCatalogBroadcast, broadcastCatalogChange } from "../utils/liveBroadcast";
 import { ImageUploadField } from "../components/ImageUploadField";
 
 // Feature: Defines the structure for Packages based on the Supabase table
@@ -90,34 +91,24 @@ export function PackagePage() {
     fetchData();
     fetchInclusions();
 
-    const channel = supabase
-      .channel(`packages-sync-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "packages" },
-        () => {
-          fetchData();
-        },
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "inclusions" },
-        () => {
-          fetchInclusions();
-        },
-      )
-      .subscribe();
+    const unsubscribe = subscribeCatalogBroadcast((key) => {
+      if (key === "packages") {
+        fetchData();
+      } else if (key === "inclusions") {
+        fetchInclusions();
+      }
+    });
 
     return () => {
-      supabase.removeChannel(channel);
+      unsubscribe();
     };
   }, []);
 
-  // Feature: Main database read function.
+  // Feature: Main database read function (pruned columns).
   const fetchData = async () => {
     const pkgResponse = await supabase
       .from("packages")
-      .select("*")
+      .select("id, name, pax, price, additional_pax_price, tag, inclusions, status, image_url, category_limits, created_at")
       .order("created_at", { ascending: false });
 
     if (pkgResponse.error)
@@ -268,6 +259,7 @@ export function PackagePage() {
       type: "Create",
       details: `Added new inclusion item to ${category}`,
     });
+    broadcastCatalogChange("inclusions");
 
     // Automatically check the new item
     handleInclusionChange(trimmedName, true);
@@ -320,6 +312,7 @@ export function PackagePage() {
         type: "Create",
         details: `Created new inclusion category`,
       });
+      broadcastCatalogChange("inclusions");
     }
   };
 
@@ -479,8 +472,10 @@ export function PackagePage() {
         });
       }
 
+      broadcastCatalogChange("inclusions");
       if (packagesWereUpdated) {
         await fetchData();
+        broadcastCatalogChange("packages");
       }
 
       setConfirmAction(null);
@@ -572,8 +567,9 @@ export function PackagePage() {
       }
     }
 
-    // Refresh UI data and reset forms
+    // Refresh UI data, broadcast to live clients, and reset forms
     await fetchData();
+    broadcastCatalogChange("packages");
     setConfirmAction(null);
     setFormError(null);
     setEditingPackage(null);

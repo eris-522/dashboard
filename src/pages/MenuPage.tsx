@@ -19,6 +19,7 @@ import {
 import { cn } from "../lib/utils";
 import { supabase } from "../utils/supabase";
 import { logAuditAction } from "../utils/auditLogger";
+import { subscribeCatalogBroadcast, broadcastCatalogChange } from "../utils/liveBroadcast";
 import { ImageUploadField } from "../components/ImageUploadField";
 
 // Defines the structure of a menu item based on the Supabase table
@@ -67,19 +68,14 @@ export function MenuPage() {
   useEffect(() => {
     fetchMenuItems();
 
-    const channel = supabase
-      .channel(`admin-menu-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "menu_items" },
-        () => {
-          fetchMenuItems();
-        },
-      )
-      .subscribe();
+    const unsubscribe = subscribeCatalogBroadcast((key) => {
+      if (key === "menu") {
+        fetchMenuItems();
+      }
+    });
 
     return () => {
-      supabase.removeChannel(channel);
+      unsubscribe();
     };
   }, []);
 
@@ -270,8 +266,9 @@ export function MenuPage() {
       });
     }
 
-    // Refreshes the UI data from the database and resets the form states
+    // Refreshes the UI data from the database, broadcasts to live clients, and resets the form states
     await fetchMenuItems();
+    broadcastCatalogChange("menu");
 
     if (addAnother) {
       setConfirmAction(null);

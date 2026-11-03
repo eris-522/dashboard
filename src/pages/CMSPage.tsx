@@ -48,6 +48,7 @@ import {
 import { cn } from "../lib/utils";
 import { supabase } from "../utils/supabase";
 import { useUser } from "../context/UserContext";
+import { broadcastCatalogChange } from "../utils/liveBroadcast";
 import { ImageUploadField } from "../components/ImageUploadField";
 import {
   FullCMSData,
@@ -633,6 +634,7 @@ export function CMSPage() {
             }
           }
           setDbPackages(updatedDbPkgs);
+          broadcastCatalogChange("packages");
         } catch (e) {
           console.warn("Could not sync image_url to packages:", e);
         }
@@ -658,6 +660,7 @@ export function CMSPage() {
             }
           }
           setDbMenuItems(updatedDbDishes);
+          broadcastCatalogChange("menu");
         } catch (e) {
           console.warn("Could not sync image_url to menu_items:", e);
         }

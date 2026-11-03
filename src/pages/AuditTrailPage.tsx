@@ -17,6 +17,7 @@ import {
 import { cn } from "../lib/utils";
 import { format } from "date-fns";
 import { supabase } from "../utils/supabase";
+import { subscribeAuditBroadcast, broadcastAuditChange } from "../utils/liveBroadcast";
 
 export function AuditTrailPage() {
   const [logs, setLogs] = useState<any[]>([]);
@@ -33,30 +34,18 @@ export function AuditTrailPage() {
   useEffect(() => {
     fetchLogs(0, false);
 
-    const channel = supabase
-      .channel(`audit-logs-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "audit_logs" },
-        (payload: any) => {
-          if (payload.new) {
-            setLogs((prev) => [payload.new, ...prev.filter((l) => l.id !== payload.new.id)]);
-          }
-        },
-      )
-      .on(
-        "postgres_changes",
-        { event: "DELETE", schema: "public", table: "audit_logs" },
-        (payload: any) => {
-          if (payload.old) {
-            setLogs((prev) => prev.filter((l) => l.id !== payload.old.id));
-          }
-        },
-      )
-      .subscribe();
+    const unsubscribe = subscribeAuditBroadcast((payload) => {
+      if (payload.action === "clear") {
+        setLogs([]);
+      } else if (payload.log && payload.log.id) {
+        setLogs((prev) => [payload.log, ...prev.filter((l) => l.id !== payload.log.id)]);
+      } else {
+        fetchLogs(0, false);
+      }
+    });
 
     return () => {
-      supabase.removeChannel(channel);
+      unsubscribe();
     };
   }, []);
 
@@ -114,6 +103,7 @@ export function AuditTrailPage() {
         console.error("Error clearing logs:", error);
       } else {
         setLogs([]);
+        broadcastAuditChange("clear");
       }
     }
   };

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { supabase } from '../utils/supabase';
 import { BookingContext } from './BookingContext';
+import { subscribeInventoryBroadcast, broadcastInventoryChange } from '../utils/liveBroadcast';
 
 export interface InventoryItem {
   id: string | number;
@@ -456,6 +457,8 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
 
     if (err) {
       console.error('Error upserting inventory_deductions in Supabase:', err.message);
+    } else {
+      broadcastInventoryChange('deductions');
     }
   };
 
@@ -467,6 +470,8 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
 
     if (err) {
       console.error('Error deleting from inventory_deductions in Supabase:', err.message);
+    } else {
+      broadcastInventoryChange('deductions');
     }
   };
 
@@ -475,7 +480,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       .from('inventory_stock_movements')
       .select('*')
       .order('timestamp', { ascending: false })
-      .limit(200);
+      .limit(50);
 
     if (!err && data) {
       setStockMovements(data.map(mapDbRowToStockMovement));
@@ -498,13 +503,32 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const refreshInventoryItemsOnly = async () => {
+    const { data, error: err } = await supabase
+      .from('inventory')
+      .select('*')
+      .order('name', { ascending: true });
+    if (!err && data) {
+      const mapped: InventoryItem[] = data.map((item: any) => ({
+        id: item.id,
+        name: item.name,
+        category: item.category,
+        stock: Number(item.stock) || 0,
+        minStock: Number(item.min_stock) || 0,
+        unit: item.unit || 'pcs',
+        status: computeItemStatus(Number(item.stock) || 0, Number(item.min_stock) || 0, item.status)
+      }));
+      setItems(mapped);
+    }
+  };
+
   const refreshItems = async (silent = false) => {
     try {
       if (!silent) setIsLoading(true);
       const [invRes, dedRes, movRes, rulesRes] = await Promise.all([
         supabase.from('inventory').select('*').order('name', { ascending: true }),
         supabase.from('inventory_deductions').select('*').order('deducted_at', { ascending: false }),
-        supabase.from('inventory_stock_movements').select('*').order('timestamp', { ascending: false }).limit(200),
+        supabase.from('inventory_stock_movements').select('*').order('timestamp', { ascending: false }).limit(50),
         supabase.from('inventory_package_rules').select('*')
       ]);
 
@@ -565,63 +589,48 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     }
   }, [bookingsSignature]);
 
+  const pendingMovementsRef = useRef<any[]>([]);
+  const movementFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     refreshItems();
 
-    let invDebounce: ReturnType<typeof setTimeout> | null = null;
+    let scopeDebounce: ReturnType<typeof setTimeout> | null = null;
     let bookingsDebounce: ReturnType<typeof setTimeout> | null = null;
 
-    const channelId = `inventory-sync-channel-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const channel = supabase
-      .channel(channelId)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "inventory" },
-        () => {
-          if (invDebounce) clearTimeout(invDebounce);
-          invDebounce = setTimeout(() => {
-            refreshItems(true);
-          }, 300);
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "inventory_deductions" },
-        () => {
+    // Listen to lightweight Broadcast sync (0 Postgres WAL decoding)
+    const unsubscribeBroadcast = subscribeInventoryBroadcast((scope) => {
+      if (scopeDebounce) clearTimeout(scopeDebounce);
+      scopeDebounce = setTimeout(() => {
+        if (scope === "items") {
+          refreshInventoryItemsOnly();
+        } else if (scope === "deductions") {
           fetchDeductionsFromDb();
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "inventory_stock_movements" },
-        () => {
+        } else if (scope === "movements") {
           fetchMovementsFromDb();
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "inventory_package_rules" },
-        () => {
+        } else if (scope === "rules") {
           fetchPackageRulesFromDb();
+        } else {
+          refreshItems(true);
         }
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "bookings" },
-        () => {
-          if (bookingsDebounce) clearTimeout(bookingsDebounce);
-          bookingsDebounce = setTimeout(async () => {
-            await refreshItems(true);
-            await reconcileCompletedEvents();
-          }, 350);
-        }
-      )
-      .subscribe();
+      }, 250);
+    });
+
+    // Reuse BookingContext's single `bookings` Realtime listener instead of opening a duplicate channel
+    const handleBookingsSync = () => {
+      if (bookingsDebounce) clearTimeout(bookingsDebounce);
+      bookingsDebounce = setTimeout(async () => {
+        await Promise.all([refreshInventoryItemsOnly(), fetchDeductionsFromDb()]);
+        await reconcileCompletedEvents();
+      }, 350);
+    };
+    window.addEventListener("bookingsRealtimeSync", handleBookingsSync);
 
     return () => {
-      if (invDebounce) clearTimeout(invDebounce);
+      if (scopeDebounce) clearTimeout(scopeDebounce);
       if (bookingsDebounce) clearTimeout(bookingsDebounce);
-      supabase.removeChannel(channel);
+      unsubscribeBroadcast();
+      window.removeEventListener("bookingsRealtimeSync", handleBookingsSync);
     };
   }, []);
 
@@ -631,27 +640,42 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       id: `mov-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       timestamp: new Date().toISOString()
     };
-    setStockMovements(prev => [newMovement, ...prev.slice(0, 199)]);
+    setStockMovements(prev => [newMovement, ...prev.slice(0, 49)]);
 
-    supabase
-      .from('inventory_stock_movements')
-      .insert([{
-        id: newMovement.id,
-        item_id: String(newMovement.itemId),
-        item_name: newMovement.itemName,
-        change: newMovement.change,
-        previous_stock: newMovement.previousStock,
-        new_stock: newMovement.newStock,
-        type: newMovement.type,
-        reason: newMovement.reason,
-        booking_id: newMovement.bookingId !== undefined ? String(newMovement.bookingId) : null,
-        booking_name: newMovement.bookingName || null,
-        timestamp: newMovement.timestamp,
-        user_name: newMovement.user
-      }])
-      .then(({ error: err }) => {
-        if (err) console.error('Failed to persist stock movement to Supabase:', err.message);
-      });
+    // Micro-batch consecutive movement inserts within 150ms into a single Postgres INSERT
+    pendingMovementsRef.current.push({
+      id: newMovement.id,
+      item_id: String(newMovement.itemId),
+      item_name: newMovement.itemName,
+      change: newMovement.change,
+      previous_stock: newMovement.previousStock,
+      new_stock: newMovement.newStock,
+      type: newMovement.type,
+      reason: newMovement.reason,
+      booking_id: newMovement.bookingId !== undefined ? String(newMovement.bookingId) : null,
+      booking_name: newMovement.bookingName || null,
+      timestamp: newMovement.timestamp,
+      user_name: newMovement.user
+    });
+
+    if (movementFlushTimerRef.current) {
+      clearTimeout(movementFlushTimerRef.current);
+    }
+    movementFlushTimerRef.current = setTimeout(async () => {
+      movementFlushTimerRef.current = null;
+      const batch = pendingMovementsRef.current.splice(0, pendingMovementsRef.current.length);
+      if (batch.length === 0) return;
+
+      const { error: err } = await supabase
+        .from('inventory_stock_movements')
+        .insert(batch);
+
+      if (err) {
+        console.error('Failed to persist stock movement batch to Supabase:', err.message);
+      } else {
+        broadcastInventoryChange('movements');
+      }
+    }, 150);
   };
 
   const getPackageRules = (packageName: string, currentItemsList?: InventoryItem[]): PackageEquipmentRule[] => {
@@ -676,7 +700,11 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         updated_at: new Date().toISOString()
       }, { onConflict: 'package_name' })
       .then(({ error: err }) => {
-        if (err) console.error('Failed to save package rules to Supabase:', err.message);
+        if (err) {
+          console.error('Failed to save package rules to Supabase:', err.message);
+        } else {
+          broadcastInventoryChange('rules');
+        }
       });
   };
 
@@ -1451,8 +1479,9 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         reason: 'Initial item creation',
         user: 'Admin'
       });
+      broadcastInventoryChange('items');
     }
-    refreshItems(true);
+    refreshInventoryItemsOnly();
   };
 
   const updateStock = async (
@@ -1478,8 +1507,9 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     if (updateError) {
       console.error("Error updating stock:", updateError);
       alert("Supabase Error: " + updateError.message);
-      refreshItems(true);
+      refreshInventoryItemsOnly();
     } else {
+      broadcastInventoryChange('items');
       recordStockMovement({
         itemId: id,
         itemName: item.name,
@@ -1506,7 +1536,9 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     if (archiveError) {
       console.error("Error archiving item:", archiveError);
       alert("Supabase Error: " + archiveError.message);
-      refreshItems(true);
+      refreshInventoryItemsOnly();
+    } else {
+      broadcastInventoryChange('items');
     }
   };
 
@@ -1541,7 +1573,9 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       if (updateError) {
         console.error("Error updating item:", updateError);
         alert("Supabase Error: " + updateError.message);
-        refreshItems(true);
+        refreshInventoryItemsOnly();
+      } else {
+        broadcastInventoryChange('items');
       }
     }
   };

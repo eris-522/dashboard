@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Activity, Shield, Database, Plus, Clock, ChevronRight, History } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { supabase } from "../utils/supabase";
+import { subscribeAuditBroadcast } from "../utils/liveBroadcast";
 import { cn } from "../lib/utils";
 
 export interface AuditLogItem {
@@ -44,17 +45,10 @@ export function RecentActivities({ onViewLogs }: { onViewLogs?: () => void }) {
   useEffect(() => {
     fetchRecentLogs();
 
-    // Set up real-time listener for audit log additions
-    const channel = supabase
-      .channel(`recent-activities-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "audit_logs" },
-        () => {
-          fetchRecentLogs();
-        }
-      )
-      .subscribe();
+    // Listen to lightweight Broadcast sync instead of Postgres WAL decoding
+    const unsubscribeBroadcast = subscribeAuditBroadcast(() => {
+      fetchRecentLogs();
+    });
 
     const handleCustomLog = () => {
       fetchRecentLogs();
@@ -64,7 +58,7 @@ export function RecentActivities({ onViewLogs }: { onViewLogs?: () => void }) {
     window.addEventListener("markAdminNotifRead", handleCustomLog);
 
     return () => {
-      supabase.removeChannel(channel);
+      unsubscribeBroadcast();
       window.removeEventListener("auditLogged", handleCustomLog);
       window.removeEventListener("markAdminNotifRead", handleCustomLog);
     };

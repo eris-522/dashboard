@@ -59,7 +59,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       if (!silent) setIsLoading(true);
       const { data, error } = await supabase
         .from('profiles')
-        .select('*')
+        .select('id, name, email, role, status, phone_number, created_at')
         .order('created_at', { ascending: false });
 
       if (error) {

@@ -42,6 +42,7 @@ import { supabase } from "../utils/supabase";
 import { useUser } from "../context/UserContext";
 import { useInventory } from "../context/InventoryContext";
 import { logAuditAction } from "../utils/auditLogger";
+import { subscribeCatalogBroadcast } from "../utils/liveBroadcast";
 import {
   OVERTIME_SERVICE_RATES,
   calculateServiceWindow,
@@ -576,8 +577,8 @@ export function BookingPage() {
         .select(
           `
           *,
-          profiles (*),
-          packages (*)
+          profiles (id, name, email, phone_number, status),
+          packages (id, name, price, pax, additional_pax_price, inclusions, category_limits)
         `,
         )
         .order("created_at", { ascending: false });
@@ -642,36 +643,57 @@ export function BookingPage() {
     window.addEventListener("focus", handleVisibilityOrFocus);
     document.addEventListener("visibilitychange", handleVisibilityOrFocus);
 
-    // Subscribe only to `menu_items` here (`bookings` is already handled by BookingContext)
-    const channel = supabase
-      .channel(`bookings-page-menu-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "menu_items" },
-        () => {
-          if (menuDebounce) clearTimeout(menuDebounce);
-          menuDebounce = setTimeout(() => {
-            supabase
-              .from("menu_items")
-              .select("*")
-              .neq("status", "Archived")
-              .then(({ data }) => {
-                if (data) setMenuItems(data);
-              });
-          }, 300);
-        },
-      )
-      .subscribe();
+    // Listen to lightweight catalog Broadcast instead of a Postgres WAL channel
+    const unsubscribeCatalog = subscribeCatalogBroadcast((key) => {
+      if (key === "menu") {
+        if (menuDebounce) clearTimeout(menuDebounce);
+        menuDebounce = setTimeout(() => {
+          supabase
+            .from("menu_items")
+            .select("id, name, category, sub_category, status")
+            .neq("status", "Archived")
+            .then(({ data }) => {
+              if (data) setMenuItems(data);
+            });
+        }, 300);
+      } else if (key === "packages") {
+        supabase
+          .from("packages")
+          .select("id, name, pax, price, additional_pax_price, inclusions, status, tag")
+          .neq("status", "Archived")
+          .then(({ data }) => {
+            if (data) setPackages(data);
+          });
+      } else if (key === "inclusions") {
+        supabase
+          .from("inclusions")
+          .select("id, category, items")
+          .not("category", "like", "__CMS_%")
+          .then(({ data }) => {
+            if (data) {
+              const validServices = data
+                .filter((row: any) => row.items && row.items !== "-" && row.items.trim() !== "")
+                .map((row: any) => ({
+                  id: row.id,
+                  name: row.items,
+                  category: row.category,
+                  price: 0,
+                }));
+              setAdditionalServices(validServices);
+            }
+          });
+      }
+    });
 
     // Cleanup subscription on unmount
     return () => {
       if (syncDebounce) clearTimeout(syncDebounce);
       if (menuDebounce) clearTimeout(menuDebounce);
+      unsubscribeCatalog();
       window.removeEventListener("bookingsUpdated", handleBookingsChange);
       window.removeEventListener("bookingsRealtimeSync", handleBookingsChange);
       window.removeEventListener("focus", handleVisibilityOrFocus);
       document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
-      supabase.removeChannel(channel);
     };
   }, []);
 
@@ -686,8 +708,8 @@ export function BookingPage() {
         .select(
           `
           *,
-          profiles (*),
-          packages (*)
+          profiles (id, name, email, phone_number, status),
+          packages (id, name, price, pax, additional_pax_price, inclusions, category_limits)
         `,
         )
         .order("created_at", { ascending: false });
@@ -722,13 +744,13 @@ export function BookingPage() {
       const [pRes, pkgRes, menuRes, incRes] = await Promise.all([
         supabase
           .from("profiles")
-          .select("*")
+          .select("id, name, email, phone_number, status")
           .neq("status", "Archived"),
         supabase
           .from("packages")
           .select("id, name, pax, price, additional_pax_price, inclusions, status, tag")
           .neq("status", "Archived"),
-        supabase.from("menu_items").select("*").neq("status", "Archived"),
+        supabase.from("menu_items").select("id, name, category, sub_category, status").neq("status", "Archived"),
         supabase
           .from("inclusions")
           .select("id, category, items")

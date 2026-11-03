@@ -173,8 +173,8 @@ export function BookingProvider({ children }: { children: ReactNode }) {
         .select(
           `
           *,
-          profiles (*),
-          packages (*)
+          profiles (id, name, email, phone_number, status),
+          packages (id, name, price, pax, additional_pax_price, inclusions, category_limits)
         `,
         )
         .order("created_at", { ascending: false });
