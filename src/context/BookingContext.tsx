@@ -82,26 +82,34 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Guards against out-of-order responses and throttles tab-focus storms
+  const latestRequestRef = React.useRef(0);
+  const lastFetchTimeRef = React.useRef(0);
+
   // Fetch bookings on mount and set up real-time listener
   useEffect(() => {
+    const FOCUS_COOLDOWN_MS = 60_000;
+    let realtimeDebounce: ReturnType<typeof setTimeout> | null = null;
+    let hasSubscribedOnce = false;
+
     refreshBookings();
 
-    // Cross-component event listener for immediate synchronization
+    // Cross-component event listener for immediate local admin synchronization
     const handleSync = () => refreshBookings(true);
     window.addEventListener("bookingsUpdated", handleSync);
 
-    // Refresh immediately when the admin returns to the tab/window
-    const handleVisibility = () => {
-      if (document.visibilityState === "visible") refreshBookings(true);
+    // Throttled refresh when the admin returns to the tab/window (60s cooldown)
+    const handleVisibilityOrFocus = () => {
+      if (
+        document.visibilityState === "visible" &&
+        Date.now() - lastFetchTimeRef.current >= FOCUS_COOLDOWN_MS
+      ) {
+        refreshBookings(true);
+      }
     };
-    window.addEventListener("focus", handleSync);
-    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleVisibilityOrFocus);
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus);
 
-    // Subscribe to real-time changes on the bookings table.
-    // A unique channel name per mount prevents the React StrictMode
-    // unmount/remount race where a re-created channel with the same topic
-    // gets torn down by the pending removeChannel() and silently stops
-    // receiving events.
     let realtimeHealthy = false;
     const channel = supabase
       .channel(`bookings-channel-context-${Date.now()}-${Math.random().toString(36).slice(2)}`)
@@ -112,46 +120,50 @@ export function BookingProvider({ children }: { children: ReactNode }) {
           if (payload.eventType === "DELETE" && payload.old?.id) {
             setBookings((prev) => prev.filter((b) => String(b.id) !== String(payload.old.id)));
           }
-          refreshBookings(true); // Refresh data silently only when a booking actually changes
-          window.dispatchEvent(new CustomEvent("bookingsRealtimeSync"));
+          if (realtimeDebounce) clearTimeout(realtimeDebounce);
+          realtimeDebounce = setTimeout(() => {
+            refreshBookings(true);
+            window.dispatchEvent(new CustomEvent("bookingsRealtimeSync"));
+          }, 250);
         },
       )
       .subscribe((status: string, err?: Error) => {
         realtimeHealthy = status === "SUBSCRIBED";
         if (status === "SUBSCRIBED") {
-          // Catch anything that changed while we were connecting
-          refreshBookings(true);
+          // Only re-sync on reconnection (initial mount already called refreshBookings above)
+          if (hasSubscribedOnce) {
+            refreshBookings(true);
+          }
+          hasSubscribedOnce = true;
         } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          console.warn(`[Bookings] Realtime ${status}. Falling back to polling.`, err);
+          console.warn(`[Bookings] Realtime ${status}. Falling back to 60s heartbeat.`, err);
         }
       });
 
-    // Fallback polling: fast when realtime is down, slow safety net otherwise
-    let tick = 0;
+    // Fallback polling ONLY when Realtime WebSocket is disconnected
     const pollId = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
-      tick++;
-      if (!realtimeHealthy || tick % 6 === 0) refreshBookings(true);
-    }, 5000);
+      if (!realtimeHealthy && document.visibilityState === "visible") {
+        refreshBookings(true);
+      }
+    }, 60_000);
 
     // Cleanup subscription on unmount
     return () => {
+      if (realtimeDebounce) clearTimeout(realtimeDebounce);
       window.removeEventListener("bookingsUpdated", handleSync);
-      window.removeEventListener("focus", handleSync);
-      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleVisibilityOrFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
       window.clearInterval(pollId);
       supabase.removeChannel(channel);
     };
   }, []);
-
-  // Guards against out-of-order responses overwriting newer data
-  const latestRequestRef = React.useRef(0);
 
   /**
    * Fetches all active bookings from Supabase with lightweight joined fields
    */
   const refreshBookings = async (silent = false) => {
     const requestId = ++latestRequestRef.current;
+    lastFetchTimeRef.current = Date.now();
     try {
       if (!silent) setIsLoading(true);
       setError(null);

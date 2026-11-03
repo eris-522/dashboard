@@ -568,6 +568,9 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refreshItems();
 
+    let invDebounce: ReturnType<typeof setTimeout> | null = null;
+    let bookingsDebounce: ReturnType<typeof setTimeout> | null = null;
+
     const channelId = `inventory-sync-channel-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const channel = supabase
       .channel(channelId)
@@ -575,7 +578,10 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         "postgres_changes",
         { event: "*", schema: "public", table: "inventory" },
         () => {
-          refreshItems(true);
+          if (invDebounce) clearTimeout(invDebounce);
+          invDebounce = setTimeout(() => {
+            refreshItems(true);
+          }, 300);
         }
       )
       .on(
@@ -602,14 +608,19 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "bookings" },
-        async () => {
-          await refreshItems(true);
-          await reconcileCompletedEvents();
+        () => {
+          if (bookingsDebounce) clearTimeout(bookingsDebounce);
+          bookingsDebounce = setTimeout(async () => {
+            await refreshItems(true);
+            await reconcileCompletedEvents();
+          }, 350);
         }
       )
       .subscribe();
 
     return () => {
+      if (invDebounce) clearTimeout(invDebounce);
+      if (bookingsDebounce) clearTimeout(bookingsDebounce);
       supabase.removeChannel(channel);
     };
   }, []);

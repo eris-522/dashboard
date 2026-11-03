@@ -564,64 +564,119 @@ export function BookingPage() {
     return () => window.removeEventListener("openAdminBookingOverview", handleOpenOverview);
   }, []);
 
+  const lastFullFetchRef = useRef(0);
+  const inFlightBookingsFetchRef = useRef(false);
+
+  const fetchBookingsOnly = async () => {
+    if (inFlightBookingsFetchRef.current) return;
+    inFlightBookingsFetchRef.current = true;
+    try {
+      const { data: bData, error: bError } = await supabase
+        .from("bookings")
+        .select(
+          `
+          *,
+          profiles (*),
+          packages (*)
+        `,
+        )
+        .order("created_at", { ascending: false });
+
+      if (!bError && bData) {
+        setBookings(bData);
+        if (pendingOpenBookingIdRef.current) {
+          const targetMatch = bData.find(
+            (b: any) => String(b.id) === String(pendingOpenBookingIdRef.current)
+          );
+          if (targetMatch) {
+            setSelectedBooking(targetMatch);
+            pendingOpenBookingIdRef.current = null;
+          }
+        } else {
+          setSelectedBooking((prev: any) => {
+            if (!prev) return null;
+            return bData.find((b: any) => String(b.id) === String(prev.id)) || prev;
+          });
+        }
+        setFetchError(null);
+        if (bData.length > 0) {
+          reconcileCompletedEvents(bData);
+        }
+      }
+    } catch (err) {
+      console.error("Silent bookings refresh error:", err);
+    } finally {
+      inFlightBookingsFetchRef.current = false;
+    }
+  };
+
   useEffect(() => {
-    // Fetch initial data
+    // Fetch initial data (bookings + static catalog reference data)
     fetchAllData(false);
 
-    const handleSilentSync = () => {
-      if (document.visibilityState === "visible") {
-        fetchAllData(true);
+    const FOCUS_COOLDOWN_MS = 60_000;
+    let syncDebounce: ReturnType<typeof setTimeout> | null = null;
+    let menuDebounce: ReturnType<typeof setTimeout> | null = null;
+
+    // BookingContext already maintains the Realtime channel on `bookings` and emits `bookingsRealtimeSync`.
+    // Only refresh `bookings` (1 query instead of 5 full-table queries!) when bookings change.
+    const handleBookingsChange = () => {
+      if (syncDebounce) clearTimeout(syncDebounce);
+      syncDebounce = setTimeout(() => {
+        fetchBookingsOnly();
+      }, 200);
+    };
+
+    const handleVisibilityOrFocus = () => {
+      if (
+        document.visibilityState === "visible" &&
+        Date.now() - lastFullFetchRef.current >= FOCUS_COOLDOWN_MS
+      ) {
+        lastFullFetchRef.current = Date.now();
+        fetchBookingsOnly();
       }
     };
 
-    window.addEventListener("bookingsUpdated", handleSilentSync);
-    window.addEventListener("bookingsRealtimeSync", handleSilentSync);
-    window.addEventListener("focus", handleSilentSync);
-    document.addEventListener("visibilitychange", handleSilentSync);
+    window.addEventListener("bookingsUpdated", handleBookingsChange);
+    window.addEventListener("bookingsRealtimeSync", handleBookingsChange);
+    window.addEventListener("focus", handleVisibilityOrFocus);
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus);
 
-    // Subscribe to real-time changes on the bookings table
+    // Subscribe only to `menu_items` here (`bookings` is already handled by BookingContext)
     const channel = supabase
-      .channel(`bookings-page-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "bookings" },
-        () => {
-          fetchAllData(true); // Refresh silently when any booking changes
-        },
-      )
+      .channel(`bookings-page-menu-${Date.now()}-${Math.random().toString(36).slice(2)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "menu_items" },
         () => {
-          supabase
-            .from("menu_items")
-            .select("*")
-            .neq("status", "Archived")
-            .then(({ data }) => {
-              if (data) setMenuItems(data);
-            });
+          if (menuDebounce) clearTimeout(menuDebounce);
+          menuDebounce = setTimeout(() => {
+            supabase
+              .from("menu_items")
+              .select("*")
+              .neq("status", "Archived")
+              .then(({ data }) => {
+                if (data) setMenuItems(data);
+              });
+          }, 300);
         },
       )
       .subscribe();
 
-    const pollInterval = setInterval(() => {
-      if (document.visibilityState === "visible") {
-        fetchAllData(true);
-      }
-    }, 5000);
-
     // Cleanup subscription on unmount
     return () => {
-      window.removeEventListener("bookingsUpdated", handleSilentSync);
-      window.removeEventListener("bookingsRealtimeSync", handleSilentSync);
-      window.removeEventListener("focus", handleSilentSync);
-      document.removeEventListener("visibilitychange", handleSilentSync);
-      clearInterval(pollInterval);
+      if (syncDebounce) clearTimeout(syncDebounce);
+      if (menuDebounce) clearTimeout(menuDebounce);
+      window.removeEventListener("bookingsUpdated", handleBookingsChange);
+      window.removeEventListener("bookingsRealtimeSync", handleBookingsChange);
+      window.removeEventListener("focus", handleVisibilityOrFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
       supabase.removeChannel(channel);
     };
   }, []);
 
   const fetchAllData = async (silent = false) => {
+    lastFullFetchRef.current = Date.now();
     try {
       if (!silent) setIsLoading(true);
       setFetchError(null);

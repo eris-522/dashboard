@@ -78,8 +78,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    refreshUsers();
-
     // Check for an existing session to auto-login the admin, and kick out unauthorized customers
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
@@ -104,26 +102,39 @@ export function UserProvider({ children }: { children: ReactNode }) {
           sessionStorage.removeItem('rp_admin_current_user');
           setCurrentUser(null);
         }
+      } else {
+        setIsLoading(false);
       }
     });
+  }, []);
 
-    // Subscribe to real-time changes on the profiles table so Dashboard metrics stay synced
+  // Only fetch customer profiles & open Realtime listener once an admin is actually signed in
+  useEffect(() => {
+    if (!currentUser?.id) return;
+
+    refreshUsers();
+
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const channel = supabase
       .channel(`users-ctx-${Date.now()}-${Math.random().toString(36).slice(2)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "profiles" },
         () => {
-          refreshUsers(true);
+          if (debounceTimer) clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(() => {
+            refreshUsers(true);
+          }, 300);
         }
       )
       .subscribe();
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [currentUser?.id]);
 
   const totalUserCount = users.filter((u) => u.id !== 0).length;
   const activeUserCount = useMemo(
