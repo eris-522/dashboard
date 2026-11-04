@@ -35,6 +35,8 @@ import {
   RefreshCw,
   RotateCcw,
   Sliders,
+  ChevronDown,
+  UtensilsCrossed,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { EventCalendar } from "../components/EventCalendar";
@@ -391,6 +393,9 @@ export function BookingPage() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState<any | null>(null);
+  const [overviewTab, setOverviewTab] = useState<"payments" | "logistics" | "menu" | "equipment">("payments");
+  const [isDayOfOtExpanded, setIsDayOfOtExpanded] = useState<boolean>(false);
+  const overviewTabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [customTravelFeeInput, setCustomTravelFeeInput] = useState<string>("0");
   const [customHaulingFeeInput, setCustomHaulingFeeInput] = useState<string>("0");
   const [customLogisticsNotes, setCustomLogisticsNotes] = useState<string>("");
@@ -529,8 +534,22 @@ export function BookingPage() {
       setCustomHaulingFeeInput(String(logInfo.haulingFee || 0));
       setCustomLogisticsNotes(logInfo.notes || "");
       setLogisticsSaveMessage("");
+      setOverviewTab("payments");
+      const dayOfInfo = selectedBooking.overtime_info?.day_of;
+      const hasAppliedDayOfOt = Boolean(
+        dayOfInfo?.total_day_of_fee !== undefined && dayOfInfo?.applied_at
+      );
+      setIsDayOfOtExpanded(
+        (selectedBooking.status || "Pending") === "Confirmed" || hasAppliedDayOfOt
+      );
     }
   }, [selectedBooking?.id]);
+
+  useEffect(() => {
+    if (selectedBooking?.status === "Confirmed") {
+      setIsDayOfOtExpanded(true);
+    }
+  }, [selectedBooking?.status]);
 
   useEffect(() => {
     if (selectedBooking && selectedBooking.status === "Confirmed") {
@@ -3673,57 +3692,284 @@ export function BookingPage() {
         </div>
       )}
 
-      {selectedBooking && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl w-full max-w-5xl lg:max-w-6xl xl:max-w-7xl 2xl:max-w-[1450px] max-h-[94vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
-            <div className="py-3.5 px-6 border-b border-natural-border flex items-center justify-between shrink-0">
-              <h3 className="text-lg font-serif font-bold text-natural-text-main">
-                Booking Overview
-              </h3>
-              <button
-                onClick={() => setSelectedBooking(null)}
-                className="p-1 hover:bg-natural-bg rounded-lg transition-colors cursor-pointer"
-              >
-                <X className="w-5 h-5 text-natural-text-light" />
-              </button>
-            </div>
+      {selectedBooking && (() => {
+        const bookingStatus = selectedBooking.status || "Pending";
+        const isCancelled = bookingStatus === "Cancelled";
+        const isCompleted = bookingStatus === "Completed";
+        const isConfirmed = bookingStatus === "Confirmed";
 
-            <div className="p-4 sm:p-5 xl:p-6 space-y-3.5 overflow-y-auto flex-1">
-              {/* Late Modification Warning Banner */}
-              {hasLateModification(selectedBooking) && (
-                <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl flex items-center justify-between gap-3 text-rose-700 dark:text-rose-300">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="w-5 h-5 text-rose-500 shrink-0" />
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wider">
-                        Late Modification Flag (&lt;14 Days Before Event)
-                      </p>
-                      <p className="text-[11px] opacity-90">
-                        This booking has modifications requested under the 14-day cutoff window. Verify market inventory and logistics before approving.
-                      </p>
+        const clientName =
+          selectedBooking.profiles?.name ||
+          selectedBooking.profiles?.full_name ||
+          "Unknown User";
+
+        const pkg =
+          selectedBooking.packages ||
+          packages.find((p) => p.id === selectedBooking.package_id);
+        const rawPkgName = (pkg?.name || selectedBooking.package || "Custom").trim();
+        const cleanPkgLabel = /\bpackage\b/i.test(rawPkgName)
+          ? rawPkgName
+          : `${rawPkgName} Package`;
+        const rawEventType = (selectedBooking.event_type || "").trim();
+        const normalizedEventKeyword = rawEventType
+          .toLowerCase()
+          .replace(/\s+reception$/i, "")
+          .trim();
+        const showEventTypePrefix =
+          Boolean(rawEventType) &&
+          Boolean(normalizedEventKeyword) &&
+          !cleanPkgLabel.toLowerCase().includes(normalizedEventKeyword);
+        const fullPackageSubtitle = showEventTypePrefix
+          ? `${rawEventType} · ${cleanPkgLabel}`
+          : cleanPkgLabel;
+
+        const baseGuests = Number(selectedBooking.guest_count) || 50;
+        const extraGuests = Number(selectedBooking.additional_pax) || 0;
+        const totalPax = baseGuests + extraGuests;
+
+        const basePrice =
+          pkg && pkg.price
+            ? parseFloat(String(pkg.price).replace(/[^\d.-]/g, "")) || 0
+            : 0;
+        const addPrice =
+          pkg && pkg.additional_pax_price
+            ? parseFloat(String(pkg.additional_pax_price).replace(/[^\d.-]/g, "")) || 0
+            : 0;
+        const additionalPaxTotal = extraGuests > 0 ? addPrice * extraGuests : 0;
+        const servicesPrice = (selectedBooking.selected_add_ons || []).reduce(
+          (acc: number, name: string) => {
+            const service = additionalServices.find((s) => s.name === name);
+            return (
+              acc +
+              (service
+                ? parseFloat(String(service.price).replace(/[^\d.-]/g, "")) || 0
+                : 0)
+            );
+          },
+          0
+        );
+
+        const logistics = getBookingLogistics(selectedBooking);
+        const corkageData = selectedBooking.corkage_info || logistics.corkage || null;
+        const hasCorkage = Boolean(
+          corkageData &&
+            (corkageData.hasLechonTable ||
+              corkageData.alcoholicBeveragesCount > 0 ||
+              corkageData.outsideFoodCount > 0)
+        );
+        const corkageFee =
+          Number(corkageData?.totalCorkageFee) ||
+          ((corkageData?.hasLechonTable ? 1500 : 0) +
+            Number(corkageData?.alcoholicBeveragesCount || 0) * 400 +
+            Number(corkageData?.outsideFoodCount || 0) * 400) ||
+          0;
+
+        const totalBudget = calculateBudget(selectedBooking);
+        const payment = getBookingPayment(selectedBooking);
+        const is50Percent = payment.payment_scheme === "Standard 50%";
+        const downpaymentDue = getInitialDownpaymentDue(
+          selectedBooking,
+          payment,
+          totalBudget
+        );
+        const balanceDue = Math.max(0, totalBudget - downpaymentDue);
+        const finalBalanceAmount = balanceDue;
+
+        const isDepositVerified =
+          payment.payment_status === "Verified" || isConfirmed || isCompleted;
+        const isFinalVerified = payment.final_balance_status === "Verified";
+        const hasFinalReceipt = Boolean(payment.final_balance_receipt);
+
+        const hasPendingInstallmentSlip =
+          !is50Percent &&
+          Array.isArray(payment.installment_schedule) &&
+          payment.installment_schedule.some(
+            (m: any) =>
+              m.status !== "Paid" &&
+              m.status !== "Verified" &&
+              !isFinalVerified &&
+              Boolean(m.receipt_url)
+          );
+        const needsPaymentReview =
+          (!isDepositVerified && Boolean(payment.receipt_url)) ||
+          (is50Percent && !isFinalVerified && hasFinalReceipt) ||
+          hasPendingInstallmentSlip;
+
+        const prebookedCatering =
+          Number(selectedBooking.overtime_info?.prebooked?.catering_hours) || 0;
+        const serviceWin = calculateServiceWindow(
+          selectedBooking.event_time,
+          prebookedCatering
+        );
+        const scheduledEndTime = serviceWin.extendedEndTimeLabel;
+        const dayOfInfo = selectedBooking.overtime_info?.day_of;
+        const isDayOfOtApplied = Boolean(
+          dayOfInfo?.total_day_of_fee !== undefined && dayOfInfo?.applied_at
+        );
+        const needsTravelFeeAssessment =
+          !isCancelled && logistics.isOutsideTaytay && (logistics.travelFee || 0) === 0;
+
+        const cleanAllergies =
+          typeof selectedBooking.food_allergies === "string" &&
+          selectedBooking.food_allergies.includes("__PAYMENT_METADATA__:")
+            ? selectedBooking.food_allergies.split("__PAYMENT_METADATA__:")[0].trim()
+            : (selectedBooking.food_allergies || "").trim();
+
+        const visibleModRequests = Array.isArray(selectedBooking.modification_requests)
+          ? selectedBooking.modification_requests.filter(
+              (r: any) => r.status !== "Superseded"
+            )
+          : [];
+        const actionableModCount = visibleModRequests.filter(
+          (r: any) => r.status === "Pending" || r.status === "Applied"
+        ).length;
+        const isLateMod = hasLateModification(selectedBooking);
+
+        const latestModNote =
+          visibleModRequests.length > 0
+            ? (visibleModRequests[visibleModRequests.length - 1]?.notes || "").trim()
+            : "";
+        const specialInstructions =
+          (selectedBooking.logistics_info?.client_special_instructions || "").trim() ||
+          latestModNote;
+
+        const menuCount = Array.isArray(selectedBooking.selected_menu_items)
+          ? selectedBooking.selected_menu_items.length
+          : 0;
+
+        // Equipment Allocation Summary (computed once for tab badge + Equipment table)
+        const equipPkgName =
+          selectedBooking.packages?.name ||
+          packages.find((p) => p.id === selectedBooking.package_id)?.name ||
+          selectedBooking.package ||
+          packages[0]?.name ||
+          "Event Package";
+        const equipList = calculatePackageEquipment(
+          equipPkgName,
+          totalPax,
+          selectedBooking.packages?.inclusions || selectedBooking.inclusions,
+          undefined,
+          corkageData
+        );
+        const deductionRec = deductionRecords.find(
+          (d) => String(d.bookingId) === String(selectedBooking.id)
+        );
+        const equipBreakdown = equipList.map((eq) => {
+          const matchedRecItem = deductionRec?.items.find(
+            (it) => it.itemName.toLowerCase() === eq.itemName.toLowerCase()
+          );
+          const invItem = items.find(
+            (it) =>
+              it.status !== "Archived" &&
+              it.name.toLowerCase() === eq.itemName.toLowerCase()
+          );
+
+          let inHouseQty = 0;
+          let outsourcedQty = 0;
+
+          if (matchedRecItem !== undefined) {
+            inHouseQty = Math.min(matchedRecItem.quantity, eq.quantity);
+            const remainder = Math.max(0, eq.quantity - inHouseQty);
+            outsourcedQty = Math.max(matchedRecItem.outsourcedQuantity || 0, remainder);
+          } else {
+            const available = invItem ? Math.max(0, invItem.stock) : 0;
+            inHouseQty = Math.min(available, eq.quantity);
+            outsourcedQty = Math.max(0, eq.quantity - inHouseQty);
+          }
+
+          return {
+            ...eq,
+            inHouseQty,
+            outsourcedQty,
+          };
+        });
+        const sortedEquipBreakdown = [...equipBreakdown].sort((a, b) => {
+          const aOut = a.outsourcedQty > 0 ? 1 : 0;
+          const bOut = b.outsourcedQty > 0 ? 1 : 0;
+          if (bOut !== aOut) return bOut - aOut;
+          return a.itemName.localeCompare(b.itemName);
+        });
+        const totalInHouse = equipBreakdown.reduce((acc, eq) => acc + eq.inHouseQty, 0);
+        const totalOutsourced = equipBreakdown.reduce(
+          (acc, eq) => acc + eq.outsourcedQty,
+          0
+        );
+        const totalEquipUnits = totalInHouse + totalOutsourced;
+
+        const tabOrder: Array<"payments" | "logistics" | "menu" | "equipment"> = [
+          "payments",
+          "logistics",
+          "menu",
+          "equipment",
+        ];
+        const handleTabKeyDown = (
+          e: React.KeyboardEvent<HTMLButtonElement>,
+          currentKey: "payments" | "logistics" | "menu" | "equipment"
+        ) => {
+          const idx = tabOrder.indexOf(currentKey);
+          let nextIdx = -1;
+          if (e.key === "ArrowRight") nextIdx = (idx + 1) % tabOrder.length;
+          else if (e.key === "ArrowLeft")
+            nextIdx = (idx - 1 + tabOrder.length) % tabOrder.length;
+          else if (e.key === "Home") nextIdx = 0;
+          else if (e.key === "End") nextIdx = tabOrder.length - 1;
+
+          if (nextIdx !== -1) {
+            e.preventDefault();
+            const nextKey = tabOrder[nextIdx];
+            setOverviewTab(nextKey);
+            overviewTabRefs.current[nextKey]?.focus();
+          }
+        };
+
+        return (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4">
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="booking-overview-title"
+              className="bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl w-full max-w-5xl lg:max-w-6xl xl:max-w-[1220px] max-h-[92vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200"
+            >
+              {/* Merged Compact Sticky Header & Summary Strip */}
+              <div className="px-5 py-3.5 bg-natural-card/80 border-b border-natural-border space-y-3 shrink-0">
+                <div className="flex items-start sm:items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <h3
+                        id="booking-overview-title"
+                        className="text-lg sm:text-xl font-serif font-bold text-natural-text-main leading-tight truncate"
+                      >
+                        {clientName}
+                      </h3>
+                      <span
+                        className={cn(
+                          "text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full border shrink-0",
+                          isConfirmed
+                            ? "bg-green-50 text-green-700 border-green-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60"
+                            : isCompleted
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60"
+                              : isCancelled
+                                ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-800/60"
+                                : bookingStatus === "Archived"
+                                  ? "bg-gray-100 text-gray-600 border-gray-300 dark:bg-natural-bg/40 dark:text-natural-text-light dark:border-natural-border/60"
+                                  : "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60"
+                        )}
+                      >
+                        {bookingStatus}
+                      </span>
                     </div>
-                  </div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-rose-500/20 border border-rose-500/40 shrink-0">
-                    Late Action Required
-                  </span>
-                </div>
-              )}
-
-              {/* Top Client Header & Logistics Bar */}
-              <div className="p-3.5 bg-natural-card/60 border border-natural-border rounded-xl space-y-2.5 shadow-2xs">
-                {/* Client Row */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-natural-border/60">
-                  <div>
-                    <h4 className="text-xl font-serif font-bold text-natural-text-main leading-tight">
-                      {selectedBooking.profiles?.name ||
-                        selectedBooking.profiles?.full_name ||
-                        "Unknown User"}
-                    </h4>
-                    <p className="text-xs font-medium text-natural-text-light">
-                      {selectedBooking.event_type}{" "}
-                      {selectedBooking.packages?.name} Package
-                      <span className="opacity-75 ml-2">
-                        (Applied:{" "}
+                    <p className="text-xs font-medium text-natural-text-light mt-0.5 flex items-center gap-1.5 flex-wrap">
+                      <span className="text-natural-text-main font-semibold">
+                        {fullPackageSubtitle}
+                      </span>
+                      <span aria-hidden="true">·</span>
+                      <span>
+                        {totalPax} Pax
+                        {extraGuests > 0 ? ` (${baseGuests} + ${extraGuests} extra)` : ""}
+                      </span>
+                      <span aria-hidden="true">·</span>
+                      <span>
+                        Applied{" "}
                         {selectedBooking.created_at
                           ? new Date(selectedBooking.created_at).toLocaleDateString(
                               undefined,
@@ -3731,229 +3977,1139 @@ export function BookingPage() {
                                 month: "short",
                                 day: "numeric",
                                 year: "numeric",
-                              },
+                              }
                             )
                           : "N/A"}
-                        )
                       </span>
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={cn(
-                        "text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full border",
-                        (selectedBooking.status || "Pending") === "Confirmed"
-                          ? "bg-green-50 text-green-700 border-green-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60"
-                          : (selectedBooking.status || "Pending") === "Completed"
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60"
-                            : (selectedBooking.status || "Pending") === "Cancelled"
-                              ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-800/60"
-                              : (selectedBooking.status || "Pending") === "Archived"
-                                ? "bg-gray-100 text-gray-600 border-gray-300 dark:bg-natural-bg/40 dark:text-natural-text-light dark:border-natural-border/60"
-                                : "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60",
+
+                  <button
+                    type="button"
+                    aria-label="Close booking overview"
+                    onClick={() => setSelectedBooking(null)}
+                    className="min-w-8 min-h-8 p-1.5 hover:bg-natural-bg rounded-lg transition-colors cursor-pointer flex items-center justify-center shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-natural-accent"
+                  >
+                    <X aria-hidden="true" className="w-5 h-5 text-natural-text-light" />
+                  </button>
+                </div>
+
+                {/* 4-Column Essential Logistics & Unified Financial Strip */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 pt-2.5 border-t border-natural-border/60 text-xs">
+                  <div className="flex items-start gap-2 min-w-0">
+                    <Calendar
+                      aria-hidden="true"
+                      className="w-3.5 h-3.5 text-natural-accent mt-0.5 shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-wider">
+                        Date &amp; Service Window
+                      </p>
+                      <p className="font-semibold text-natural-text-main truncate">
+                        {formatEventDate(selectedBooking.event_date)} ·{" "}
+                        {formatEventTime(selectedBooking.event_time)}
+                      </p>
+                      <p className="text-[10px] text-natural-accent font-semibold truncate">
+                        {serviceWin.standardWindowText} ({4 + prebookedCatering}h window)
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-2 min-w-0">
+                    <MapPin
+                      aria-hidden="true"
+                      className="w-3.5 h-3.5 text-natural-accent mt-0.5 shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-wider">
+                          Venue
+                        </p>
+                        <span
+                          className={cn(
+                            "text-[9px] font-bold px-1.5 py-0.2 rounded uppercase tracking-wider border",
+                            logistics.isOutsideTaytay
+                              ? "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700/60"
+                              : "bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-700/60"
+                          )}
+                        >
+                          {logistics.isOutsideTaytay ? "Outside Taytay" : "Within Taytay"}
+                        </span>
+                        {logistics.requiresStairsIngress && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded uppercase tracking-wider bg-rose-100 text-rose-800 border border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-700/60">
+                            Stairs
+                          </span>
+                        )}
+                      </div>
+                      <p
+                        className="font-semibold text-natural-text-main truncate"
+                        title={selectedBooking.event_location || ""}
+                      >
+                        {(selectedBooking.event_location || "N/A").split(" - ")[0]}
+                      </p>
+                      {(selectedBooking.event_location || "").split(" - ")[1] && (
+                        <p
+                          className="text-[10px] text-natural-text-light truncate"
+                          title={(selectedBooking.event_location || "").split(" - ")[1]}
+                        >
+                          {(selectedBooking.event_location || "").split(" - ")[1]}
+                        </p>
                       )}
-                    >
-                      {selectedBooking.status || "Pending"}
-                    </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-2 min-w-0">
+                    <Phone
+                      aria-hidden="true"
+                      className="w-3.5 h-3.5 text-natural-accent mt-0.5 shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-wider">
+                        Contact
+                      </p>
+                      <p className="font-semibold text-natural-text-main truncate">
+                        {selectedBooking.profiles?.phone_number ||
+                          selectedBooking.profiles?.phone ||
+                          "N/A"}
+                      </p>
+                      <p
+                        className="text-[10px] text-natural-text-light truncate"
+                        title={selectedBooking.profiles?.email || ""}
+                      >
+                        {selectedBooking.profiles?.email || "No email"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-2 min-w-0">
+                    <CreditCard
+                      aria-hidden="true"
+                      className="w-3.5 h-3.5 text-natural-accent mt-0.5 shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-wider">
+                          Total Event Cost
+                        </p>
+                      </div>
+                      <p className="font-serif font-bold text-natural-accent text-sm leading-tight">
+                        ₱{totalBudget.toLocaleString()}
+                      </p>
+                      <p className="text-[10px] text-natural-text-light truncate">
+                        Dep: ₱{downpaymentDue.toLocaleString()} · Bal: ₱
+                        {balanceDue.toLocaleString()}
+                      </p>
+                    </div>
                   </div>
                 </div>
 
-                {/* Logistics Strip */}
-                {(() => {
-                  const pkg =
-                    selectedBooking.packages ||
-                    packages.find((p) => p.id === selectedBooking.package_id);
-                  const basePrice =
-                    pkg && pkg.price
-                      ? parseFloat(String(pkg.price).replace(/[^\d.-]/g, "")) || 0
-                      : 0;
-                  const addPrice =
-                    pkg && pkg.additional_pax_price
-                      ? parseFloat(
-                          String(pkg.additional_pax_price).replace(/[^\d.-]/g, ""),
-                        ) || 0
-                      : 0;
-                  const additionalPaxTotal =
-                    selectedBooking.additional_pax
-                      ? addPrice * selectedBooking.additional_pax
-                      : 0;
-                  const servicesPrice = (
-                    selectedBooking.selected_add_ons || []
-                  ).reduce((acc: number, name: string) => {
-                    const service = additionalServices.find((s) => s.name === name);
+                {/* Coordinator Tab Bar (Accessible ARIA Tablist) */}
+                <div
+                  role="tablist"
+                  aria-label="Booking coordinator sections"
+                  className="flex items-center gap-1.5 overflow-x-auto pt-1 -mb-3.5 border-t border-natural-border/50 no-scrollbar"
+                >
+                  {[
+                    {
+                      key: "payments" as const,
+                      label: "Payments & Billing",
+                      icon: Receipt,
+                      badge: needsPaymentReview ? "Review" : is50Percent ? "50%" : "20% Plan",
+                      badgeTone: needsPaymentReview ? "amber" : "neutral",
+                    },
+                    {
+                      key: "logistics" as const,
+                      label: "Logistics & Overtime",
+                      icon: MapPin,
+                      badge: needsTravelFeeAssessment
+                        ? "Set Travel Fee"
+                        : isDayOfOtApplied
+                          ? "OT Applied"
+                          : null,
+                      badgeTone: needsTravelFeeAssessment
+                        ? "amber"
+                        : isDayOfOtApplied
+                          ? "emerald"
+                          : "neutral",
+                    },
+                    {
+                      key: "menu" as const,
+                      label: "Menu & Requests",
+                      icon: UtensilsCrossed,
+                      badge:
+                        actionableModCount > 0
+                          ? `${actionableModCount} Mod`
+                          : String(menuCount),
+                      badgeTone: actionableModCount > 0 ? "rose" : "neutral",
+                    },
+                    {
+                      key: "equipment" as const,
+                      label: "Equipment",
+                      icon: Boxes,
+                      badge:
+                        !isCompleted && totalOutsourced > 0
+                          ? `${totalOutsourced} Outsource`
+                          : String(totalEquipUnits),
+                      badgeTone:
+                        !isCompleted && totalOutsourced > 0 ? "amber" : "neutral",
+                    },
+                  ].map((tab) => {
+                    const Icon = tab.icon;
+                    const isActive = overviewTab === tab.key;
                     return (
-                      acc +
-                      (service
-                        ? parseFloat(
-                            String(service.price).replace(/[^\d.-]/g, ""),
-                          ) || 0
-                        : 0)
+                      <button
+                        key={tab.key}
+                        ref={(el) => {
+                          overviewTabRefs.current[tab.key] = el;
+                        }}
+                        type="button"
+                        role="tab"
+                        id={`overview-tab-${tab.key}`}
+                        aria-selected={isActive}
+                        aria-controls={`overview-panel-${tab.key}`}
+                        tabIndex={isActive ? 0 : -1}
+                        onClick={() => setOverviewTab(tab.key)}
+                        onKeyDown={(e) => handleTabKeyDown(e, tab.key)}
+                        className={cn(
+                          "min-h-10 px-3.5 py-2 text-xs font-bold uppercase tracking-wider border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-natural-accent",
+                          isActive
+                            ? "border-natural-accent text-natural-accent bg-natural-accent/5"
+                            : "border-transparent text-natural-text-light hover:text-natural-text-main hover:bg-natural-bg/50"
+                        )}
+                      >
+                        <Icon aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />
+                        <span>{tab.label}</span>
+                        {tab.badge && (
+                          <span
+                            className={cn(
+                              "text-[10px] font-bold px-1.5 py-0.2 rounded-full border",
+                              tab.badgeTone === "amber"
+                                ? "bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-500/30"
+                                : tab.badgeTone === "rose"
+                                  ? "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30"
+                                  : tab.badgeTone === "emerald"
+                                    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
+                                    : isActive
+                                      ? "bg-natural-accent/15 text-natural-accent border-natural-accent/30"
+                                      : "bg-natural-bg text-natural-text-light border-natural-border"
+                            )}
+                          >
+                            {tab.badge}
+                          </span>
+                        )}
+                      </button>
                     );
-                  }, 0);
-                  const logistics = getBookingLogistics(selectedBooking);
-                  const totalBudget =
-                    basePrice +
-                    additionalPaxTotal +
-                    servicesPrice +
-                    logistics.haulingFee +
-                    logistics.travelFee;
+                  })}
+                </div>
+              </div>
+
+              {/* Single Clean Scrollable Workspace Body */}
+              <div className="p-4 sm:p-5 space-y-3.5 overflow-y-auto flex-1">
+                {/* Exception-Only High-Priority Alerts */}
+                {(isLateMod || actionableModCount > 0) && (
+                  <div className="p-2.5 px-3.5 bg-rose-500/10 border border-rose-500/30 rounded-xl flex flex-wrap items-center justify-between gap-2 text-rose-800 dark:text-rose-200 text-xs">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle
+                        aria-hidden="true"
+                        className="w-4 h-4 text-rose-500 shrink-0"
+                      />
+                      <span>
+                        <strong className="uppercase tracking-wider text-[11px]">
+                          {isLateMod
+                            ? "Late Modification (<14 Days Before Event):"
+                            : "Client Modification Needs Review:"}
+                        </strong>{" "}
+                        {isLateMod
+                          ? "Requested inside the 14-day cutoff window. Verify market inventory before confirming."
+                          : `${actionableModCount} client menu/headcount update awaiting coordinator confirmation.`}
+                      </span>
+                    </div>
+                    {overviewTab !== "menu" && (
+                      <button
+                        type="button"
+                        onClick={() => setOverviewTab("menu")}
+                        className="px-2.5 py-1 rounded-md bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer shrink-0"
+                      >
+                        Review Request →
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {cleanAllergies && overviewTab !== "menu" && (
+                  <div className="p-2.5 px-3.5 bg-orange-50/90 dark:bg-orange-950/30 border border-orange-200/70 dark:border-orange-800/40 rounded-xl flex items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <AlertCircle
+                        aria-hidden="true"
+                        className="w-4 h-4 text-orange-600 dark:text-orange-400 shrink-0"
+                      />
+                      <p className="text-orange-900 dark:text-orange-200 truncate">
+                        <strong className="uppercase tracking-wider text-[10px] mr-1.5">
+                          Food Allergies:
+                        </strong>
+                        {cleanAllergies}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setOverviewTab("menu")}
+                      className="text-[10px] font-bold uppercase tracking-wider text-orange-700 dark:text-orange-300 hover:underline shrink-0 cursor-pointer"
+                    >
+                      Details →
+                    </button>
+                  </div>
+                )}
+
+                {isCancelled && (
+                  <div className="p-2.5 px-3.5 bg-red-50 dark:bg-red-950/30 border border-red-200/70 dark:border-red-800/40 rounded-xl flex items-center gap-2 text-xs">
+                    <XCircle
+                      aria-hidden="true"
+                      className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0"
+                    />
+                    <p className="text-red-900 dark:text-red-200">
+                      <strong className="uppercase tracking-wider text-[10px] mr-1.5">
+                        Cancellation Reason:
+                      </strong>
+                      <span className="italic">
+                        &ldquo;
+                        {selectedBooking.cancellation_reason &&
+                        selectedBooking.cancellation_reason.trim() !== ""
+                          ? selectedBooking.cancellation_reason
+                          : "No reason provided"}
+                        &rdquo;
+                      </span>
+                    </p>
+                  </div>
+                )}
+
+                {/* TAB 1: PAYMENTS & BILLING */}
+                {overviewTab === "payments" && (() => {
+                  let deadlineStr = "N/A";
+                  let daysRemaining: number | null = null;
+                  if (selectedBooking.event_date) {
+                    const evDate = new Date(`${selectedBooking.event_date}T12:00:00`);
+                    if (!isNaN(evDate.getTime())) {
+                      const dl = new Date(evDate);
+                      dl.setDate(dl.getDate() - 15);
+                      deadlineStr = dl.toLocaleDateString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      });
+                      daysRemaining = Math.ceil(
+                        (dl.getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+                      );
+                    }
+                  }
+
+                  const preOT = selectedBooking.overtime_info?.prebooked;
+                  const dayOT = selectedBooking.overtime_info?.day_of;
+                  const preFee = Number(preOT?.total_prebooked_fee) || 0;
+                  const dayFee = Number(dayOT?.total_day_of_fee) || 0;
+
+                  const prebookedItems: { label: string; fee?: number }[] = [
+                    preOT?.catering_hours > 0
+                      ? {
+                          label: `Catering (${preOT.catering_hours}h)`,
+                          fee: preOT.catering_fee || preOT.catering_hours * 4000,
+                        }
+                      : null,
+                    preOT?.sounds_lights_hours > 0
+                      ? {
+                          label: `Sounds & Lights (${preOT.sounds_lights_hours}h)`,
+                          fee:
+                            preOT.sounds_lights_fee || preOT.sounds_lights_hours * 1500,
+                        }
+                      : null,
+                    preOT?.photo_booth_hours > 0
+                      ? {
+                          label: `Photo Booth (${preOT.photo_booth_hours}h)`,
+                          fee: preOT.photo_booth_fee || preOT.photo_booth_hours * 1000,
+                        }
+                      : null,
+                    preOT?.emcee_hours > 0
+                      ? {
+                          label: `Emcee (${preOT.emcee_hours}h)`,
+                          fee: preOT.emcee_fee || preOT.emcee_hours * 500,
+                        }
+                      : null,
+                    preOT?.coordinators_hours > 0
+                      ? {
+                          label: `Coordinators (${preOT.coordinators_hours}h)`,
+                          fee:
+                            preOT.coordinators_fee ||
+                            preOT.coordinators_hours *
+                              (preOT.coordinators_count || 2) *
+                              300,
+                        }
+                      : null,
+                    preOT?.photo_video_hours > 0
+                      ? {
+                          label: `Photo & Video (${preOT.photo_video_hours}h)`,
+                          fee: preOT.photo_video_fee || preOT.photo_video_hours * 2500,
+                        }
+                      : null,
+                    preOT?.mobile_bar_hours > 0
+                      ? {
+                          label: `Mobile Bar (${preOT.mobile_bar_hours}h)`,
+                          fee: preOT.mobile_bar_fee || preOT.mobile_bar_hours * 1500,
+                        }
+                      : null,
+                  ].filter(Boolean) as { label: string; fee?: number }[];
+
+                  if (
+                    prebookedItems.length === 0 &&
+                    Array.isArray(selectedBooking.selected_add_ons)
+                  ) {
+                    selectedBooking.selected_add_ons.forEach((a: string) => {
+                      if (typeof a === "string" && a.toLowerCase().includes("overtime")) {
+                        prebookedItems.push({
+                          label: a.replace(/Overtime:\s*/i, "").trim(),
+                        });
+                      }
+                    });
+                  }
 
                   return (
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                      <div className="flex items-start gap-2">
-                        <Calendar className="w-3.5 h-3.5 text-natural-accent mt-0.5 shrink-0" />
-                        <div>
-                          <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-wider">
-                            Date & Time
-                          </p>
-                          <p className="font-semibold text-natural-text-main text-xs">
-                            {formatEventDate(selectedBooking.event_date)} at{" "}
-                            {formatEventTime(selectedBooking.event_time)}
-                          </p>
-                          {(() => {
-                            const preCatering = Number(selectedBooking.overtime_info?.prebooked?.catering_hours) || 0;
-                            const win = calculateServiceWindow(selectedBooking.event_time, preCatering);
-                            return (
-                              <p className="text-[10px] text-natural-accent font-semibold mt-0.5 flex items-center gap-1">
-                                <Clock className="w-3 h-3 shrink-0" />
-                                {win.standardWindowText} ({4 + preCatering}h window)
+                    <div
+                      role="tabpanel"
+                      id="overview-panel-payments"
+                      aria-labelledby="overview-tab-payments"
+                      className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start"
+                    >
+                      {/* LEFT: Deposit Verification + Itemized Cost Breakdown */}
+                      <div className="lg:col-span-6 space-y-3.5">
+                        {/* Date Lock Deposit Card */}
+                        <div className="p-4 bg-natural-card border border-natural-border rounded-xl space-y-3 shadow-2xs">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <h4 className="text-xs font-bold text-natural-text-main flex items-center gap-1.5 uppercase tracking-wider">
+                              <CreditCard
+                                aria-hidden="true"
+                                className="w-4 h-4 text-natural-accent"
+                              />
+                              Date Lock Deposit ({is50Percent ? "50%" : "20%"})
+                            </h4>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider bg-natural-bg text-natural-text-light border border-natural-border">
+                                {is50Percent ? "Standard 50%" : "Installment 20%"}
+                              </span>
+                              <span
+                                className={cn(
+                                  "text-[10px] font-bold px-2.5 py-0.5 rounded uppercase tracking-wider border",
+                                  isDepositVerified
+                                    ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
+                                    : payment.receipt_url
+                                      ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60"
+                                      : "bg-natural-bg text-natural-text-light border-natural-border"
+                                )}
+                              >
+                                {isDepositVerified
+                                  ? "Deposit Paid"
+                                  : payment.receipt_url
+                                    ? "Pending Review"
+                                    : "Unpaid"}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                            <dl className="space-y-1.5">
+                              <div className="flex justify-between items-center gap-2">
+                                <dt className="text-natural-text-light">Method:</dt>
+                                <dd className="font-semibold text-natural-text-main text-right">
+                                  {payment.payment_method || "Not selected"}
+                                </dd>
+                              </div>
+                              <div className="flex justify-between items-center gap-2">
+                                <dt className="text-natural-text-light">Reference:</dt>
+                                <dd className="font-mono font-bold text-natural-accent text-right truncate">
+                                  {payment.reference_number || "None provided"}
+                                </dd>
+                              </div>
+                              <div className="flex justify-between items-center gap-2">
+                                <dt className="text-natural-text-light">Contract:</dt>
+                                <dd className="font-semibold text-emerald-600 dark:text-emerald-400 text-right">
+                                  {payment.terms_accepted
+                                    ? "✓ Signed"
+                                    : "Agreed on Submit"}
+                                </dd>
+                              </div>
+                            </dl>
+
+                            <div>
+                              {payment.receipt_url ? (
+                                <div className="flex items-center justify-between gap-2 bg-natural-bg/70 dark:bg-natural-sidebar/50 p-2.5 rounded-lg border border-natural-border">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <img
+                                      src={payment.receipt_url}
+                                      alt="Deposit receipt slip thumbnail"
+                                      className="w-10 h-10 object-cover rounded-md border border-natural-border cursor-pointer hover:opacity-80 transition-opacity shrink-0"
+                                      onError={(e) => {
+                                        (e.target as HTMLImageElement).src =
+                                          "https://images.unsplash.com/photo-1554415707-9e4c07d3882d?auto=format&fit=crop&q=80&w=800";
+                                      }}
+                                      onClick={() =>
+                                        setViewingReceipt({
+                                          url: payment.receipt_url,
+                                          bookingName: clientName,
+                                          ref: payment.reference_number,
+                                          method: payment.payment_method,
+                                          amount: downpaymentDue,
+                                          title: `${is50Percent ? "50%" : "20%"} Reservation Deposit Slip`,
+                                        })
+                                      }
+                                    />
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-bold text-natural-text-main truncate">
+                                        Deposit Slip
+                                      </p>
+                                      <p className="text-[11px] font-serif font-bold text-natural-accent">
+                                        ₱{downpaymentDue.toLocaleString()}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    aria-label="Inspect deposit receipt slip"
+                                    onClick={() =>
+                                      setViewingReceipt({
+                                        url: payment.receipt_url,
+                                        bookingName: clientName,
+                                        ref: payment.reference_number,
+                                        method: payment.payment_method,
+                                        amount: downpaymentDue,
+                                        title: `${is50Percent ? "50%" : "20%"} Reservation Deposit Slip`,
+                                      })
+                                    }
+                                    className="min-h-7 px-2.5 py-1.5 bg-natural-accent hover:bg-natural-accent/90 text-white text-[11px] font-bold uppercase tracking-wider rounded-md transition-all flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
+                                  >
+                                    <Eye aria-hidden="true" className="w-3 h-3" /> Inspect
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="p-2.5 bg-amber-500/10 rounded-lg border border-amber-500/20 text-center">
+                                  <p className="text-xs text-amber-700 dark:text-amber-400 italic">
+                                    No deposit slip uploaded yet.
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {isDepositVerified && (
+                            <div className="pt-2 border-t border-natural-border/60">
+                              <div className="w-full py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5">
+                                <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" />
+                                Deposit Confirmed &amp; Date Locked
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Itemized Cost Ledger */}
+                        <div className="p-4 bg-natural-card border border-natural-border rounded-xl space-y-2.5 shadow-2xs">
+                          <div className="flex items-center justify-between border-b border-natural-border/60 pb-2">
+                            <h4 className="text-xs font-bold text-natural-text-main uppercase tracking-wider flex items-center gap-1.5">
+                              <Receipt
+                                aria-hidden="true"
+                                className="w-3.5 h-3.5 text-natural-accent"
+                              />
+                              Itemized Cost Breakdown
+                            </h4>
+                            <span className="text-[11px] text-natural-text-light">
+                              {totalPax} Total Guests
+                            </span>
+                          </div>
+
+                          <dl className="space-y-1.5 text-xs">
+                            <div className="flex justify-between items-center gap-2">
+                              <dt className="text-natural-text-light">
+                                Base Package ({baseGuests} Pax)
+                              </dt>
+                              <dd className="font-semibold text-natural-text-main font-mono">
+                                ₱{basePrice.toLocaleString()}
+                              </dd>
+                            </div>
+
+                            {additionalPaxTotal > 0 && (
+                              <div className="flex justify-between items-center gap-2">
+                                <dt className="text-natural-text-light">
+                                  Extra Headcount (+{extraGuests} @ ₱
+                                  {addPrice.toLocaleString()})
+                                </dt>
+                                <dd className="font-semibold text-natural-text-main font-mono">
+                                  +₱{additionalPaxTotal.toLocaleString()}
+                                </dd>
+                              </div>
+                            )}
+
+                            {servicesPrice > 0 && (
+                              <div className="flex justify-between items-center gap-2">
+                                <dt className="text-natural-text-light">
+                                  Additional Services
+                                </dt>
+                                <dd className="font-semibold text-natural-text-main font-mono">
+                                  +₱{servicesPrice.toLocaleString()}
+                                </dd>
+                              </div>
+                            )}
+
+                            {(logistics.travelFee > 0 || logistics.isOutsideTaytay) && (
+                              <div className="flex justify-between items-center gap-2">
+                                <dt className="text-natural-text-light flex items-center gap-1.5">
+                                  <span>Out-of-Town Travel Fee</span>
+                                  {needsTravelFeeAssessment && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setOverviewTab("logistics")}
+                                      className="text-[10px] font-bold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer"
+                                    >
+                                      Set Fee →
+                                    </button>
+                                  )}
+                                </dt>
+                                <dd className="font-semibold text-natural-text-main font-mono">
+                                  {logistics.travelFee > 0
+                                    ? `+₱${logistics.travelFee.toLocaleString()}`
+                                    : "₱0"}
+                                </dd>
+                              </div>
+                            )}
+
+                            {(logistics.haulingFee > 0 ||
+                              logistics.requiresStairsIngress) && (
+                              <div className="flex justify-between items-center gap-2">
+                                <dt className="text-natural-text-light">
+                                  Hauling / Stairs Ingress Fee
+                                </dt>
+                                <dd className="font-semibold text-natural-text-main font-mono">
+                                  +₱{(logistics.haulingFee || 0).toLocaleString()}
+                                </dd>
+                              </div>
+                            )}
+
+                            {corkageFee > 0 && (
+                              <div className="flex justify-between items-center gap-2">
+                                <dt className="text-natural-text-light">
+                                  Corkage &amp; Outside Food (Term 8)
+                                </dt>
+                                <dd className="font-semibold text-natural-text-main font-mono">
+                                  +₱{corkageFee.toLocaleString()}
+                                </dd>
+                              </div>
+                            )}
+
+                            {preFee > 0 && (
+                              <div className="pt-1 border-t border-natural-border/40 space-y-1">
+                                <div className="flex justify-between items-center gap-2">
+                                  <dt className="text-natural-text-main font-semibold">
+                                    Pre-Booked Overtime
+                                  </dt>
+                                  <dd className="font-semibold text-natural-accent font-mono">
+                                    +₱{preFee.toLocaleString()}
+                                  </dd>
+                                </div>
+                                {prebookedItems.length > 0 && (
+                                  <p className="text-[10px] text-natural-text-light leading-relaxed">
+                                    {prebookedItems.map((it) => it.label).join(" · ")}
+                                  </p>
+                                )}
+                              </div>
+                            )}
+
+                            {dayFee > 0 && (
+                              <div className="pt-1 border-t border-natural-border/40 space-y-1">
+                                <div className="flex justify-between items-center gap-2">
+                                  <dt className="text-amber-700 dark:text-amber-400 font-semibold flex items-center gap-1.5">
+                                    <span>
+                                      Day-of Event OT ({dayOT?.billable_ot_hours}h)
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setIsDayOfOtExpanded(true);
+                                        setOverviewTab("logistics");
+                                      }}
+                                      className="text-[10px] font-bold underline cursor-pointer"
+                                    >
+                                      Edit →
+                                    </button>
+                                  </dt>
+                                  <dd className="font-semibold text-amber-600 dark:text-amber-400 font-mono">
+                                    +₱{dayFee.toLocaleString()}
+                                  </dd>
+                                </div>
+                                {Array.isArray(dayOT?.services_billed) &&
+                                  dayOT.services_billed.length > 0 && (
+                                    <p className="text-[10px] text-natural-text-light leading-relaxed">
+                                      Actual End {dayOT.actual_end_time} ·{" "}
+                                      {dayOT.services_billed
+                                        .map((s: any) => s.name)
+                                        .join(" · ")}
+                                    </p>
+                                  )}
+                              </div>
+                            )}
+                          </dl>
+
+                          <div className="pt-2.5 border-t border-natural-border grid grid-cols-3 gap-2 text-center bg-natural-bg/50 p-2.5 rounded-lg">
+                            <div>
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
+                                Total Cost
                               </p>
-                            );
-                          })()}
+                              <p className="text-sm font-bold text-natural-text-main font-serif">
+                                ₱{totalBudget.toLocaleString()}
+                              </p>
+                            </div>
+                            <div className="border-x border-natural-border px-1">
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-natural-accent">
+                                {is50Percent ? "50% Deposit" : "20% Deposit"}
+                              </p>
+                              <p className="text-sm font-bold text-natural-accent font-serif">
+                                ₱{downpaymentDue.toLocaleString()}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
+                                Balance Due
+                              </p>
+                              <p className="text-sm font-bold text-natural-text-main font-serif">
+                                ₱{finalBalanceAmount.toLocaleString()}
+                              </p>
+                            </div>
+                          </div>
                         </div>
                       </div>
 
-                      <div className="flex items-start gap-2">
-                        <MapPin className="w-3.5 h-3.5 text-natural-accent mt-0.5 shrink-0" />
-                        <div className="min-w-0">
-                          <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-wider">
-                            Location
-                          </p>
-                          <p className="font-semibold text-natural-text-main text-xs truncate">
-                            {(selectedBooking.event_location || "").split(" - ")[0]}
-                          </p>
-                          {(selectedBooking.event_location || "").split(" - ")[1] && (
-                            <p className="text-[10px] text-natural-text-light truncate">
-                              {(selectedBooking.event_location || "").split(" - ")[1]}
-                            </p>
-                          )}
-                          {false && (
-                            <p>
-                            </p>
-                          )}
-                        </div>
-                      </div>
+                      {/* RIGHT: Installment Schedule OR 15-Day Final Balance Settlement */}
+                      <div className="lg:col-span-6 space-y-3.5">
+                        {!is50Percent ? (
+                          <div className="p-4 bg-natural-card border border-natural-border rounded-xl space-y-3 shadow-2xs">
+                            <div className="flex items-center justify-between gap-2 flex-wrap border-b border-natural-border/60 pb-2.5">
+                              <div>
+                                <h4 className="text-xs font-bold text-natural-text-main flex items-center gap-1.5 uppercase tracking-wider">
+                                  <Clock
+                                    aria-hidden="true"
+                                    className="w-4 h-4 text-natural-accent"
+                                  />
+                                  Installment Breakdown Schedule
+                                </h4>
+                                <p className="text-[10px] text-natural-text-light mt-0.5">
+                                  Final cutoff strictly 15 days prior ({deadlineStr})
+                                </p>
+                              </div>
+                              <span className="text-[10px] font-bold px-2.5 py-1 rounded-md uppercase tracking-wider bg-natural-accent/10 text-natural-accent border border-natural-accent/25">
+                                Monthly Plan
+                              </span>
+                            </div>
 
-                      <div className="flex items-start gap-2">
-                        <Phone className="w-3.5 h-3.5 text-natural-accent mt-0.5 shrink-0" />
-                        <div className="min-w-0">
-                          <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-wider">
-                            Contact
-                          </p>
-                          <p className="font-semibold text-natural-text-main text-xs truncate">
-                            {selectedBooking.profiles?.phone_number ||
-                              selectedBooking.profiles?.phone ||
-                              "N/A"}
-                          </p>
-                          <p className="text-[10px] text-natural-text-light truncate">
-                            {selectedBooking.profiles?.email}
-                          </p>
-                        </div>
-                      </div>
+                            {payment.installment_schedule &&
+                            payment.installment_schedule.length > 0 ? (
+                              <div className="divide-y divide-natural-border/60 border border-natural-border rounded-xl overflow-hidden bg-natural-bg/30">
+                                {payment.installment_schedule.map(
+                                  (milestone: any, idx: number) => {
+                                    const milestoneLabel =
+                                      milestone.title ||
+                                      milestone.milestone ||
+                                      `Installment #${idx + 1}`;
+                                    const isPaid =
+                                      milestone.status === "Paid" ||
+                                      milestone.status === "Verified" ||
+                                      isFinalVerified;
+                                    const isPending =
+                                      !isPaid &&
+                                      milestone.status === "Pending Verification";
+                                    const receiptUrlToShow =
+                                      milestone.receipt_url ||
+                                      (isFinalVerified
+                                        ? payment.final_balance_receipt
+                                        : "");
+                                    const hasSlip = Boolean(receiptUrlToShow);
 
-                      <div className="flex items-start gap-2">
-                        <CreditCard className="w-3.5 h-3.5 text-natural-accent mt-0.5 shrink-0" />
-                        <div className="min-w-0">
-                          <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-wider">
-                            Estimated Budget
-                          </p>
-                          <p className="font-serif font-bold text-natural-accent text-sm leading-tight">
-                            ₱{totalBudget.toLocaleString()}
-                          </p>
-                          <p className="text-[10px] text-natural-text-light truncate">
-                            {selectedBooking.guest_count} Pax{" "}
-                            {selectedBooking.additional_pax > 0
-                              ? `(+${selectedBooking.additional_pax} extra @ ₱${addPrice.toLocaleString()})`
-                              : ""}
-                          </p>
-                        </div>
+                                    return (
+                                      <div
+                                        key={idx}
+                                        className={cn(
+                                          "flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 py-2.5 text-xs transition-colors",
+                                          isPending
+                                            ? "bg-amber-500/5"
+                                            : "hover:bg-natural-bg/60"
+                                        )}
+                                      >
+                                        <div className="flex items-center gap-2.5 min-w-0">
+                                          <span
+                                            className={cn(
+                                              "w-5 h-5 rounded-full font-bold text-[10px] flex items-center justify-center shrink-0 border",
+                                              isPaid
+                                                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
+                                                : isPending
+                                                  ? "bg-amber-500/20 text-amber-800 dark:text-amber-200 border-amber-500/40"
+                                                  : "bg-natural-card text-natural-text-light border-natural-border"
+                                            )}
+                                          >
+                                            {idx + 1}
+                                          </span>
+                                          <div className="min-w-0">
+                                            <p className="font-semibold text-natural-text-main truncate">
+                                              {milestoneLabel}
+                                            </p>
+                                            <p className="text-[10px] text-natural-text-light">
+                                              Due: {milestone.dueDate}
+                                            </p>
+                                          </div>
+                                        </div>
+
+                                        <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0">
+                                          <div className="flex items-center gap-2">
+                                            <span className="font-serif font-bold text-natural-text-main text-xs">
+                                              ₱{Number(milestone.amount).toLocaleString()}
+                                            </span>
+                                            <span
+                                              className={cn(
+                                                "text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border",
+                                                isPaid
+                                                  ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
+                                                  : isPending ||
+                                                      milestone.status === "Due Now"
+                                                    ? "bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-500/30"
+                                                    : "bg-natural-card text-natural-text-light border-natural-border"
+                                              )}
+                                            >
+                                              {isPaid
+                                                ? "Verified"
+                                                : isPending
+                                                  ? "Under Review"
+                                                  : milestone.status || "Upcoming"}
+                                            </span>
+                                          </div>
+
+                                          {(hasSlip || (!isPaid && hasSlip)) && (
+                                            <div className="flex items-center gap-1.5">
+                                              {hasSlip && (
+                                                <button
+                                                  type="button"
+                                                  aria-label={`Slip for ${milestoneLabel}`}
+                                                  onClick={() =>
+                                                    setViewingReceipt({
+                                                      url: receiptUrlToShow,
+                                                      bookingName: clientName,
+                                                      ref:
+                                                        milestone.reference_number ||
+                                                        payment.final_balance_reference,
+                                                      method:
+                                                        milestone.payment_method ||
+                                                        payment.final_balance_method,
+                                                      amount: Number(milestone.amount),
+                                                      title: `${milestoneLabel} Slip`,
+                                                    })
+                                                  }
+                                                  className="min-h-6 px-2 py-1 bg-natural-accent hover:bg-natural-accent/90 text-white text-[10px] font-bold uppercase tracking-wider rounded transition-colors flex items-center gap-1 cursor-pointer"
+                                                >
+                                                  <Eye aria-hidden="true" className="w-3 h-3" />{" "}
+                                                  Slip
+                                                </button>
+                                              )}
+                                              {!isPaid && hasSlip && (
+                                                <button
+                                                  type="button"
+                                                  aria-label={`Confirm ${milestoneLabel}`}
+                                                  onClick={() =>
+                                                    handleVerifyInstallment(
+                                                      selectedBooking.id,
+                                                      idx
+                                                    )
+                                                  }
+                                                  className="min-h-6 px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold uppercase tracking-wider rounded transition-colors flex items-center gap-1 cursor-pointer"
+                                                >
+                                                  <CheckCheck
+                                                    aria-hidden="true"
+                                                    className="w-3 h-3"
+                                                  />{" "}
+                                                  Confirm
+                                                </button>
+                                              )}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  }
+                                )}
+                              </div>
+                            ) : (
+                              <div className="p-3 bg-natural-bg/60 rounded-lg border border-natural-border text-xs text-natural-text-light space-y-1">
+                                <p className="font-semibold text-natural-text-main">
+                                  Monthly installment plan selected.
+                                </p>
+                                <p>
+                                  Remaining balance of ₱{balanceDue.toLocaleString()}{" "}
+                                  concludes strictly 15 days before the event ({deadlineStr}
+                                  ).
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="p-4 bg-natural-card border border-natural-border rounded-xl space-y-3 shadow-2xs">
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-natural-border/60 pb-2.5">
+                              <div>
+                                <h4 className="text-xs font-bold text-natural-text-main flex items-center gap-1.5 uppercase tracking-wider">
+                                  <ShieldCheck
+                                    aria-hidden="true"
+                                    className="w-4 h-4 text-natural-accent"
+                                  />
+                                  Final Balance Settlement (50%)
+                                </h4>
+                                <p className="text-[10px] text-natural-text-light mt-0.5">
+                                  15-Day Settlement Deadline: {deadlineStr}
+                                </p>
+                              </div>
+
+                              <div>
+                                {isFinalVerified ? (
+                                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                                    <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" />{" "}
+                                    Settled &amp; Verified
+                                  </span>
+                                ) : !isDepositVerified ? (
+                                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                                    <Clock aria-hidden="true" className="w-3.5 h-3.5" />{" "}
+                                    Awaiting Deposit
+                                  </span>
+                                ) : daysRemaining !== null && daysRemaining < 0 ? (
+                                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/30 flex items-center gap-1">
+                                    <AlertCircle aria-hidden="true" className="w-3.5 h-3.5" />{" "}
+                                    Overdue by {Math.abs(daysRemaining)}d
+                                  </span>
+                                ) : daysRemaining !== null && daysRemaining <= 15 ? (
+                                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                                    <Clock aria-hidden="true" className="w-3.5 h-3.5" /> Due in{" "}
+                                    {daysRemaining}d
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-natural-bg text-natural-text-light border border-natural-border">
+                                    {daysRemaining !== null
+                                      ? `Due in ${daysRemaining}d`
+                                      : "Upcoming"}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <dl className="space-y-1.5 text-xs">
+                              <div className="flex justify-between items-center gap-2">
+                                <dt className="text-natural-text-light">
+                                  Final Balance Amount:
+                                </dt>
+                                <dd className="font-bold text-natural-accent font-serif text-sm">
+                                  ₱{finalBalanceAmount.toLocaleString()}
+                                </dd>
+                              </div>
+                              <div className="flex justify-between items-center gap-2">
+                                <dt className="text-natural-text-light">Payment Method:</dt>
+                                <dd className="font-semibold text-natural-text-main">
+                                  {payment.final_balance_method || "Pending submission"}
+                                </dd>
+                              </div>
+                              <div className="flex justify-between items-center gap-2">
+                                <dt className="text-natural-text-light">
+                                  Reference Number:
+                                </dt>
+                                <dd className="font-mono font-semibold text-natural-text-main">
+                                  {payment.final_balance_reference || "N/A"}
+                                </dd>
+                              </div>
+                            </dl>
+
+                            {hasFinalReceipt ? (
+                              <div className="flex items-center justify-between gap-2.5 bg-natural-bg/70 dark:bg-natural-sidebar/50 p-2.5 rounded-lg border border-natural-border">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <img
+                                    src={payment.final_balance_receipt}
+                                    alt="Final balance receipt slip thumbnail"
+                                    className="w-10 h-10 object-cover rounded-md border border-natural-border cursor-pointer hover:opacity-80 transition-opacity shrink-0"
+                                    onError={(e) => {
+                                      (e.target as HTMLImageElement).src =
+                                        "https://images.unsplash.com/photo-1554415707-9e4c07d3882d?auto=format&fit=crop&q=80&w=800";
+                                    }}
+                                    onClick={() =>
+                                      setViewingReceipt({
+                                        url: payment.final_balance_receipt,
+                                        bookingName: clientName,
+                                        ref: payment.final_balance_reference,
+                                        method: payment.final_balance_method,
+                                        amount: finalBalanceAmount,
+                                        title: "15-Day Final Balance Slip",
+                                      })
+                                    }
+                                  />
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-bold text-natural-text-main truncate">
+                                      Final Balance Slip
+                                    </p>
+                                    <p className="text-[11px] font-serif font-bold text-natural-accent">
+                                      ₱{finalBalanceAmount.toLocaleString()}
+                                    </p>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  aria-label="Inspect final balance receipt slip"
+                                  onClick={() =>
+                                    setViewingReceipt({
+                                      url: payment.final_balance_receipt,
+                                      bookingName: clientName,
+                                      ref: payment.final_balance_reference,
+                                      method: payment.final_balance_method,
+                                      amount: finalBalanceAmount,
+                                      title: "15-Day Final Balance Slip",
+                                    })
+                                  }
+                                  className="min-h-7 px-2.5 py-1.5 bg-natural-accent hover:bg-natural-accent/90 text-white text-[11px] font-bold uppercase tracking-wider rounded-md transition-all flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
+                                >
+                                  <Eye aria-hidden="true" className="w-3 h-3" /> Inspect
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="p-2.5 bg-natural-bg/60 dark:bg-natural-sidebar/30 rounded-lg border border-natural-border text-center">
+                                <p className="text-xs text-natural-text-light italic">
+                                  No final balance slip uploaded yet.
+                                </p>
+                              </div>
+                            )}
+
+                            {isFinalVerified ? (
+                              <div className="w-full py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5">
+                                <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" />
+                                Final Balance Confirmed
+                              </div>
+                            ) : !isDepositVerified ? (
+                              <div className="w-full py-2 bg-natural-bg/50 border border-dashed border-natural-border text-natural-text-light rounded-lg text-xs font-medium flex items-center justify-center gap-1.5">
+                                <Lock aria-hidden="true" className="w-3.5 h-3.5" />
+                                <span>Unlocks after deposit is confirmed</span>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={!hasFinalReceipt}
+                                onClick={() => {
+                                  if (!hasFinalReceipt) return;
+                                  setConfirmAction({
+                                    type: "verify_final_payment",
+                                    bookingId: selectedBooking.id,
+                                    bookingName: clientName,
+                                  });
+                                }}
+                                className={cn(
+                                  "w-full py-2 px-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shadow-xs select-none",
+                                  hasFinalReceipt
+                                    ? "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+                                    : "bg-natural-bg/70 dark:bg-natural-sidebar/40 border border-natural-border text-natural-text-light/60 cursor-not-allowed opacity-75"
+                                )}
+                                title={
+                                  !hasFinalReceipt
+                                    ? "Client must upload a final balance slip before payment can be confirmed"
+                                    : "Verify and confirm final payment"
+                                }
+                              >
+                                {hasFinalReceipt ? (
+                                  <>
+                                    <CheckCheck aria-hidden="true" className="w-3.5 h-3.5" />
+                                    <span>Confirm Final Payment</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Lock aria-hidden="true" className="w-3 h-3" />
+                                    <span>Confirm (Slip Required)</span>
+                                  </>
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
                 })()}
-              </div>
 
-              {(selectedBooking.status || "Pending") === "Cancelled" && (
-                <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-100 dark:border-red-800/40 rounded-xl">
-                  <p className="text-[10px] font-bold text-red-800 dark:text-red-400 uppercase tracking-wider mb-0.5">
-                    Reason for Cancellation
-                  </p>
-                  <p className="text-xs text-red-900 dark:text-red-200 italic">
-                    "
-                    {selectedBooking.cancellation_reason &&
-                    selectedBooking.cancellation_reason.trim() !== ""
-                      ? selectedBooking.cancellation_reason
-                      : "No reason provided"}
-                    "
-                  </p>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-                {/* LEFT COLUMN: Payment Scheme & Ledger */}
-                <div className="space-y-4">
-                  {/* Venue Coverage & Custom Logistics Surcharge Card */}
-                  {(() => {
-                    const logistics = getBookingLogistics(selectedBooking);
-                    const isCancelled = (selectedBooking.status || "Pending") === "Cancelled";
-                    const totalPax =
-                      (Number(selectedBooking.guest_count) || 0) +
-                      (Number(selectedBooking.additional_pax) || 0);
-                    const autoWaiters =
-                      logistics.waiterCount || Math.max(2, Math.ceil((totalPax || 50) / 25));
-                    const floorsUp = logistics.isSecondFloorOrHigher
-                      ? Math.max(1, (logistics.floorLevel || 2) - 1)
+                {/* TAB 2: LOGISTICS & OVERTIME */}
+                {overviewTab === "logistics" && (() => {
+                  const autoWaiters =
+                    logistics.waiterCount || Math.max(2, Math.ceil((totalPax || 50) / 25));
+                  const floorsUp = logistics.isSecondFloorOrHigher
+                    ? Math.max(1, (logistics.floorLevel || 2) - 1)
+                    : 0;
+                  const recommendedHauling =
+                    logistics.isSecondFloorOrHigher && !logistics.hasElevator
+                      ? 150 * floorsUp * autoWaiters
                       : 0;
-                    const recommendedHauling =
-                      logistics.isSecondFloorOrHigher && !logistics.hasElevator
-                        ? 150 * floorsUp * autoWaiters
-                        : 0;
 
-                    return (
-                      <div className="p-4 bg-natural-card/60 border border-natural-border rounded-2xl space-y-3.5 shadow-sm">
+                  const otCalculation: import("../utils/overtimeBilling").DayOfOvertimeResult =
+                    actualEndTimeInput.trim()
+                      ? calculateDayOfOvertime(
+                          scheduledEndTime,
+                          actualEndTimeInput.trim(),
+                          selectedOTServices,
+                          otCoordinatorCount
+                        )
+                      : {
+                          valid: true,
+                          minutesOver: 0,
+                          billableOtHours: 0,
+                          servicesBilled: [],
+                          totalFee: 0,
+                          isOvertime: false,
+                        };
+
+                  const toggleService = (serviceId: string) => {
+                    setSelectedOTServices((prev) =>
+                      prev.includes(serviceId)
+                        ? prev.filter((id) => id !== serviceId)
+                        : [...prev, serviceId]
+                    );
+                  };
+
+                  return (
+                    <div
+                      role="tabpanel"
+                      id="overview-panel-logistics"
+                      aria-labelledby="overview-tab-logistics"
+                      className="space-y-4"
+                    >
+                      {/* Venue Coverage & Custom Logistics Surcharge */}
+                      <div className="p-4 bg-natural-card border border-natural-border rounded-xl space-y-3.5 shadow-2xs">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-lg bg-natural-accent/10 flex items-center justify-center text-natural-accent shrink-0">
-                              <MapPin className="w-4 h-4" />
-                            </div>
-                            <div>
-                              <h5 className="text-xs font-bold text-natural-text-main uppercase tracking-wider">
-                                Venue Coverage &amp; Logistics Surcharge
-                              </h5>
-                            </div>
-                          </div>
-
-                          {/* Out-of-Town & Logistics Badges */}
+                          <h4 className="text-xs font-bold text-natural-text-main uppercase tracking-wider flex items-center gap-1.5">
+                            <MapPin
+                              aria-hidden="true"
+                              className="w-4 h-4 text-natural-accent"
+                            />
+                            Venue Coverage &amp; Logistics Surcharge
+                          </h4>
                           <div className="flex flex-wrap items-center gap-1.5">
                             {logistics.isOutsideTaytay ? (
-                              <span className="text-[10px] font-bold px-2.5 py-1 rounded-md uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700/60">
+                              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700/60">
                                 Outside Taytay
                               </span>
                             ) : (
-                              <span className="text-[10px] font-bold px-2.5 py-1 rounded-md uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-700/60">
+                              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-700/60">
                                 Within Taytay
                               </span>
                             )}
                             {logistics.requiresStairsIngress && (
-                              <span className="text-[10px] font-bold px-2.5 py-1 rounded-md uppercase tracking-wider bg-rose-100 text-rose-800 border border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-700/60">
+                              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded uppercase tracking-wider bg-rose-100 text-rose-800 border border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-700/60">
                                 Stairs Ingress Required
+                              </span>
+                            )}
+                            {logistics.hasLechonTable && (
+                              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded uppercase tracking-wider bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                                +1 Lechon Chopper Assigned
                               </span>
                             )}
                           </div>
                         </div>
 
-                        {/* Accessibility Questionnaire Summary */}
-                        <div className="grid grid-cols-3 gap-2 p-2.5 bg-natural-card rounded-xl border border-natural-border text-xs">
+                        <div className="grid grid-cols-3 gap-2 p-2.5 bg-natural-bg/50 rounded-lg border border-natural-border text-xs">
                           <div>
                             <p className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
                               Floor Level
@@ -3964,7 +5120,7 @@ export function BookingPage() {
                                 : "Ground Floor"}
                             </p>
                           </div>
-                          <div className="border-x border-natural-border px-2">
+                          <div className="border-x border-natural-border px-2.5">
                             <p className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
                               Elevator
                             </p>
@@ -3978,101 +5134,88 @@ export function BookingPage() {
                           </div>
                           <div className="pl-1">
                             <p className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
-                              Staff Count
+                              Crew Roster
                             </p>
                             <p className="font-semibold text-natural-text-main mt-0.5">
-                              {autoWaiters + (logistics.hasLechonTable ? 1 : 0)} Staff ({autoWaiters} Waiters{logistics.hasLechonTable ? " + 1 Chopper" : ""})
+                              {autoWaiters + (logistics.hasLechonTable ? 1 : 0)} Staff (
+                              {autoWaiters} Waiters
+                              {logistics.hasLechonTable ? " + 1 Chopper" : ""})
                             </p>
                           </div>
                         </div>
 
-                        {/* Event Crew Roster: Dedicated Lechon Chopper Assignment */}
-                        {logistics.hasLechonTable && (
-                          <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between gap-3 text-xs">
-                            <div className="flex items-center gap-2.5">
-                              <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-500 flex items-center justify-center font-bold text-xs shrink-0">
-                                🍗
-                              </div>
-                              <div>
-                                <p className="font-bold text-natural-text-main">
-                                  1 Designated Lechon Chopper Waiter Assigned
-                                </p>
-                                <p className="text-[11px] text-natural-text-light">
-                                  Crew roster automatically allocated to the lechon carving station (Contract Term 8).
-                                </p>
-                              </div>
+                        {hasCorkage && corkageData && (
+                          <div className="p-3 bg-natural-bg/40 rounded-lg border border-natural-border space-y-2 text-xs">
+                            <div className="flex items-center justify-between border-b border-natural-border/60 pb-1.5">
+                              <span className="font-bold text-natural-accent uppercase tracking-wider text-[10px] flex items-center gap-1.5">
+                                <Wine aria-hidden="true" className="w-3.5 h-3.5" /> Corkage
+                                &amp; Outside Food Services (Term 8)
+                              </span>
+                              <span className="font-serif font-bold text-natural-text-main">
+                                Total: ₱{corkageFee.toLocaleString()}
+                              </span>
                             </div>
-                            <span className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/30 shrink-0">
-                              Designated Crew
-                            </span>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              {corkageData.hasLechonTable && (
+                                <div className="p-2 bg-natural-card border border-natural-border rounded-lg">
+                                  <div className="flex justify-between font-bold text-natural-text-main">
+                                    <span>Lechon Table Setup</span>
+                                    <span className="text-natural-accent">₱1,500</span>
+                                  </div>
+                                  <p className="text-[10px] text-natural-text-light mt-0.5">
+                                    Half table, 50 plates, warmer, board &amp; chopper
+                                  </p>
+                                </div>
+                              )}
+                              {corkageData.alcoholicBeveragesCount > 0 && (
+                                <div className="p-2 bg-natural-card border border-natural-border rounded-lg">
+                                  <div className="flex justify-between font-bold text-natural-text-main">
+                                    <span>Alcoholic Corkage</span>
+                                    <span className="text-natural-accent">
+                                      ₱
+                                      {(
+                                        corkageData.alcoholicBeveragesCount * 400
+                                      ).toLocaleString()}
+                                    </span>
+                                  </div>
+                                  <p className="text-[10px] text-natural-text-light mt-0.5">
+                                    {corkageData.alcoholicBeveragesCount} bottle(s) @ ₱400
+                                  </p>
+                                </div>
+                              )}
+                              {corkageData.outsideFoodCount > 0 && (
+                                <div className="p-2 bg-natural-card border border-natural-border rounded-lg">
+                                  <div className="flex justify-between font-bold text-natural-text-main">
+                                    <span>Outside Food Corkage</span>
+                                    <span className="text-natural-accent">
+                                      ₱
+                                      {(
+                                        corkageData.outsideFoodCount * 400
+                                      ).toLocaleString()}
+                                    </span>
+                                  </div>
+                                  <p className="text-[10px] text-natural-text-light mt-0.5">
+                                    {corkageData.outsideFoodCount} dish(es) @ ₱400 ·{" "}
+                                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                                      ✓ Waiver Signed
+                                    </span>
+                                  </p>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         )}
 
-                        {/* Corkage & Outside Food Surcharges (Contract Term 8 & 15) */}
-                        {(() => {
-                          const corkage = selectedBooking.corkage_info || logistics.corkage || null;
-                          const hasCorkage = corkage && (corkage.hasLechonTable || corkage.alcoholicBeveragesCount > 0 || corkage.outsideFoodCount > 0);
-                          if (!hasCorkage) return null;
-
-                          return (
-                            <div className="p-3.5 bg-natural-card rounded-xl border border-natural-border space-y-2.5 text-xs">
-                              <div className="flex items-center justify-between border-b border-natural-border pb-2">
-                                <span className="font-bold text-natural-accent uppercase tracking-wider text-[11px] flex items-center gap-1.5">
-                                  <Wine className="w-3.5 h-3.5" /> Corkage &amp; Outside Food Services (Term 8)
-                                </span>
-                                <span className="font-serif font-bold text-natural-text-main text-xs">
-                                  Total Corkage: ₱{(corkage.totalCorkageFee || 0).toLocaleString()}
-                                </span>
-                              </div>
-                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                                {corkage.hasLechonTable && (
-                                  <div className="p-2 bg-natural-bg/60 border border-natural-border rounded-lg">
-                                    <div className="flex justify-between items-center font-bold text-natural-text-main">
-                                      <span>Lechon Table Setup</span>
-                                      <span className="text-natural-accent">₱1,500</span>
-                                    </div>
-                                    <p className="text-[10px] text-natural-text-light mt-0.5">
-                                      Half table, 50 plates, warmer, board &amp; 1 chopper waiter
-                                    </p>
-                                  </div>
-                                )}
-                                {corkage.alcoholicBeveragesCount > 0 && (
-                                  <div className="p-2 bg-natural-bg/60 border border-natural-border rounded-lg">
-                                    <div className="flex justify-between items-center font-bold text-natural-text-main">
-                                      <span>Alcoholic Corkage</span>
-                                      <span className="text-natural-accent">₱{(corkage.alcoholicBeveragesCount * 400).toLocaleString()}</span>
-                                    </div>
-                                    <p className="text-[10px] text-natural-text-light mt-0.5">
-                                      {corkage.alcoholicBeveragesCount} bottle(s) @ ₱400 (Ice, water, &amp; glassware included)
-                                    </p>
-                                  </div>
-                                )}
-                                {corkage.outsideFoodCount > 0 && (
-                                  <div className="p-2 bg-natural-bg/60 border border-natural-border rounded-lg">
-                                    <div className="flex justify-between items-center font-bold text-natural-text-main">
-                                      <span>Outside Food Corkage</span>
-                                      <span className="text-natural-accent">₱{(corkage.outsideFoodCount * 400).toLocaleString()}</span>
-                                    </div>
-                                    <p className="text-[10px] text-natural-text-light mt-0.5">
-                                      {corkage.outsideFoodCount} dish(es) @ ₱400 (Extra chafing warmer included)
-                                    </p>
-                                    <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold mt-1">
-                                      ✓ Health Risk Waiver Signed
-                                    </p>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })()}
-
-                        {/* Custom Logistics Surcharge Inputs */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div className="space-y-1">
-                            <label className="block text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
+                            <label
+                              htmlFor="custom-travel-fee-input"
+                              className="block text-[10px] font-bold uppercase tracking-wider text-natural-text-light"
+                            >
                               Out-of-Town Travel Fee (₱)
                             </label>
                             <input
+                              id="custom-travel-fee-input"
                               type="number"
                               min="0"
                               step="100"
@@ -4081,9 +5224,9 @@ export function BookingPage() {
                               onChange={(e) => setCustomTravelFeeInput(e.target.value)}
                               placeholder="0"
                               className={cn(
-                                "w-full px-3 py-2 text-xs font-semibold bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent",
+                                "w-full px-3 py-2 text-xs font-semibold bg-natural-bg/60 border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent",
                                 (isCancelled || isSavingLogistics) &&
-                                  "opacity-60 cursor-not-allowed bg-natural-bg/50"
+                                  "opacity-60 cursor-not-allowed"
                               )}
                             />
                             <p className="text-[10px] text-natural-text-light">
@@ -4095,7 +5238,10 @@ export function BookingPage() {
 
                           <div className="space-y-1">
                             <div className="flex items-center justify-between">
-                              <label className="block text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
+                              <label
+                                htmlFor="custom-hauling-fee-input"
+                                className="block text-[10px] font-bold uppercase tracking-wider text-natural-text-light"
+                              >
                                 Hauling / Stairs Fee (₱)
                               </label>
                               {!isCancelled &&
@@ -4113,6 +5259,7 @@ export function BookingPage() {
                                 )}
                             </div>
                             <input
+                              id="custom-hauling-fee-input"
                               type="number"
                               min="0"
                               step="150"
@@ -4121,9 +5268,9 @@ export function BookingPage() {
                               onChange={(e) => setCustomHaulingFeeInput(e.target.value)}
                               placeholder="0"
                               className={cn(
-                                "w-full px-3 py-2 text-xs font-semibold bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent",
+                                "w-full px-3 py-2 text-xs font-semibold bg-natural-bg/60 border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent",
                                 (isCancelled || isSavingLogistics) &&
-                                  "opacity-60 cursor-not-allowed bg-natural-bg/50"
+                                  "opacity-60 cursor-not-allowed"
                               )}
                             />
                             <p className="text-[10px] text-natural-text-light">
@@ -4132,11 +5279,12 @@ export function BookingPage() {
                           </div>
                         </div>
 
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-natural-border/60">
                           <div className="text-xs">
                             {isCancelled ? (
                               <span className="text-amber-700 dark:text-amber-400 font-semibold text-[11px] flex items-center gap-1">
-                                <Lock className="w-3.5 h-3.5" /> Logistics locked (Booking is cancelled)
+                                <Lock aria-hidden="true" className="w-3.5 h-3.5" /> Logistics
+                                locked (Booking is cancelled)
                               </span>
                             ) : logisticsSaveMessage ? (
                               <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
@@ -4148,7 +5296,8 @@ export function BookingPage() {
                                 <strong className="text-natural-text-main font-serif">
                                   ₱
                                   {(
-                                    (logistics.travelFee || 0) + (logistics.haulingFee || 0)
+                                    (logistics.travelFee || 0) +
+                                    (logistics.haulingFee || 0)
                                   ).toLocaleString()}
                                 </strong>
                               </span>
@@ -4158,7 +5307,7 @@ export function BookingPage() {
                             type="button"
                             disabled={isSavingLogistics || isCancelled}
                             onClick={() => handleSaveLogisticsSurcharge(selectedBooking.id)}
-                            className="px-3.5 py-2 bg-natural-accent hover:bg-natural-accent/90 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-all shadow-2xs shrink-0"
+                            className="px-3.5 py-2 bg-natural-accent hover:bg-natural-accent/90 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-all shadow-2xs shrink-0 cursor-pointer"
                           >
                             {isSavingLogistics
                               ? "Saving..."
@@ -4168,1086 +5317,734 @@ export function BookingPage() {
                           </button>
                         </div>
                       </div>
-                    );
-                  })()}
 
-              {/* Day-of Event Timer & OT Calculator Card (Contract Term: 1 minute = 1 hour OT) */}
-                  {(() => {
-                    const prebookedCatering = Number(selectedBooking.overtime_info?.prebooked?.catering_hours) || 0;
-                    const serviceWin = calculateServiceWindow(selectedBooking.event_time, prebookedCatering);
-                    const scheduledEndTime = serviceWin.extendedEndTimeLabel;
-
-                    const otCalculation: import("../utils/overtimeBilling").DayOfOvertimeResult = actualEndTimeInput.trim()
-                      ? calculateDayOfOvertime(
-                          scheduledEndTime,
-                          actualEndTimeInput.trim(),
-                          selectedOTServices,
-                          otCoordinatorCount
-                        )
-                      : {
-                          valid: true,
-                          minutesOver: 0,
-                          billableOtHours: 0,
-                          servicesBilled: [],
-                          totalFee: 0,
-                          isOvertime: false,
-                        };
-
-                    const dayOfInfo = selectedBooking.overtime_info?.day_of;
-                    const isAlreadyApplied = Boolean(dayOfInfo?.total_day_of_fee !== undefined && dayOfInfo?.applied_at);
-
-                    const toggleService = (serviceId: string) => {
-                      setSelectedOTServices((prev) =>
-                        prev.includes(serviceId)
-                          ? prev.filter((id) => id !== serviceId)
-                          : [...prev, serviceId]
-                      );
-                    };
-
-                    return (
-                      <div id="day-of-ot-calculator-section" className="p-4 bg-natural-card/60 border border-natural-border rounded-2xl space-y-3.5 shadow-sm">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
+                      {/* Context-Aware Day-of Overtime Calculator (<details> Disclosure) */}
+                      <details
+                        id="day-of-ot-calculator-section"
+                        open={isDayOfOtExpanded}
+                        onToggle={(e) => setIsDayOfOtExpanded(e.currentTarget.open)}
+                        className="group bg-natural-card border border-natural-border rounded-xl shadow-2xs overflow-hidden"
+                      >
+                        <summary className="list-none px-4 py-3 cursor-pointer hover:bg-natural-bg/40 transition-colors flex flex-wrap items-center justify-between gap-2 select-none focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-natural-accent">
                           <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-lg bg-natural-accent/10 flex items-center justify-center text-natural-accent shrink-0">
-                              <Clock className="w-4 h-4" />
-                            </div>
+                            <Clock
+                              aria-hidden="true"
+                              className="w-4 h-4 text-natural-accent shrink-0"
+                            />
                             <div>
-                              <h5 className="text-xs font-bold text-natural-text-main uppercase tracking-wider">
+                              <span className="text-xs font-bold text-natural-text-main uppercase tracking-wider block">
                                 Day-of Event Timer &amp; Overtime Calculator
-                              </h5>
-                              <p className="text-[10px] text-natural-text-light">
-                                Catering Contract Rule: &ldquo;1 minute equals 1 hour OT&rdquo;
-                              </p>
+                              </span>
+                              <span className="text-[10px] text-natural-text-light block">
+                                {isConfirmed
+                                  ? "Contract Rule: 1 minute past scheduled end equals 1 hour OT"
+                                  : `Scheduled window: ${serviceWin.startTimeLabel} – ${scheduledEndTime} · Click to expand`}
+                              </span>
                             </div>
                           </div>
 
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                              1 min = 1 hr OT Rule
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/25">
+                              1 min = 1 hr Rule
                             </span>
-                            {isAlreadyApplied && (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                                OT Applied (₱{(dayOfInfo.total_day_of_fee || 0).toLocaleString()})
+                            {isDayOfOtApplied && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25">
+                                OT Applied (₱
+                                {(dayOfInfo?.total_day_of_fee || 0).toLocaleString()})
                               </span>
                             )}
+                            <ChevronDown
+                              aria-hidden="true"
+                              className="w-4 h-4 text-natural-text-light transition-transform duration-200 group-open:rotate-180"
+                            />
                           </div>
-                        </div>
+                        </summary>
 
-                        {/* Timing Overview Grid */}
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 p-3 bg-natural-card rounded-xl border border-natural-border text-xs">
-                          <div>
-                            <p className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
-                              Start Time
-                            </p>
-                            <p className="font-semibold text-natural-text-main mt-0.5">
-                              {serviceWin.startTimeLabel}
-                            </p>
-                            <p className="text-[10px] text-natural-text-light">Standard 4h package</p>
-                          </div>
+                        <div className="p-4 pt-3 border-t border-natural-border/60 space-y-3.5">
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 p-3 bg-natural-bg/50 rounded-xl border border-natural-border text-xs">
+                            <div>
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
+                                Start Time
+                              </p>
+                              <p className="font-semibold text-natural-text-main mt-0.5">
+                                {serviceWin.startTimeLabel}
+                              </p>
+                              <p className="text-[10px] text-natural-text-light">
+                                Standard 4h package
+                              </p>
+                            </div>
 
-                          <div className="border-y sm:border-y-0 sm:border-x border-natural-border py-1 sm:py-0 sm:px-2.5">
-                            <p className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
-                              Scheduled End Time
-                            </p>
-                            <p className="font-semibold text-natural-text-main mt-0.5">
-                              {scheduledEndTime}
-                            </p>
-                            <p className="text-[10px] text-natural-text-light">
-                              {prebookedCatering > 0 ? `4h + ${prebookedCatering}h pre-booked` : "4-hour service window"}
-                            </p>
-                          </div>
+                            <div className="border-y sm:border-y-0 sm:border-x border-natural-border py-1.5 sm:py-0 sm:px-2.5">
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
+                                Scheduled End Time
+                              </p>
+                              <p className="font-semibold text-natural-text-main mt-0.5">
+                                {scheduledEndTime}
+                              </p>
+                              <p className="text-[10px] text-natural-text-light">
+                                {prebookedCatering > 0
+                                  ? `4h + ${prebookedCatering}h pre-booked`
+                                  : "4-hour service window"}
+                              </p>
+                            </div>
 
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold uppercase tracking-wider text-natural-accent block">
-                              Actual End Time *
-                            </label>
-                            <div className="flex items-center gap-1.5">
+                            <div className="space-y-1">
+                              <label
+                                htmlFor="actual-end-time-input"
+                                className="text-[10px] font-bold uppercase tracking-wider text-natural-accent block"
+                              >
+                                Actual End Time *
+                              </label>
                               <input
+                                id="actual-end-time-input"
                                 type="text"
                                 placeholder="e.g. 11:30 PM"
                                 value={actualEndTimeInput}
                                 onChange={(e) => setActualEndTimeInput(e.target.value)}
                                 className={cn(
-                                  "w-full px-2.5 py-1.5 text-xs font-semibold bg-natural-bg border rounded-lg text-natural-text-main focus:outline-none transition-colors",
+                                  "w-full px-2.5 py-1.5 text-xs font-semibold bg-natural-card border rounded-lg text-natural-text-main focus:outline-none transition-colors",
                                   actualEndTimeInput.trim() !== "" && !otCalculation.valid
                                     ? "border-red-500 focus:border-red-500 text-red-500"
                                     : "border-natural-border focus:border-natural-accent"
                                 )}
                               />
-                            </div>
-                            {actualEndTimeInput.trim() !== "" && !otCalculation.valid && (
-                              <p className="text-[10px] text-red-500 font-medium flex items-center gap-1 mt-1">
-                                <AlertCircle className="w-3 h-3 shrink-0" />
-                                {otCalculation.error || "Invalid time format (e.g. 03:00 PM)"}
-                              </p>
-                            )}
-                            {/* Quick times preset buttons */}
-                            <div className="flex flex-wrap gap-1 pt-1">
-                              {[
-                                scheduledEndTime,
-                                minutesTo12h(timeStringToMinutes(scheduledEndTime) + 15),
-                                minutesTo12h(timeStringToMinutes(scheduledEndTime) + 30),
-                                minutesTo12h(timeStringToMinutes(scheduledEndTime) + 60),
-                                minutesTo12h(timeStringToMinutes(scheduledEndTime) + 120),
-                              ].map((preset) => (
-                                <button
-                                  key={preset}
-                                  type="button"
-                                  onClick={() => setActualEndTimeInput(preset)}
-                                  className="text-[9px] px-1.5 py-0.5 rounded bg-natural-bg hover:bg-natural-accent/10 border border-natural-border text-natural-text-light hover:text-natural-accent transition-colors"
-                                >
-                                  {preset}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Live Overtime Calculation Callout */}
-                        {actualEndTimeInput.trim() !== "" && (
-                          otCalculation.valid ? (
-                            <div className={`p-3 rounded-xl border text-xs space-y-1 ${
-                              otCalculation.isOvertime
-                                ? "bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-200"
-                                : "bg-emerald-500/10 border-emerald-500/30 text-emerald-800 dark:text-emerald-200"
-                            }`}>
-                              {otCalculation.isOvertime ? (
-                                <div>
-                                  <div className="flex items-center gap-1.5 font-bold text-amber-700 dark:text-amber-300">
-                                    <AlertTriangle className="w-4 h-4 shrink-0" />
-                                    <span>Overtime Detected: {otCalculation.minutesOver} Minutes Past Scheduled End</span>
-                                  </div>
-                                  <p className="text-[11px] mt-1 leading-relaxed text-natural-text-main">
-                                    Applying contract rule (<em>1 minute = 1 hour OT</em>):{" "}
-                                    <strong className="text-amber-600 dark:text-amber-400 font-bold">
-                                      {otCalculation.billableOtHours} billable overtime hour{otCalculation.billableOtHours > 1 ? "s" : ""}
-                                    </strong>.
-                                  </p>
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-1.5 font-bold text-emerald-700 dark:text-emerald-300">
-                                  <CheckCheck className="w-4 h-4 shrink-0" />
-                                  <span>Event Ended On Schedule ({otCalculation.minutesOver} mins overtime • ₱0 fee)</span>
-                                </div>
+                              {actualEndTimeInput.trim() !== "" && !otCalculation.valid && (
+                                <p className="text-[10px] text-red-500 font-medium flex items-center gap-1 mt-1">
+                                  <AlertCircle
+                                    aria-hidden="true"
+                                    className="w-3 h-3 shrink-0"
+                                  />
+                                  {otCalculation.error ||
+                                    "Invalid time format (e.g. 03:00 PM)"}
+                                </p>
                               )}
-                            </div>
-                          ) : (
-                            <div className="p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-xs text-red-700 dark:text-red-300 flex items-center gap-2">
-                              <AlertCircle className="w-4 h-4 shrink-0" />
-                              <span>{otCalculation.error || "Please enter a valid time (e.g. 03:00 PM or 15:00)."}</span>
-                            </div>
-                          )
-                        )}
-
-                        {/* Services Billed Checkbox Selector */}
-                        {otCalculation.valid && otCalculation.isOvertime && (
-                          <div className="space-y-2 pt-1">
-                            <label className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block">
-                              Select Overtime Services to Bill ({otCalculation.billableOtHours} hr{otCalculation.billableOtHours > 1 ? "s" : ""}):
-                            </label>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                              {(() => {
-                                const bookingPkg = selectedBooking?.packages || packages.find((p) => p.id === selectedBooking?.package_id);
-                                const eligibleServices = OVERTIME_SERVICE_RATES.filter((srv) => {
-                                  const isPrebooked = Boolean(
-                                    (selectedBooking?.overtime_info?.prebooked as any)?.[srv.id] > 0 ||
-                                    (srv.id === "coordinators" && (selectedBooking?.overtime_info?.prebooked?.coordinators_hours || 0) > 0)
-                                  );
-                                  return isServiceIncludedInPackage(srv.id, bookingPkg) || isPrebooked;
-                                });
-                                return eligibleServices.map((srv) => {
-                                const isChecked = selectedOTServices.includes(srv.id);
-                                const count = srv.perPerson ? Math.max(1, otCoordinatorCount) : 1;
-                                const subtotal = isChecked ? otCalculation.billableOtHours * srv.rate * count : 0;
-
-                                return (
-                                  <div
-                                    key={srv.id}
-                                    onClick={() => toggleService(srv.id)}
-                                    className={`p-2.5 rounded-xl border cursor-pointer transition-all flex items-start justify-between gap-2 ${
-                                      isChecked
-                                        ? "bg-natural-accent/10 border-natural-accent/40 text-natural-text-main"
-                                        : "bg-natural-card border-natural-border text-natural-text-light hover:border-natural-border-hover"
-                                    }`}
+                              <div className="flex flex-wrap gap-1 pt-1">
+                                {[
+                                  scheduledEndTime,
+                                  minutesTo12h(timeStringToMinutes(scheduledEndTime) + 15),
+                                  minutesTo12h(timeStringToMinutes(scheduledEndTime) + 30),
+                                  minutesTo12h(timeStringToMinutes(scheduledEndTime) + 60),
+                                  minutesTo12h(timeStringToMinutes(scheduledEndTime) + 120),
+                                ].map((preset) => (
+                                  <button
+                                    key={preset}
+                                    type="button"
+                                    onClick={() => setActualEndTimeInput(preset)}
+                                    className="min-h-6 text-[10px] px-1.5 py-0.5 rounded bg-natural-card hover:bg-natural-accent/10 border border-natural-border text-natural-text-light hover:text-natural-accent transition-colors cursor-pointer"
                                   >
-                                    <div className="flex items-start gap-2 min-w-0">
-                                      <input
-                                        type="checkbox"
-                                        checked={isChecked}
-                                        onChange={() => {}} // handled by parent onClick
-                                        className="mt-0.5 rounded accent-natural-accent"
-                                      />
-                                      <div>
-                                        <p className="font-bold text-xs leading-tight">{srv.name}</p>
-                                        <p className="text-[10px] text-natural-text-light">
-                                          ₱{srv.rate.toLocaleString()}/{srv.perPerson ? "hr/pax" : "hr"}
-                                        </p>
-                                        {srv.perPerson && isChecked && (
-                                          <div
-                                            className="flex items-center gap-1 mt-1 text-[10px]"
-                                            onClick={(e) => e.stopPropagation()}
-                                          >
-                                            <span className="text-natural-text-light">Staff:</span>
-                                            <input
-                                              type="number"
-                                              min="1"
-                                              max="10"
-                                              value={otCoordinatorCount}
-                                              onChange={(e) => setOtCoordinatorCount(Math.max(1, parseInt(e.target.value) || 1))}
-                                              className="w-12 px-1 py-0.5 bg-natural-bg border border-natural-border rounded text-center text-[10px] font-bold"
-                                            />
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
+                                    {preset}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
 
-                                    <div className="text-right shrink-0">
-                                      <span className="text-[10px] block text-natural-text-light">Charge</span>
-                                      <span className={`font-serif font-bold text-xs ${isChecked ? "text-natural-accent" : "text-natural-text-light"}`}>
-                                        {isChecked ? `₱${subtotal.toLocaleString()}` : "₱0"}
+                          {actualEndTimeInput.trim() !== "" &&
+                            (otCalculation.valid ? (
+                              <div
+                                className={cn(
+                                  "p-3 rounded-xl border text-xs space-y-1",
+                                  otCalculation.isOvertime
+                                    ? "bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-200"
+                                    : "bg-emerald-500/10 border-emerald-500/30 text-emerald-800 dark:text-emerald-200"
+                                )}
+                              >
+                                {otCalculation.isOvertime ? (
+                                  <div>
+                                    <div className="flex items-center gap-1.5 font-bold text-amber-700 dark:text-amber-300">
+                                      <AlertTriangle
+                                        aria-hidden="true"
+                                        className="w-4 h-4 shrink-0"
+                                      />
+                                      <span>
+                                        Overtime Detected: {otCalculation.minutesOver} Mins
+                                        Past Scheduled End
                                       </span>
                                     </div>
+                                    <p className="text-[11px] mt-1 text-natural-text-main">
+                                      Applying contract rule (<em>1 min = 1 hr OT</em>):{" "}
+                                      <strong className="text-amber-600 dark:text-amber-400 font-bold">
+                                        {otCalculation.billableOtHours} billable overtime
+                                        hour{otCalculation.billableOtHours > 1 ? "s" : ""}
+                                      </strong>
+                                      .
+                                    </p>
                                   </div>
-                                );
-                              });
-                            })()}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Actions and Save Status */}
-                        {showRevertOTConfirm ? (
-                          <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs w-full">
-                            <div className="flex items-center gap-2 text-rose-700 dark:text-rose-300">
-                              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500" />
-                              <span>
-                                Revert and remove <strong>₱{(dayOfInfo?.total_day_of_fee || 0).toLocaleString()}</strong> overtime surcharge? This will deduct it from the final balance.
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <button
-                                type="button"
-                                disabled={isRevertingOvertime}
-                                onClick={() => handleRevertDayOfOvertime(selectedBooking.id)}
-                                className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-colors shadow-2xs flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                              >
-                                <RotateCcw className={`w-3.5 h-3.5 ${isRevertingOvertime ? "animate-spin" : ""}`} />
-                                {isRevertingOvertime ? "Reverting..." : "Yes, Revert OT"}
-                              </button>
-                              <button
-                                type="button"
-                                disabled={isRevertingOvertime}
-                                onClick={() => setShowRevertOTConfirm(false)}
-                                className="px-3 py-1.5 border border-natural-border text-natural-text-light hover:bg-natural-bg rounded-lg text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-natural-border">
-                            <div className="text-xs">
-                              {overtimeSaveMessage ? (
-                                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
-                                  {overtimeSaveMessage}
+                                ) : (
+                                  <div className="flex items-center gap-1.5 font-bold text-emerald-700 dark:text-emerald-300">
+                                    <CheckCheck
+                                      aria-hidden="true"
+                                      className="w-4 h-4 shrink-0"
+                                    />
+                                    <span>
+                                      Event Ended On Schedule ({otCalculation.minutesOver}{" "}
+                                      mins overtime · ₱0 fee)
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-xs text-red-700 dark:text-red-300 flex items-center gap-2">
+                                <AlertCircle
+                                  aria-hidden="true"
+                                  className="w-4 h-4 shrink-0"
+                                />
+                                <span>
+                                  {otCalculation.error ||
+                                    "Please enter a valid time (e.g. 03:00 PM or 15:00)."}
                                 </span>
-                              ) : (
-                                <span className="text-natural-text-light">
-                                  Day-of Overtime Fee:{" "}
-                                  <strong className="text-natural-text-main font-serif text-sm">
-                                    ₱{otCalculation.totalFee.toLocaleString()}
-                                  </strong>
-                                </span>
-                              )}
-                            </div>
+                              </div>
+                            ))}
 
-                            <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                              {isAlreadyApplied && (
+                          {otCalculation.valid && otCalculation.isOvertime && (
+                            <div className="space-y-2">
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
+                                Select Overtime Services to Bill (
+                                {otCalculation.billableOtHours} hr
+                                {otCalculation.billableOtHours > 1 ? "s" : ""}):
+                              </p>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
+                                {(() => {
+                                  const eligibleServices = OVERTIME_SERVICE_RATES.filter(
+                                    (srv) => {
+                                      const isPrebooked = Boolean(
+                                        (selectedBooking?.overtime_info?.prebooked as any)?.[
+                                          srv.id
+                                        ] > 0 ||
+                                          (srv.id === "coordinators" &&
+                                            (selectedBooking?.overtime_info?.prebooked
+                                              ?.coordinators_hours || 0) > 0)
+                                      );
+                                      return (
+                                        isServiceIncludedInPackage(srv.id, pkg) ||
+                                        isPrebooked
+                                      );
+                                    }
+                                  );
+                                  return eligibleServices.map((srv) => {
+                                    const isChecked = selectedOTServices.includes(srv.id);
+                                    const count = srv.perPerson
+                                      ? Math.max(1, otCoordinatorCount)
+                                      : 1;
+                                    const subtotal = isChecked
+                                      ? otCalculation.billableOtHours * srv.rate * count
+                                      : 0;
+
+                                    return (
+                                      <div
+                                        key={srv.id}
+                                        onClick={() => toggleService(srv.id)}
+                                        className={cn(
+                                          "p-2.5 rounded-xl border cursor-pointer transition-all flex items-start justify-between gap-2",
+                                          isChecked
+                                            ? "bg-natural-accent/10 border-natural-accent/40 text-natural-text-main"
+                                            : "bg-natural-bg/40 border-natural-border text-natural-text-light hover:border-natural-accent/30"
+                                        )}
+                                      >
+                                        <div className="flex items-start gap-2 min-w-0">
+                                          <input
+                                            type="checkbox"
+                                            aria-label={`Bill overtime for ${srv.name}`}
+                                            checked={isChecked}
+                                            onChange={() => {}}
+                                            className="mt-0.5 rounded accent-natural-accent"
+                                          />
+                                          <div>
+                                            <p className="font-bold text-xs leading-tight">
+                                              {srv.name}
+                                            </p>
+                                            <p className="text-[10px] text-natural-text-light">
+                                              ₱{srv.rate.toLocaleString()}/
+                                              {srv.perPerson ? "hr/pax" : "hr"}
+                                            </p>
+                                            {srv.perPerson && isChecked && (
+                                              <div
+                                                className="flex items-center gap-1 mt-1 text-[10px]"
+                                                onClick={(e) => e.stopPropagation()}
+                                              >
+                                                <label
+                                                  htmlFor="ot-coordinator-count-input"
+                                                  className="text-natural-text-light"
+                                                >
+                                                  Staff:
+                                                </label>
+                                                <input
+                                                  id="ot-coordinator-count-input"
+                                                  type="number"
+                                                  min="1"
+                                                  max="10"
+                                                  value={otCoordinatorCount}
+                                                  onChange={(e) =>
+                                                    setOtCoordinatorCount(
+                                                      Math.max(
+                                                        1,
+                                                        parseInt(e.target.value) || 1
+                                                      )
+                                                    )
+                                                  }
+                                                  className="w-12 px-1 py-0.5 bg-natural-card border border-natural-border rounded text-center text-[10px] font-bold"
+                                                />
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                        <div className="text-right shrink-0">
+                                          <span className="text-[10px] block text-natural-text-light">
+                                            Charge
+                                          </span>
+                                          <span
+                                            className={cn(
+                                              "font-serif font-bold text-xs",
+                                              isChecked
+                                                ? "text-natural-accent"
+                                                : "text-natural-text-light"
+                                            )}
+                                          >
+                                            {isChecked
+                                              ? `₱${subtotal.toLocaleString()}`
+                                              : "₱0"}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    );
+                                  });
+                                })()}
+                              </div>
+                            </div>
+                          )}
+
+                          {showRevertOTConfirm ? (
+                            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                              <div className="flex items-center gap-2 text-rose-700 dark:text-rose-300">
+                                <AlertTriangle
+                                  aria-hidden="true"
+                                  className="w-4 h-4 shrink-0 text-rose-500"
+                                />
+                                <span>
+                                  Revert and remove{" "}
+                                  <strong>
+                                    ₱{(dayOfInfo?.total_day_of_fee || 0).toLocaleString()}
+                                  </strong>{" "}
+                                  overtime surcharge?
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
                                 <button
                                   type="button"
-                                  disabled={isSavingOvertime || isRevertingOvertime}
-                                  onClick={() => setShowRevertOTConfirm(true)}
-                                  className="px-3 py-2 border border-rose-500/30 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                                  title="Remove day-of overtime surcharge and restore original balance"
-                                >
-                                  <RotateCcw className="w-3.5 h-3.5" />
-                                  Revert Overtime
-                                </button>
-                              )}
-
-                              <button
-                                type="button"
-                                disabled={isSavingOvertime || isRevertingOvertime || !actualEndTimeInput.trim() || !otCalculation.valid}
-                                onClick={() => handleApplyDayOfOvertime(selectedBooking.id)}
-                                className="px-4 py-2 bg-natural-accent hover:bg-natural-accent/90 disabled:opacity-50 text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-all shadow-2xs cursor-pointer"
-                              >
-                                {isSavingOvertime
-                                  ? "Applying..."
-                                  : isAlreadyApplied
-                                    ? "Update Overtime Surcharge"
-                                    : "Apply Overtime to Final Invoice"}
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                  {/* Payment Scheme & Installment Ledger Section (Catering Contract Clause 1 & Clause 16) */}
-              {(() => {
-                const payment = getBookingPayment(selectedBooking);
-                const totalBudget = calculateBudget(selectedBooking);
-                const is50Percent = payment.payment_scheme === "Standard 50%";
-
-                const downpaymentDue = getInitialDownpaymentDue(selectedBooking, payment, totalBudget);
-                const balanceDue = Math.max(0, totalBudget - downpaymentDue);
-                const finalBalanceAmount = balanceDue;
-
-                const isDepositVerified =
-                  payment.payment_status === "Verified" ||
-                  (selectedBooking.status || "Pending") === "Confirmed";
-
-                const isFinalVerified = payment.final_balance_status === "Verified";
-                const hasFinalReceipt = Boolean(payment.final_balance_receipt);
-
-                // 15-Day Balance Settlement Deadline Calculation
-                let deadlineStr = "N/A";
-                let daysRemaining: number | null = null;
-                if (selectedBooking.event_date) {
-                  const evDate = new Date(`${selectedBooking.event_date}T12:00:00`);
-                  if (!isNaN(evDate.getTime())) {
-                    const dl = new Date(evDate);
-                    dl.setDate(dl.getDate() - 15);
-                    deadlineStr = dl.toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                    });
-                    daysRemaining = Math.ceil((dl.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-                  }
-                }
-
-                return (
-                  <div className="p-5 bg-natural-card/50 border border-natural-border rounded-2xl space-y-4 shadow-sm">
-                    {/* Header */}
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-lg bg-natural-accent/10 flex items-center justify-center text-natural-accent shrink-0">
-                          <Receipt className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <h5 className="text-xs font-bold text-natural-text-main uppercase tracking-wider">
-                            Payment Scheme & Ledger
-                          </h5>
-                        </div>
-                      </div>
-                      <span
-                        className={cn(
-                          "text-xs font-bold px-2.5 py-1 rounded-md uppercase tracking-wider border shrink-0",
-                          is50Percent
-                            ? "bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20"
-                            : "bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/20"
-                        )}
-                      >
-                        {payment.payment_scheme}
-                      </span>
-                    </div>
-
-                    {/* Overtime Fee Summary in Payment Ledger - Bulleted & Balanced */}
-                    {(() => {
-                      const preOT = selectedBooking.overtime_info?.prebooked;
-                      const dayOT = selectedBooking.overtime_info?.day_of;
-                      const preFee = Number(preOT?.total_prebooked_fee) || 0;
-                      const dayFee = Number(dayOT?.total_day_of_fee) || 0;
-                      if (preFee === 0 && dayFee === 0) return null;
-
-                      const hasBoth = preFee > 0 && dayFee > 0;
-
-                      const prebookedItems: { label: string; fee?: number }[] = [
-                        preOT?.catering_hours > 0 ? { label: `Catering Service (${preOT.catering_hours}h)`, fee: preOT.catering_fee || preOT.catering_hours * 4000 } : null,
-                        preOT?.sounds_lights_hours > 0 ? { label: `Sounds & Lights (${preOT.sounds_lights_hours}h)`, fee: preOT.sounds_lights_fee || preOT.sounds_lights_hours * 1500 } : null,
-                        preOT?.photo_booth_hours > 0 ? { label: `Photo Booth (${preOT.photo_booth_hours}h)`, fee: preOT.photo_booth_fee || preOT.photo_booth_hours * 1000 } : null,
-                        preOT?.emcee_hours > 0 ? { label: `Emcee / Host (${preOT.emcee_hours}h)`, fee: preOT.emcee_fee || preOT.emcee_hours * 500 } : null,
-                        preOT?.coordinators_hours > 0 ? { label: `Coordinators (${preOT.coordinators_hours}h)`, fee: preOT.coordinators_fee || (preOT.coordinators_hours * (preOT.coordinators_count || 2) * 300) } : null,
-                        preOT?.photo_video_hours > 0 ? { label: `Photo & Video (${preOT.photo_video_hours}h)`, fee: preOT.photo_video_fee || preOT.photo_video_hours * 2500 } : null,
-                        preOT?.mobile_bar_hours > 0 ? { label: `Mobile Bar (${preOT.mobile_bar_hours}h)`, fee: preOT.mobile_bar_fee || preOT.mobile_bar_hours * 1500 } : null,
-                      ].filter(Boolean) as { label: string; fee?: number }[];
-
-                      if (prebookedItems.length === 0 && Array.isArray(selectedBooking.selected_add_ons)) {
-                        selectedBooking.selected_add_ons.forEach((a: string) => {
-                          if (typeof a === "string" && a.toLowerCase().includes("overtime")) {
-                            prebookedItems.push({ label: a.replace(/Overtime:\s*/i, "").trim() });
-                          }
-                        });
-                      }
-
-                      return (
-                        <div className="space-y-2 pt-1 pb-1">
-                          <div className="flex items-center justify-between text-xs px-0.5">
-                            <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400 font-bold text-[11px] uppercase tracking-wider">
-                              <Clock className="w-3.5 h-3.5" />
-                              <span>Overtime Billed to Final Invoice</span>
-                            </div>
-                            <span className="text-[11px] font-bold text-natural-text-light font-mono">
-                              Total OT: <strong className="text-amber-600 dark:text-amber-400 font-serif text-xs font-bold">+₱{(preFee + dayFee).toLocaleString()}</strong>
-                            </span>
-                          </div>
-
-                          <div className={`grid gap-2.5 ${hasBoth ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"}`}>
-                            {/* Pre-Booked Overtime Card */}
-                            {preFee > 0 && (
-                              <div className="p-3 bg-natural-card rounded-xl border border-natural-border shadow-2xs flex flex-col justify-between gap-2.5">
-                                <div className="space-y-1.5">
-                                  <div className="flex items-start justify-between gap-2">
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="text-[10px] font-bold uppercase tracking-wider text-natural-accent px-1.5 py-0.5 rounded bg-natural-accent/10 border border-natural-accent/20">
-                                        Pre-Booked
-                                      </span>
-                                      <span className="text-xs font-semibold text-natural-text-main">
-                                        Contract Add-ons
-                                      </span>
-                                    </div>
-                                    <span className="font-serif font-bold text-natural-text-main text-sm shrink-0">
-                                      +₱{preFee.toLocaleString()}
-                                    </span>
-                                  </div>
-
-                                  {/* Bulleted list of pre-booked overtime add-ons */}
-                                  {prebookedItems.length > 0 ? (
-                                    <ul className="space-y-1 pt-0.5">
-                                      {prebookedItems.map((item, idx) => (
-                                        <li key={idx} className="flex items-center justify-between text-xs">
-                                          <div className="flex items-center gap-1.5 text-natural-text-main">
-                                            <span className="w-1.5 h-1.5 rounded-full bg-natural-accent shrink-0" />
-                                            <span className="text-[11px] font-medium">{item.label}</span>
-                                          </div>
-                                          {item.fee ? (
-                                            <span className="text-natural-text-light font-mono text-[10px]">
-                                              +₱{item.fee.toLocaleString()}
-                                            </span>
-                                          ) : null}
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  ) : (
-                                    <p className="text-[10px] text-natural-text-light leading-snug">
-                                      Extended service window pre-booked at contract rates
-                                    </p>
-                                  )}
-                                </div>
-
-                                <div className="pt-2 border-t border-natural-border flex items-center justify-between text-[10px] text-natural-text-light">
-                                  <span>Secured at initial booking</span>
-                                  <span className="font-semibold text-natural-text-main">
-                                    {prebookedItems.length > 0 ? `${prebookedItems.length} Service${prebookedItems.length === 1 ? "" : "s"}` : "Contract Add-on"}
-                                  </span>
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Day-of Event Overtime Card */}
-                            {dayFee > 0 && (
-                              <div className="p-3 bg-amber-500/10 border border-amber-500/25 rounded-xl shadow-2xs flex flex-col justify-between gap-2.5">
-                                <div className="space-y-1.5">
-                                  <div className="flex items-start justify-between gap-2">
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/30">
-                                        Day-of Event OT
-                                      </span>
-                                      <span className="text-xs font-semibold text-natural-text-main">
-                                        {dayOT?.billable_ot_hours}h Billable OT
-                                      </span>
-                                    </div>
-                                    <span className="font-serif font-bold text-amber-600 dark:text-amber-400 text-sm shrink-0">
-                                      +₱{dayFee.toLocaleString()}
-                                    </span>
-                                  </div>
-                                  <p className="text-[10px] text-natural-text-light leading-snug">
-                                    Actual End: <strong className="text-natural-text-main">{dayOT?.actual_end_time}</strong> ({dayOT?.minutes_over} mins past scheduled end)
-                                  </p>
-
-                                  {/* Bulleted list of day-of billed overtime services */}
-                                  {Array.isArray(dayOT?.services_billed) && dayOT.services_billed.length > 0 && (
-                                    <ul className="space-y-1 pt-0.5">
-                                      {dayOT.services_billed.map((s: any, idx: number) => (
-                                        <li key={idx} className="flex items-center justify-between text-xs">
-                                          <div className="flex items-center gap-1.5 text-natural-text-main">
-                                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
-                                            <span className="text-[11px] font-medium">{s.name}</span>
-                                          </div>
-                                          <span className="text-amber-700 dark:text-amber-300 font-mono text-[10px]">
-                                            +₱{Number(s.subtotal).toLocaleString()}
-                                          </span>
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  )}
-                                </div>
-
-                                <div className="pt-2 border-t border-amber-500/20 flex items-center justify-between text-[10px] text-natural-text-light">
-                                  <div className="flex items-center gap-1.5">
-                                    <span>Billed under 1 min = 1 hr rule</span>
-                                  </div>
-                                  <span className="font-semibold text-natural-text-main">
-                                    {(() => {
-                                      const count = Array.isArray(dayOT?.services_billed) && dayOT.services_billed.length > 0
-                                        ? dayOT.services_billed.length
-                                        : 1;
-                                      return `${count} Service${count === 1 ? "" : "s"}`;
-                                    })()}
-                                  </span>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    {/* Cost Overview Grid */}
-                    <div className="grid grid-cols-3 gap-3 p-3 bg-natural-card rounded-xl border border-natural-border text-center shadow-2xs">
-                      <div>
-                        <p className="text-xs font-bold uppercase tracking-wider text-natural-text-light">
-                          Total Event Cost
-                        </p>
-                        <p className="text-sm font-bold text-natural-text-main font-serif">
-                          ₱{totalBudget.toLocaleString()}
-                        </p>
-                      </div>
-                      <div className="border-x border-natural-border px-1">
-                        <p className="text-xs font-bold uppercase tracking-wider text-natural-accent">
-                          {is50Percent ? "50% Downpayment" : "20% Deposit"}
-                        </p>
-                        <p className="text-sm font-bold text-natural-accent font-serif">
-                          ₱{downpaymentDue.toLocaleString()}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs font-bold uppercase tracking-wider text-natural-text-light">
-                          {is50Percent ? "50% Final Balance" : "Remaining Balance"}
-                        </p>
-                        <p className="text-sm font-bold text-natural-text-main font-serif">
-                          ₱{finalBalanceAmount.toLocaleString()}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Section 1: Initial Deposit Details & Slip */}
-                    <div className="space-y-3 bg-natural-card p-3.5 rounded-xl border border-natural-border shadow-2xs">
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs font-bold text-natural-text-main flex items-center gap-1.5 uppercase tracking-wider">
-                          <CreditCard className="w-4 h-4 text-natural-accent" />
-                          Date Lock Deposit ({is50Percent ? "50%" : "20%"})
-                        </p>
-                        <span
-                          className={cn(
-                            "text-xs font-bold px-2.5 py-1 rounded-md uppercase tracking-wider border",
-                            isDepositVerified
-                              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
-                              : payment.receipt_url
-                                ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60"
-                                : "bg-natural-bg text-natural-text-light border-natural-border"
-                          )}
-                        >
-                          {isDepositVerified
-                            ? "Deposit Paid"
-                            : payment.receipt_url
-                              ? "Pending Review"
-                              : "Unpaid"}
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs pt-1">
-                        <div className="space-y-1.5">
-                          <div className="flex justify-between items-center text-xs gap-2">
-                            <span className="text-natural-text-light shrink-0">Method:</span>
-                            <span className="font-semibold text-natural-text-main text-right">
-                              {payment.payment_method || "Not selected"}
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center text-xs gap-2">
-                            <span className="text-natural-text-light shrink-0">Reference:</span>
-                            <span className="font-mono font-bold text-natural-accent text-right">
-                              {payment.reference_number || "None provided"}
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-start text-xs gap-2">
-                            <span className="text-natural-text-light shrink-0">Contract Terms:</span>
-                            <span className="font-semibold text-emerald-600 dark:text-emerald-400 text-right leading-tight">
-                              {payment.terms_accepted
-                                ? "✓ Signed"
-                                : "Agreed upon Submission"}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div>
-                          {payment.receipt_url ? (
-                            <div className="flex items-center gap-2.5 bg-natural-bg/70 dark:bg-natural-sidebar/50 p-2.5 rounded-lg border border-natural-border shadow-2xs justify-between">
-                              <div className="flex items-center gap-2">
-                                <img
-                                  src={payment.receipt_url}
-                                  alt="Deposit Slip"
-                                  className="w-10 h-10 object-cover rounded-md border border-natural-border cursor-pointer hover:opacity-80 transition-opacity"
-                                  onError={(e) => {
-                                    (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1554415707-9e4c07d3882d?auto=format&fit=crop&q=80&w=800";
-                                  }}
+                                  disabled={isRevertingOvertime}
                                   onClick={() =>
-                                    setViewingReceipt({
-                                      url: payment.receipt_url,
-                                      bookingName:
-                                        selectedBooking.profiles?.name ||
-                                        selectedBooking.profiles?.full_name ||
-                                        "Client",
-                                      ref: payment.reference_number,
-                                      method: payment.payment_method,
-                                      amount: downpaymentDue,
-                                      title: `${is50Percent ? "50%" : "20%"} Reservation Deposit Slip`,
-                                    })
+                                    handleRevertDayOfOvertime(selectedBooking.id)
                                   }
-                                />
-                                <div>
-                                  <p className="text-xs font-bold text-natural-text-main">
-                                    Deposit Receipt Slip
-                                  </p>
-                                  <p className="text-xs text-natural-text-light">
-                                    ₱{downpaymentDue.toLocaleString()}
-                                  </p>
-                                </div>
+                                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                                >
+                                  <RotateCcw
+                                    aria-hidden="true"
+                                    className={cn(
+                                      "w-3.5 h-3.5",
+                                      isRevertingOvertime && "animate-spin"
+                                    )}
+                                  />
+                                  {isRevertingOvertime ? "Reverting..." : "Yes, Revert OT"}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isRevertingOvertime}
+                                  onClick={() => setShowRevertOTConfirm(false)}
+                                  className="px-3 py-1.5 border border-natural-border text-natural-text-light hover:bg-natural-bg rounded-lg text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
                               </div>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setViewingReceipt({
-                                    url: payment.receipt_url,
-                                    bookingName:
-                                      selectedBooking.profiles?.name ||
-                                      selectedBooking.profiles?.full_name ||
-                                      "Client",
-                                    ref: payment.reference_number,
-                                    method: payment.payment_method,
-                                    amount: downpaymentDue,
-                                    title: `${is50Percent ? "50%" : "20%"} Reservation Deposit Slip`,
-                                  })
-                                }
-                                className="px-2.5 py-1.5 bg-natural-accent hover:bg-natural-accent/90 text-white text-xs font-bold uppercase tracking-wider rounded-md transition-all flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
-                              >
-                                <Eye className="w-3 h-3" /> Inspect
-                              </button>
                             </div>
                           ) : (
-                            <div className="p-2.5 bg-amber-500/10 rounded-lg border border-amber-500/20 text-center">
-                              <p className="text-xs text-amber-700 dark:text-amber-400 italic">
-                                No deposit slip uploaded yet.
-                              </p>
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-natural-border/60">
+                              <div className="text-xs">
+                                {overtimeSaveMessage ? (
+                                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                                    {overtimeSaveMessage}
+                                  </span>
+                                ) : (
+                                  <span className="text-natural-text-light">
+                                    Day-of Overtime Fee:{" "}
+                                    <strong className="text-natural-text-main font-serif text-sm">
+                                      ₱{otCalculation.totalFee.toLocaleString()}
+                                    </strong>
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                {isDayOfOtApplied && (
+                                  <button
+                                    type="button"
+                                    disabled={isSavingOvertime || isRevertingOvertime}
+                                    onClick={() => setShowRevertOTConfirm(true)}
+                                    className="px-3 py-2 border border-rose-500/30 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                                  >
+                                    <RotateCcw aria-hidden="true" className="w-3.5 h-3.5" />
+                                    Revert Overtime
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  disabled={
+                                    isSavingOvertime ||
+                                    isRevertingOvertime ||
+                                    !actualEndTimeInput.trim() ||
+                                    !otCalculation.valid
+                                  }
+                                  onClick={() =>
+                                    handleApplyDayOfOvertime(selectedBooking.id)
+                                  }
+                                  className="px-4 py-2 bg-natural-accent hover:bg-natural-accent/90 disabled:opacity-50 text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-all shadow-2xs cursor-pointer"
+                                >
+                                  {isSavingOvertime
+                                    ? "Applying..."
+                                    : isDayOfOtApplied
+                                      ? "Update Overtime Surcharge"
+                                      : "Apply Overtime to Final Invoice"}
+                                </button>
+                              </div>
                             </div>
                           )}
                         </div>
-                      </div>
-
-                      {/* Stage 1 Admin Verification / Status Action */}
-                      {isDepositVerified && (
-                        <div className="pt-2 border-t border-natural-border/60">
-                          <div className="w-full py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5">
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                            Deposit Confirmed & Date Locked
-                          </div>
-                        </div>
-                      )}
+                      </details>
                     </div>
+                  );
+                })()}
 
-                    {/* Section 2: Installment Milestones (If 20% Installment Scheme) */}
-                    {!is50Percent && (
-                      <div className="space-y-2.5 bg-natural-card p-4 rounded-xl border border-purple-200 dark:border-purple-800/50 shadow-xs">
-                        <div className="flex items-center justify-between">
-                          <p className="text-xs font-bold text-purple-900 dark:text-purple-200 flex items-center gap-2 uppercase tracking-wider">
-                            <Clock className="w-4 h-4 text-purple-700 dark:text-purple-400" />
-                            Installment Breakdown Schedule
-                          </p>
-                          <span className="text-xs font-bold px-2.5 py-1 rounded-md bg-purple-100 text-purple-900 border border-purple-200 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800/50">
-                            Monthly Plan
-                          </span>
+                {/* TAB 3: MENU & CLIENT REQUESTS */}
+                {overviewTab === "menu" && (
+                  <div
+                    role="tabpanel"
+                    id="overview-panel-menu"
+                    aria-labelledby="overview-tab-menu"
+                    className="space-y-4"
+                  >
+                    {/* Client Modification Requests & History (surfaced first when present) */}
+                    {visibleModRequests.length > 0 && (
+                      <div className="p-4 bg-natural-card border border-natural-border rounded-xl space-y-3 shadow-2xs">
+                        <div className="flex items-center justify-between pb-2 border-b border-natural-border/60">
+                          <h4 className="text-xs font-bold text-natural-accent uppercase tracking-wider flex items-center gap-1.5">
+                            <Sliders aria-hidden="true" className="w-3.5 h-3.5" />
+                            Client Modifications &amp; History ({visibleModRequests.length})
+                          </h4>
+                          {isLateMod && (
+                            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30">
+                              Under 14-Day Lockout
+                            </span>
+                          )}
                         </div>
 
-                        {payment.installment_schedule &&
-                        payment.installment_schedule.length > 0 ? (
-                          <div className="space-y-2 pt-1">
-                            {payment.installment_schedule.map((milestone: any, idx: number) => {
-                              const isPaid = milestone.status === "Paid" || milestone.status === "Verified" || isFinalVerified;
-                              const isPending = !isPaid && milestone.status === "Pending Verification";
-                              const receiptUrlToShow = milestone.receipt_url || (isFinalVerified ? payment.final_balance_receipt : "");
-                              const hasSlip = Boolean(receiptUrlToShow);
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                          {[...visibleModRequests]
+                            .reverse()
+                            .map((req: any, revIdx: number) => {
+                              const origNum = visibleModRequests.length - revIdx;
+                              const isLate =
+                                req.is_late ||
+                                (req.days_before_event !== undefined &&
+                                  req.days_before_event <= 14);
+                              const isPending = req.status === "Pending";
+                              const isApplied = req.status === "Applied";
+                              const isActionable = isPending || isApplied;
+
+                              const prevMenu: string[] = Array.isArray(
+                                req.previous_menu_items
+                              )
+                                ? req.previous_menu_items
+                                : [];
+                              const reqMenu: string[] = Array.isArray(
+                                req.requested_menu_items
+                              )
+                                ? req.requested_menu_items
+                                : [];
+                              const addedDishes: string[] = Array.isArray(req.added_dishes)
+                                ? req.added_dishes
+                                : reqMenu.filter((d) => !prevMenu.includes(d));
+                              const removedDishes: string[] = Array.isArray(
+                                req.removed_dishes
+                              )
+                                ? req.removed_dishes
+                                : prevMenu.filter((d) => !reqMenu.includes(d));
+
+                              const basePaxVal =
+                                Number(req.base_guest_count) ||
+                                Number(selectedBooking.guest_count) ||
+                                50;
+                              const prevExtra = Number(req.previous_additional_pax) || 0;
+                              const reqExtra = Number(req.requested_additional_pax) || 0;
 
                               return (
                                 <div
-                                  key={idx}
-                                  className="flex flex-col sm:flex-row sm:items-center justify-between text-xs p-3 bg-purple-50/50 hover:bg-purple-50/80 dark:bg-purple-950/30 dark:hover:bg-purple-950/50 rounded-lg border border-purple-200/80 dark:border-purple-800/50 transition-colors shadow-2xs gap-2"
+                                  key={req.id || revIdx}
+                                  className="p-3 bg-natural-bg/60 border border-natural-border rounded-lg space-y-2 text-xs flex flex-col justify-between"
                                 >
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-6 h-6 rounded-full bg-purple-700 text-white dark:bg-purple-600 dark:text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs">
-                                      {idx + 1}
-                                    </div>
-                                    <div>
-                                      <p className="font-bold text-natural-text-main text-xs leading-snug">
-                                        {milestone.title || milestone.milestone || `Installment #${idx + 1}`}
-                                      </p>
-                                      <p className="text-xs font-medium text-natural-text-main/75 dark:text-natural-text-light mt-0.5">
-                                        <span className="font-semibold text-natural-text-main">Due:</span> {milestone.dueDate}
-                                      </p>
-                                    </div>
-                                  </div>
-
-                                  <div className="flex items-center justify-between sm:justify-end gap-3 pt-1 sm:pt-0 border-t sm:border-t-0 border-purple-200/50">
-                                    <div className="text-right">
-                                      <p className="font-bold text-natural-text-main font-serif text-sm">
-                                        ₱{Number(milestone.amount).toLocaleString()}
-                                      </p>
+                                  <div className="space-y-2">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="font-bold text-natural-text-main">
+                                          Modification #{origNum}
+                                        </span>
+                                        {req.created_at && (
+                                          <span className="text-[10px] text-natural-text-light">
+                                            {new Date(req.created_at).toLocaleString(
+                                              undefined,
+                                              {
+                                                month: "short",
+                                                day: "numeric",
+                                                hour: "2-digit",
+                                                minute: "2-digit",
+                                              }
+                                            )}
+                                          </span>
+                                        )}
+                                        {isLate ? (
+                                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30">
+                                            Late ({req.days_before_event}d prior)
+                                          </span>
+                                        ) : req.days_before_event !== undefined ? (
+                                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                                            {req.days_before_event}d prior
+                                          </span>
+                                        ) : null}
+                                      </div>
                                       <span
                                         className={cn(
-                                          "inline-block text-xs font-bold px-2.5 py-1 rounded uppercase tracking-wider border mt-0.5",
-                                          isPaid
-                                            ? "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700"
-                                            : isPending
-                                            ? "bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border-amber-300 dark:border-amber-700"
-                                            : milestone.status === "Due Now"
-                                            ? "bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border-amber-300 dark:border-amber-700"
-                                            : "bg-purple-100 dark:bg-purple-950/60 text-purple-900 dark:text-purple-200 border-purple-300 dark:border-purple-700"
+                                          "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border",
+                                          req.status === "Approved"
+                                            ? "bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-300 border-green-300"
+                                            : req.status === "Applied"
+                                              ? "bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border-blue-300"
+                                              : req.status === "Rejected"
+                                                ? "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300 border-red-300"
+                                                : "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 border-amber-300"
                                         )}
                                       >
-                                        {isPaid ? "Verified" : isPending ? "Under Review" : milestone.status || "Upcoming"}
+                                        {req.status === "Applied"
+                                          ? "Applied by Client"
+                                          : req.status === "Approved"
+                                            ? "Confirmed"
+                                            : req.status === "Rejected"
+                                              ? "Declined / Reverted"
+                                              : "Pending Review"}
                                       </span>
                                     </div>
 
-                                    <div className="flex items-center gap-1.5 shrink-0">
-                                      {hasSlip && (
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            setViewingReceipt({
-                                              url: receiptUrlToShow,
-                                              bookingName:
-                                                selectedBooking.profiles?.name ||
-                                                selectedBooking.profiles?.full_name ||
-                                                "Client",
-                                              ref: milestone.reference_number || payment.final_balance_reference,
-                                              method: milestone.payment_method || payment.final_balance_method,
-                                              amount: Number(milestone.amount),
-                                              title: `${milestone.title || `Installment #${idx + 1}`} Slip`,
-                                            })
-                                          }
-                                          className="px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold uppercase tracking-wider rounded-md transition-all flex items-center gap-1 shadow-2xs cursor-pointer"
-                                        >
-                                          <Eye className="w-3 h-3" /> Slip
-                                        </button>
+                                    <div className="space-y-1.5 text-natural-text-light text-[11px]">
+                                      {prevExtra !== reqExtra && (
+                                        <p>
+                                          <strong className="text-natural-text-main">
+                                            Headcount:
+                                          </strong>{" "}
+                                          {basePaxVal + prevExtra} Pax (+{prevExtra}) →{" "}
+                                          <strong className="text-natural-accent">
+                                            {basePaxVal + reqExtra} Pax (+{reqExtra})
+                                          </strong>
+                                        </p>
                                       )}
 
-                                      {!isPaid && hasSlip && (
-                                        <button
-                                          type="button"
-                                          onClick={() => handleVerifyInstallment(selectedBooking.id, idx)}
-                                          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold uppercase tracking-wider rounded-md transition-all flex items-center gap-1 shadow-2xs cursor-pointer"
-                                        >
-                                          <CheckCheck className="w-3 h-3" /> Confirm
-                                        </button>
+                                      {(addedDishes.length > 0 ||
+                                        removedDishes.length > 0) && (
+                                        <div className="space-y-1">
+                                          <strong className="text-natural-text-main block">
+                                            Dish Swap:
+                                          </strong>
+                                          <div className="flex flex-wrap items-center gap-1">
+                                            {removedDishes.map((d) => (
+                                              <span
+                                                key={`rem-${d}`}
+                                                className="px-1.5 py-0.5 bg-rose-500/10 text-rose-600 dark:text-rose-300 border border-rose-500/30 rounded text-[10px] line-through"
+                                              >
+                                                {d}
+                                              </span>
+                                            ))}
+                                            {removedDishes.length > 0 &&
+                                              addedDishes.length > 0 && (
+                                                <span className="text-natural-accent font-bold">
+                                                  →
+                                                </span>
+                                              )}
+                                            {addedDishes.map((d) => (
+                                              <span
+                                                key={`add-${d}`}
+                                                className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 rounded text-[10px] font-bold"
+                                              >
+                                                + {d}
+                                              </span>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {req.notes && (
+                                        <p className="italic text-natural-text-main bg-natural-card px-2 py-1.5 rounded border border-natural-border">
+                                          &ldquo;{req.notes}&rdquo;
+                                        </p>
+                                      )}
+
+                                      {req.review_note && (
+                                        <p className="text-rose-500 font-medium">
+                                          Coordinator Note: &ldquo;{req.review_note}&rdquo;
+                                        </p>
                                       )}
                                     </div>
                                   </div>
+
+                                  {isActionable && (
+                                    <div className="pt-2 border-t border-natural-border/50 flex items-center justify-end gap-2">
+                                      {rejectingModId === req.id ? (
+                                        <div className="flex items-center gap-1.5 w-full">
+                                          <input
+                                            type="text"
+                                            aria-label="Reason for declining modification"
+                                            placeholder={
+                                              isApplied
+                                                ? "Reason for reverting..."
+                                                : "Reason for declining..."
+                                            }
+                                            value={rejectReasonInput}
+                                            onChange={(e) =>
+                                              setRejectReasonInput(e.target.value)
+                                            }
+                                            className="flex-1 bg-natural-card border border-natural-border px-2 py-1 text-xs rounded text-natural-text-main"
+                                          />
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              handleRejectModification(
+                                                req.id,
+                                                rejectReasonInput
+                                              )
+                                            }
+                                            className="min-h-6 px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold uppercase rounded cursor-pointer"
+                                          >
+                                            Confirm
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setRejectingModId(null);
+                                              setRejectReasonInput("");
+                                            }}
+                                            className="min-h-6 px-2.5 py-1 bg-natural-border hover:bg-natural-border/80 text-natural-text-main text-[10px] rounded cursor-pointer"
+                                          >
+                                            Cancel
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setRejectingModId(req.id);
+                                              setRejectReasonInput("");
+                                            }}
+                                            className="min-h-6 px-2.5 py-1 text-rose-600 hover:bg-rose-500/10 border border-rose-500/30 rounded text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                                          >
+                                            {isApplied ? "Revert & Decline" : "Decline"}
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleApproveModification(req.id)}
+                                            className="min-h-6 px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold uppercase tracking-wider transition-colors shadow-2xs cursor-pointer flex items-center gap-1"
+                                          >
+                                            <CheckCircle2
+                                              aria-hidden="true"
+                                              className="w-3 h-3"
+                                            />
+                                            {isApplied
+                                              ? "Acknowledge & Confirm"
+                                              : "Approve & Apply"}
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Allergies & Special Instructions (side-by-side when present) */}
+                    {(cleanAllergies || specialInstructions) && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {cleanAllergies && (
+                          <div className="p-3 bg-orange-50/80 dark:bg-orange-950/30 border border-orange-200/70 dark:border-orange-800/40 rounded-xl flex items-start gap-2.5">
+                            <AlertCircle
+                              aria-hidden="true"
+                              className="w-4 h-4 text-orange-600 dark:text-orange-400 shrink-0 mt-0.5"
+                            />
+                            <div>
+                              <p className="text-[10px] font-bold text-orange-800 dark:text-orange-300 uppercase tracking-wider mb-0.5">
+                                Food Allergies &amp; Dietary Restrictions
+                              </p>
+                              <p className="text-xs text-orange-900 dark:text-orange-200 font-medium leading-relaxed">
+                                {cleanAllergies}
+                              </p>
+                            </div>
                           </div>
-                        ) : (
-                          <div className="p-3 bg-purple-50/60 dark:bg-purple-950/30 rounded-lg border border-purple-200/80 dark:border-purple-800/40 text-xs text-purple-900 dark:text-purple-200 space-y-1">
-                            <p className="text-xs font-semibold">
-                              Client opted for monthly installment distribution leading up to the 15-day final balance.
-                            </p>
-                            <p className="text-xs text-purple-800/80 dark:text-purple-300 font-medium">
-                              Remaining balance of ₱{balanceDue.toLocaleString()} is settled in monthly milestones, concluding strictly 15 days before the event.
-                            </p>
+                        )}
+
+                        {specialInstructions && (
+                          <div className="p-3 bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200/70 dark:border-amber-800/40 rounded-xl flex items-start gap-2.5">
+                            <Sliders
+                              aria-hidden="true"
+                              className="w-4 h-4 text-natural-accent shrink-0 mt-0.5"
+                            />
+                            <div>
+                              <p className="text-[10px] font-bold text-natural-accent uppercase tracking-wider mb-0.5">
+                                Client Special Instructions
+                              </p>
+                              <p className="text-xs text-natural-text-main font-medium leading-relaxed italic">
+                                &ldquo;{specialInstructions}&rdquo;
+                              </p>
+                            </div>
                           </div>
                         )}
                       </div>
                     )}
 
-                    {/* Section 3: 15-Day Final Balance Settlement Tracker & Verification (Only for Standard 50% Scheme) */}
-                    {is50Percent && (
-                      <div className="space-y-3 bg-natural-card p-3.5 rounded-xl border border-natural-border shadow-2xs">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
-                        <div>
-                          <p className="text-xs font-bold text-natural-text-main flex items-center gap-1.5 uppercase tracking-wider">
-                            <ShieldCheck className="w-4 h-4 text-natural-accent" />
-                            Final Balance Settlement
-                          </p>
-                        </div>
-
-                        <div className="flex items-center gap-1.5">
-                          {isFinalVerified ? (
-                            <span className="text-xs font-bold px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> Settled & Verified
-                            </span>
-                          ) : !isDepositVerified ? (
-                            <span className="text-xs font-bold px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
-                              <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" /> Awaiting Deposit
-                            </span>
-                          ) : daysRemaining !== null && daysRemaining < 0 ? (
-                            <span className="text-xs font-bold px-2.5 py-1 rounded-md bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/30 flex items-center gap-1">
-                              <AlertCircle className="w-3.5 h-3.5 text-red-600 dark:text-red-400" /> Overdue by {Math.abs(daysRemaining)}d
-                            </span>
-                          ) : daysRemaining !== null && daysRemaining <= 15 ? (
-                            <span className="text-xs font-bold px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
-                              <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" /> Due in {daysRemaining}d
-                            </span>
-                          ) : (
-                            <span className="text-xs font-bold px-2.5 py-1 rounded-md bg-natural-bg text-natural-text-light border border-natural-border">
-                              {daysRemaining !== null ? `Due in ${daysRemaining}d` : "Upcoming"}
-                            </span>
-                          )}
-                        </div>
+                    {/* Full-Width Menu Selection (Zero Nested Scrollbars) */}
+                    <div className="p-4 bg-natural-card border border-natural-border rounded-xl space-y-3 shadow-2xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-natural-border/60">
+                        <h4 className="text-xs font-bold text-natural-text-main uppercase tracking-wider flex items-center gap-1.5">
+                          <UtensilsCrossed
+                            aria-hidden="true"
+                            className="w-3.5 h-3.5 text-natural-accent"
+                          />
+                          Menu Selection ({menuCount} Dishes)
+                        </h4>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenSubstituteModal()}
+                          className="min-h-7 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider bg-natural-accent/10 text-natural-accent hover:bg-natural-accent hover:text-white rounded-md border border-natural-accent/30 transition-colors flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <RefreshCw aria-hidden="true" className="w-3 h-3" />
+                          Substitute Unavailable Dish
+                        </button>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs pt-1">
-                        <div className="space-y-1.5">
-                          <div className="flex justify-between items-center text-xs gap-2">
-                            <span className="text-natural-text-light shrink-0">Final Balance Amount:</span>
-                            <span className="font-bold text-natural-accent font-serif text-sm text-right">
-                              ₱{finalBalanceAmount.toLocaleString()}
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center text-xs gap-2">
-                            <span className="text-natural-text-light shrink-0">Payment Method:</span>
-                            <span className="font-semibold text-natural-text-main text-right">
-                              {payment.final_balance_method || "Pending submission"}
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center text-xs gap-2">
-                            <span className="text-natural-text-light shrink-0">Reference Number:</span>
-                            <span className="font-mono font-semibold text-natural-text-main text-right">
-                              {payment.final_balance_reference || "N/A"}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          {hasFinalReceipt ? (
-                            <div className="flex items-center gap-2.5 bg-natural-bg/70 dark:bg-natural-sidebar/50 p-2 rounded-lg border border-natural-border shadow-2xs justify-between">
-                              <div className="flex items-center gap-2">
-                                <img
-                                  src={payment.final_balance_receipt}
-                                  alt="Final Balance Slip"
-                                  className="w-10 h-10 object-cover rounded-md border border-natural-border cursor-pointer hover:opacity-80 transition-opacity"
-                                  onError={(e) => {
-                                    (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1554415707-9e4c07d3882d?auto=format&fit=crop&q=80&w=800";
-                                  }}
-                                  onClick={() =>
-                                    setViewingReceipt({
-                                      url: payment.final_balance_receipt,
-                                      bookingName:
-                                        selectedBooking.profiles?.name ||
-                                        selectedBooking.profiles?.full_name ||
-                                        "Client",
-                                      ref: payment.final_balance_reference,
-                                      method: payment.final_balance_method,
-                                      amount: finalBalanceAmount,
-                                      title: "15-Day Final Balance Slip",
-                                    })
-                                  }
-                                />
-                                <div>
-                                  <p className="text-xs font-bold text-natural-text-main">
-                                    Final Balance Slip
-                                  </p>
-                                  <p className="text-xs text-natural-text-light">
-                                    ₱{finalBalanceAmount.toLocaleString()}
-                                  </p>
-                                </div>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setViewingReceipt({
-                                    url: payment.final_balance_receipt,
-                                    bookingName:
-                                      selectedBooking.profiles?.name ||
-                                      selectedBooking.profiles?.full_name ||
-                                      "Client",
-                                    ref: payment.final_balance_reference,
-                                    method: payment.final_balance_method,
-                                    amount: finalBalanceAmount,
-                                    title: "15-Day Final Balance Slip",
-                                  })
-                                }
-                                className="px-2.5 py-1 bg-natural-accent hover:bg-natural-accent/90 text-white text-xs font-bold uppercase tracking-wider rounded-md transition-all flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
-                              >
-                                <Eye className="w-3 h-3" /> Inspect
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="p-2.5 bg-natural-bg/60 dark:bg-natural-sidebar/30 rounded-lg border border-natural-border text-center">
-                              <p className="text-xs text-natural-text-light italic">
-                                No final balance slip uploaded yet.
-                              </p>
-                            </div>
-                          )}
-
-                          {/* Admin Verification Action */}
-                          {isFinalVerified ? (
-                            <div className="w-full py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                              Final Balance Confirmed
-                            </div>
-                          ) : !isDepositVerified ? (
-                            <div className="w-full py-2 bg-natural-bg/50 border border-dashed border-natural-border text-natural-text-light rounded-lg text-xs font-medium flex items-center justify-center gap-1.5">
-                              <Lock className="w-3.5 h-3.5 text-natural-text-light/70" />
-                              <span>Unlocks after deposit is confirmed</span>
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              disabled={!hasFinalReceipt}
-                              onClick={() => {
-                                if (!hasFinalReceipt) return;
-                                setConfirmAction({
-                                  type: "verify_final_payment",
-                                  bookingId: selectedBooking.id,
-                                  bookingName:
-                                    selectedBooking.profiles?.name ||
-                                    selectedBooking.profiles?.full_name ||
-                                    "Unknown User",
-                                });
-                              }}
-                              className={cn(
-                                "w-full py-2 px-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shadow-xs select-none",
-                                hasFinalReceipt
-                                  ? "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
-                                  : "bg-natural-bg/70 dark:bg-natural-sidebar/40 border border-natural-border text-natural-text-light/60 cursor-not-allowed opacity-75"
-                              )}
-                              title={
-                                !hasFinalReceipt
-                                  ? "Client must upload a final balance slip before payment can be confirmed"
-                                  : "Verify and confirm final payment"
-                              }
-                            >
-                              {hasFinalReceipt ? (
-                                <>
-                                  <CheckCheck className="w-3.5 h-3.5 shrink-0" />
-                                  <span className="whitespace-nowrap">
-                                    Confirm Final Payment
-                                  </span>
-                                </>
-                              ) : (
-                                <>
-                                  <Lock className="w-3 h-3 shrink-0 text-natural-text-light/70" />
-                                  <span className="whitespace-nowrap">
-                                    Confirm (Slip Required)
-                                  </span>
-                                </>
-                              )}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    )}
-                  </div>
-                );
-              })()}
-                </div>
-
-                {/* RIGHT COLUMN: Menu Selection & Equipment */}
-                <div className="space-y-3.5">
-                  {/* Food Allergies (if any) */}
-                  {(() => {
-                    const cleanAllergies =
-                      typeof selectedBooking.food_allergies === "string" &&
-                      selectedBooking.food_allergies.includes(
-                        "__PAYMENT_METADATA__:",
-                      )
-                        ? selectedBooking.food_allergies
-                            .split("__PAYMENT_METADATA__:")[0]
-                            .trim()
-                        : (selectedBooking.food_allergies || "").trim();
-
-                    if (!cleanAllergies) return null;
-
-                    return (
-                      <div className="p-3 bg-orange-50/80 dark:bg-orange-950/30 border border-orange-200/60 dark:border-orange-800/40 rounded-xl flex items-start gap-2.5">
-                        <AlertCircle className="w-4 h-4 text-orange-600 dark:text-orange-400 shrink-0 mt-0.5" />
-                        <div>
-                          <p className="text-[10px] font-bold text-orange-800 dark:text-orange-300 uppercase tracking-wider mb-0.5">
-                            Food Allergies & Dietary Restrictions
-                          </p>
-                          <p className="text-xs text-orange-900 dark:text-orange-200 font-medium leading-relaxed">
-                            {cleanAllergies}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {/* Client Special Instructions / Modification Notes (if any) */}
-                  {(() => {
-                    const modList = Array.isArray(selectedBooking.modification_requests)
-                      ? selectedBooking.modification_requests.filter((r: any) => r.status !== "Superseded")
-                      : [];
-                    const latestModNote =
-                      modList.length > 0 ? (modList[modList.length - 1]?.notes || "").trim() : "";
-                    const specialInstructions =
-                      (selectedBooking.logistics_info?.client_special_instructions || "").trim() ||
-                      latestModNote;
-
-                    if (!specialInstructions) return null;
-
-                    return (
-                      <div className="p-3 bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200/70 dark:border-amber-800/40 rounded-xl flex items-start gap-2.5">
-                        <Sliders className="w-4 h-4 text-natural-accent shrink-0 mt-0.5" />
-                        <div>
-                          <p className="text-[10px] font-bold text-natural-accent uppercase tracking-wider mb-0.5">
-                            Client Special Instructions / Reason for Changes
-                          </p>
-                          <p className="text-xs text-natural-text-main font-medium leading-relaxed italic">
-                            "{specialInstructions}"
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {/* Menu Selection & Additional Services */}
-                  <div className="p-3.5 bg-natural-card/50 border border-natural-border rounded-xl space-y-2.5 shadow-2xs">
-                    <div className="flex items-center justify-between pb-1 border-b border-natural-border/50">
-                      <h5 className="text-[11px] font-bold text-natural-accent uppercase tracking-wider">
-                        Menu Selection {selectedBooking.selected_menu_items ? `(${selectedBooking.selected_menu_items.length} items)` : ""}
-                      </h5>
-                      <button
-                        type="button"
-                        onClick={() => handleOpenSubstituteModal()}
-                        className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-natural-accent/10 text-natural-accent hover:bg-natural-accent hover:text-white rounded border border-natural-accent/30 transition-colors flex items-center gap-1 cursor-pointer"
-                        title="If ingredient or dish is out of stock in market, select a reasonable replacement"
-                      >
-                        <RefreshCw className="w-3 h-3" />
-                        Substitute Unavailable Dish
-                      </button>
-                    </div>
-                    <div className="max-h-60 overflow-y-auto pr-1 custom-scrollbar">
-                      {selectedBooking.selected_menu_items &&
-                      selectedBooking.selected_menu_items.length > 0 ? (
+                      {menuCount > 0 ? (
                         (() => {
                           const groupedMenu: Record<string, string[]> = {};
                           const uncategorized: string[] = [];
 
-                          selectedBooking.selected_menu_items.forEach(
-                            (m: string) => {
-                              const cat = getBookingDishCategory(m, selectedBooking, menuItems, bookingCustomDishes);
-                              if (cat) {
-                                if (!groupedMenu[cat]) groupedMenu[cat] = [];
-                                groupedMenu[cat].push(m);
-                              } else {
-                                uncategorized.push(m);
-                              }
-                            },
-                          );
+                          selectedBooking.selected_menu_items.forEach((m: string) => {
+                            const cat = getBookingDishCategory(
+                              m,
+                              selectedBooking,
+                              menuItems,
+                              bookingCustomDishes
+                            );
+                            if (cat) {
+                              if (!groupedMenu[cat]) groupedMenu[cat] = [];
+                              groupedMenu[cat].push(m);
+                            } else {
+                              uncategorized.push(m);
+                            }
+                          });
 
                           const sortedCategories = categoryOrder.filter(
                             (cat) => groupedMenu[cat] && groupedMenu[cat].length > 0
@@ -5257,51 +6054,66 @@ export function BookingPage() {
                           });
 
                           return (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                               {sortedCategories.map((cat) => (
-                                <div key={cat} className="space-y-1">
-                                  <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-wider border-b border-natural-border/40 pb-0.5">
+                                <div
+                                  key={cat}
+                                  className="p-2.5 bg-natural-bg/40 border border-natural-border/60 rounded-lg space-y-1.5"
+                                >
+                                  <p className="text-[10px] font-bold text-natural-accent uppercase tracking-wider border-b border-natural-border/50 pb-1">
                                     {cat} ({groupedMenu[cat].length})
                                   </p>
-                                  <div className="flex flex-wrap gap-1">
+                                  <div className="flex flex-wrap gap-1.5">
                                     {groupedMenu[cat].map((m) => (
                                       <div
                                         key={m}
-                                        className="group/dish inline-flex items-center gap-1 px-2 py-0.5 bg-natural-bg border border-natural-border rounded-md text-[11px] font-semibold text-natural-text-main uppercase tracking-wider"
+                                        className="group/dish inline-flex items-center gap-1 pl-2 pr-1 py-0.5 bg-natural-card border border-natural-border rounded-md text-[11px] font-semibold text-natural-text-main"
                                       >
                                         <span>{m}</span>
                                         <button
                                           type="button"
-                                          title="Substitute out of stock dish"
+                                          aria-label={`Substitute ${m}`}
+                                          title={`Substitute ${m}`}
                                           onClick={() => handleOpenSubstituteModal(m)}
-                                          className="text-natural-text-light/40 group-hover/dish:text-natural-accent hover:scale-110 transition-all p-0.5 cursor-pointer"
+                                          className="min-w-6 min-h-6 flex items-center justify-center text-natural-text-light/60 hover:text-natural-accent rounded transition-colors cursor-pointer"
                                         >
-                                          <RefreshCw className="w-2.5 h-2.5" />
+                                          <RefreshCw
+                                            aria-hidden="true"
+                                            className="w-3 h-3"
+                                          />
                                         </button>
                                       </div>
                                     ))}
                                   </div>
                                 </div>
                               ))}
+
                               {uncategorized.length > 0 && (
-                                <div key="Other" className="space-y-1">
-                                  <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-wider border-b border-natural-border/40 pb-0.5">
+                                <div
+                                  key="Other"
+                                  className="p-2.5 bg-natural-bg/40 border border-natural-border/60 rounded-lg space-y-1.5"
+                                >
+                                  <p className="text-[10px] font-bold text-natural-accent uppercase tracking-wider border-b border-natural-border/50 pb-1">
                                     Other ({uncategorized.length})
                                   </p>
-                                  <div className="flex flex-wrap gap-1">
+                                  <div className="flex flex-wrap gap-1.5">
                                     {uncategorized.map((m) => (
                                       <div
                                         key={m}
-                                        className="group/dish inline-flex items-center gap-1 px-2 py-0.5 bg-natural-bg border border-natural-border rounded-md text-[11px] font-semibold text-natural-text-main uppercase tracking-wider"
+                                        className="group/dish inline-flex items-center gap-1 pl-2 pr-1 py-0.5 bg-natural-card border border-natural-border rounded-md text-[11px] font-semibold text-natural-text-main"
                                       >
                                         <span>{m}</span>
                                         <button
                                           type="button"
-                                          title="Substitute out of stock dish"
+                                          aria-label={`Substitute ${m}`}
+                                          title={`Substitute ${m}`}
                                           onClick={() => handleOpenSubstituteModal(m)}
-                                          className="text-natural-text-light/40 group-hover/dish:text-natural-accent hover:scale-110 transition-all p-0.5 cursor-pointer"
+                                          className="min-w-6 min-h-6 flex items-center justify-center text-natural-text-light/60 hover:text-natural-accent rounded transition-colors cursor-pointer"
                                         >
-                                          <RefreshCw className="w-2.5 h-2.5" />
+                                          <RefreshCw
+                                            aria-hidden="true"
+                                            className="w-3 h-3"
+                                          />
                                         </button>
                                       </div>
                                     ))}
@@ -5312,666 +6124,428 @@ export function BookingPage() {
                           );
                         })()
                       ) : (
-                        <span className="text-xs text-natural-text-light italic">
-                          No menu items selected
-                        </span>
+                        <p className="text-xs text-natural-text-light italic">
+                          No menu items selected.
+                        </p>
                       )}
-                    </div>
 
-                    {/* Unavailable & Substituted Dishes Log with "Set Available Again" control */}
-                    {(() => {
-                      const activeMenu: string[] = Array.isArray(selectedBooking.selected_menu_items)
-                        ? selectedBooking.selected_menu_items
-                        : [];
-                      const unavailableEntries = getBookingUnavailableEntries(selectedBooking);
-                      if (unavailableEntries.length === 0) return null;
-                      return (
-                        <div className="pt-2 border-t border-natural-border/60 space-y-1.5">
-                          <p className="text-[10px] font-bold text-natural-accent uppercase tracking-wider flex items-center gap-1">
-                            <RefreshCw className="w-3 h-3" />
-                            Unavailable &amp; Substituted Dishes ({unavailableEntries.length})
-                          </p>
-                          <div className="space-y-1">
-                            {unavailableEntries.map((sub: any, idx: number) => {
-                              const isReplacementActive =
-                                sub?.replacement_dish && activeMenu.includes(sub.replacement_dish);
-                              const isRestoring = restoringDish === sub.original_dish;
-                              return (
-                                <div
-                                  key={sub.id || idx}
-                                  className="p-1.5 bg-natural-bg/70 border border-natural-border/50 rounded text-[11px] flex flex-col sm:flex-row sm:items-center justify-between gap-2"
-                                >
-                                  <div>
-                                    <span className="line-through text-natural-text-light/60">
-                                      {sub.original_dish}
-                                    </span>
-                                    {isReplacementActive ? (
-                                      <>
-                                        <span className="mx-1 text-natural-accent font-bold">➔</span>
-                                        <span className="font-bold text-natural-text-main">
-                                          {sub.replacement_dish}
-                                        </span>
-                                      </>
-                                    ) : (
-                                      <span className="text-[10px] text-natural-text-light ml-1.5 italic">
-                                        (Marked unavailable · Client chose another dish)
-                                      </span>
-                                    )}
-                                    {sub.reason && isReplacementActive && (
-                                      <span className="text-[10px] text-natural-text-light ml-1.5">
-                                        ({sub.reason})
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    {sub.substituted_at && (
-                                      <span className="text-[9px] text-natural-text-light">
-                                        {new Date(sub.substituted_at).toLocaleDateString()}
-                                      </span>
-                                    )}
-                                    <button
-                                      type="button"
-                                      disabled={isRestoring}
-                                      onClick={() => handleMarkDishAvailableAgain(sub.original_dish)}
-                                      title={
-                                        isReplacementActive
-                                          ? `Mark "${sub.original_dish}" available again, restore it to the menu, and hide any custom replacement dish`
-                                          : `Mark "${sub.original_dish}" available again for the client and hide any custom replacement dish`
-                                      }
-                                      className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-emerald-600/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-600 hover:text-white rounded border border-emerald-600/30 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                                    >
-                                      <CheckCircle2 className="w-3 h-3" />
-                                      {isRestoring ? "Restoring..." : "Set Available Again"}
-                                    </button>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    {selectedBooking.selected_add_ons &&
-                      selectedBooking.selected_add_ons.length > 0 && (
-                        <div className="space-y-1 pt-2 border-t border-natural-border/50">
-                          <h6 className="text-[10px] font-bold text-natural-accent uppercase tracking-wider">
-                            Additional Services
-                          </h6>
-                          <div className="flex flex-wrap gap-1">
-                            {selectedBooking.selected_add_ons.map((s: string) => (
-                              <span
-                                key={s}
-                                className="px-2 py-0.5 bg-natural-bg border border-natural-border rounded-md text-[11px] font-semibold text-natural-text-main uppercase tracking-wider"
-                              >
-                                {s}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                  </div>
-
-                  {/* Client Modification Requests & History Card */}
-                  {(() => {
-                    const visibleModRequests = Array.isArray(selectedBooking.modification_requests)
-                      ? selectedBooking.modification_requests.filter((r: any) => r.status !== "Superseded")
-                      : [];
-                    if (visibleModRequests.length === 0) return null;
-
-                    return (
-                      <div className="p-3.5 bg-natural-card/50 border border-natural-border rounded-xl space-y-2.5 shadow-2xs">
-                        <div className="flex items-center justify-between pb-1 border-b border-natural-border/50">
-                          <h5 className="text-[11px] font-bold text-natural-accent uppercase tracking-wider flex items-center gap-1.5">
-                            <Sliders className="w-3.5 h-3.5" />
-                            Client Modifications &amp; History ({visibleModRequests.length})
-                          </h5>
-                          {hasLateModification(selectedBooking) && (
-                            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30">
-                              ⚠️ Under 14-Day Lockout
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1 custom-scrollbar">
-                          {[...visibleModRequests].reverse().map((req: any, revIdx: number) => {
-                            const origNum = visibleModRequests.length - revIdx;
-                            const isLate =
-                              req.is_late ||
-                              (req.days_before_event !== undefined && req.days_before_event <= 14);
-                            const isPending = req.status === "Pending";
-                            const isApplied = req.status === "Applied";
-                            const isActionable = isPending || isApplied;
-
-                            const prevMenu: string[] = Array.isArray(req.previous_menu_items)
-                              ? req.previous_menu_items
-                              : [];
-                            const reqMenu: string[] = Array.isArray(req.requested_menu_items)
-                              ? req.requested_menu_items
-                              : [];
-                            const addedDishes: string[] = Array.isArray(req.added_dishes)
-                              ? req.added_dishes
-                              : reqMenu.filter((d) => !prevMenu.includes(d));
-                            const removedDishes: string[] = Array.isArray(req.removed_dishes)
-                              ? req.removed_dishes
-                              : prevMenu.filter((d) => !reqMenu.includes(d));
-
-                            const basePaxVal =
-                              Number(req.base_guest_count) ||
-                              Number(selectedBooking.guest_count) ||
-                              50;
-                            const prevExtra = Number(req.previous_additional_pax) || 0;
-                            const reqExtra = Number(req.requested_additional_pax) || 0;
-
-                            return (
-                              <div
-                                key={req.id || revIdx}
-                                className="p-3 bg-natural-bg/60 border border-natural-border/60 rounded-lg space-y-2 text-xs"
-                              >
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="font-bold text-natural-text-main">
-                                      Modification #{origNum}
-                                    </span>
-                                    {req.created_at && (
-                                      <span className="text-[10px] text-natural-text-light">
-                                        {new Date(req.created_at).toLocaleString(undefined, {
-                                          month: "short",
-                                          day: "numeric",
-                                          hour: "2-digit",
-                                          minute: "2-digit",
-                                        })}
-                                      </span>
-                                    )}
-                                    {isLate && (
-                                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30">
-                                        ⚠️ Late ({req.days_before_event}d before event)
-                                      </span>
-                                    )}
-                                    {!isLate && req.days_before_event !== undefined && (
-                                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
-                                        {req.days_before_event}d before event
-                                      </span>
-                                    )}
-                                  </div>
-                                  <span
-                                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                                      req.status === "Approved"
-                                        ? "bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-300 border border-green-300"
-                                        : req.status === "Applied"
-                                        ? "bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-300"
-                                        : req.status === "Rejected"
-                                        ? "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300 border border-red-300"
-                                        : "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-300"
-                                    }`}
+                      {/* Unavailable & Substituted Dishes Log */}
+                      {(() => {
+                        const activeMenu: string[] = Array.isArray(
+                          selectedBooking.selected_menu_items
+                        )
+                          ? selectedBooking.selected_menu_items
+                          : [];
+                        const unavailableEntries =
+                          getBookingUnavailableEntries(selectedBooking);
+                        if (unavailableEntries.length === 0) return null;
+                        return (
+                          <div className="pt-2.5 border-t border-natural-border/60 space-y-1.5">
+                            <p className="text-[10px] font-bold text-natural-accent uppercase tracking-wider flex items-center gap-1">
+                              <RefreshCw aria-hidden="true" className="w-3 h-3" />
+                              Unavailable &amp; Substituted Dishes (
+                              {unavailableEntries.length})
+                            </p>
+                            <div className="space-y-1.5">
+                              {unavailableEntries.map((sub: any, idx: number) => {
+                                const isReplacementActive =
+                                  sub?.replacement_dish &&
+                                  activeMenu.includes(sub.replacement_dish);
+                                const isRestoring = restoringDish === sub.original_dish;
+                                return (
+                                  <div
+                                    key={sub.id || idx}
+                                    className="p-2 bg-natural-bg/70 border border-natural-border/60 rounded-lg text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2"
                                   >
-                                    {req.status === "Applied"
-                                      ? "Applied by Client"
-                                      : req.status === "Approved"
-                                      ? "Confirmed"
-                                      : req.status === "Rejected"
-                                      ? "Declined / Reverted"
-                                      : "Pending Review"}
-                                  </span>
-                                </div>
-
-                                <div className="space-y-1.5 text-natural-text-light text-[11px]">
-                                  {prevExtra !== reqExtra && (
-                                    <p>
-                                      <strong className="text-natural-text-main">Headcount Change:</strong>{" "}
-                                      {basePaxVal + prevExtra} Guests (+{prevExtra} extra) ➔{" "}
-                                      <strong className="text-natural-accent">
-                                        {basePaxVal + reqExtra} Guests (+{reqExtra} extra)
-                                      </strong>
-                                    </p>
-                                  )}
-
-                                  {(addedDishes.length > 0 || removedDishes.length > 0) && (
-                                    <div className="space-y-1">
-                                      <strong className="text-natural-text-main block">
-                                        Dish Swap:
-                                      </strong>
-                                      {removedDishes.length === 1 && addedDishes.length === 1 ? (
-                                        <p className="flex items-center gap-1.5 flex-wrap">
-                                          <span className="px-1.5 py-0.5 bg-rose-500/10 text-rose-600 dark:text-rose-300 border border-rose-500/30 rounded text-[10px] line-through">
-                                            {removedDishes[0]}
+                                    <div>
+                                      <span className="line-through text-natural-text-light/70">
+                                        {sub.original_dish}
+                                      </span>
+                                      {isReplacementActive ? (
+                                        <>
+                                          <span className="mx-1.5 text-natural-accent font-bold">
+                                            →
                                           </span>
-                                          <span className="text-natural-accent font-bold">➔</span>
-                                          <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 rounded text-[10px] font-bold">
-                                            {addedDishes[0]}
+                                          <span className="font-bold text-natural-text-main">
+                                            {sub.replacement_dish}
                                           </span>
-                                        </p>
+                                        </>
                                       ) : (
-                                        <div className="flex flex-wrap gap-1">
-                                          {removedDishes.map((d) => (
-                                            <span
-                                              key={`rem-${d}`}
-                                              className="px-1.5 py-0.5 bg-rose-500/10 text-rose-600 dark:text-rose-300 border border-rose-500/30 rounded text-[10px] line-through"
-                                            >
-                                              {d}
-                                            </span>
-                                          ))}
-                                          {addedDishes.map((d) => (
-                                            <span
-                                              key={`add-${d}`}
-                                              className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 rounded text-[10px] font-bold"
-                                            >
-                                              + {d}
-                                            </span>
-                                          ))}
-                                        </div>
+                                        <span className="text-[11px] text-natural-text-light ml-1.5 italic">
+                                          (Marked unavailable · Client chose another dish)
+                                        </span>
+                                      )}
+                                      {sub.reason && isReplacementActive && (
+                                        <span className="text-[11px] text-natural-text-light ml-1.5">
+                                          ({sub.reason})
+                                        </span>
                                       )}
                                     </div>
-                                  )}
-
-                                  {req.notes && (
-                                    <div className="p-2 bg-natural-card border border-natural-border rounded">
-                                      <span className="text-[9px] font-bold uppercase tracking-wider text-natural-accent block">
-                                        Special Instructions / Reason:
-                                      </span>
-                                      <p className="italic text-natural-text-main mt-0.5">
-                                        "{req.notes}"
-                                      </p>
-                                    </div>
-                                  )}
-
-                                  {req.review_note && (
-                                    <p className="text-rose-500 font-medium">
-                                      Coordinator Note: "{req.review_note}"
-                                    </p>
-                                  )}
-                                </div>
-
-                                {isActionable && (
-                                  <div className="pt-2 border-t border-natural-border/40 flex items-center justify-end gap-2">
-                                    {rejectingModId === req.id ? (
-                                      <div className="flex items-center gap-1 w-full">
-                                        <input
-                                          type="text"
-                                          placeholder={
-                                            isApplied
-                                              ? "Reason for reverting changes..."
-                                              : "Reason for declining..."
-                                          }
-                                          value={rejectReasonInput}
-                                          onChange={(e) => setRejectReasonInput(e.target.value)}
-                                          className="flex-1 bg-natural-card border border-natural-border px-2 py-1 text-xs rounded text-natural-text-main"
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      {sub.substituted_at && (
+                                        <span className="text-[10px] text-natural-text-light">
+                                          {new Date(
+                                            sub.substituted_at
+                                          ).toLocaleDateString()}
+                                        </span>
+                                      )}
+                                      <button
+                                        type="button"
+                                        disabled={isRestoring}
+                                        aria-label={`Set Available Again for ${sub.original_dish}`}
+                                        onClick={() =>
+                                          handleMarkDishAvailableAgain(sub.original_dish)
+                                        }
+                                        className="min-h-6 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider bg-emerald-600/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-600 hover:text-white rounded border border-emerald-600/30 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                                      >
+                                        <CheckCircle2
+                                          aria-hidden="true"
+                                          className="w-3 h-3"
                                         />
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            handleRejectModification(req.id, rejectReasonInput)
-                                          }
-                                          className="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold uppercase rounded cursor-pointer"
-                                        >
-                                          Confirm
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setRejectingModId(null);
-                                            setRejectReasonInput("");
-                                          }}
-                                          className="px-2 py-1 bg-natural-border hover:bg-natural-border/80 text-natural-text-main text-[10px] rounded cursor-pointer"
-                                        >
-                                          Cancel
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      <>
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setRejectingModId(req.id);
-                                            setRejectReasonInput("");
-                                          }}
-                                          className="px-2.5 py-1 text-rose-600 hover:bg-rose-500/10 border border-rose-500/30 rounded text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
-                                        >
-                                          {isApplied ? "Revert & Decline" : "Decline"}
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleApproveModification(req.id)}
-                                          className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold uppercase tracking-wider transition-colors shadow-2xs cursor-pointer flex items-center gap-1"
-                                        >
-                                          <CheckCircle2 className="w-3 h-3" />
-                                          {isApplied ? "Acknowledge & Confirm" : "Approve & Apply"}
-                                        </button>
-                                      </>
-                                    )}
+                                        {isRestoring
+                                          ? "Restoring..."
+                                          : "Set Available Again"}
+                                      </button>
+                                    </div>
                                   </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })()}
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()}
 
-                  {/* Allocated Event Equipment Section */}
-                  {/* Allocated Event Equipment Section */}
-                  {(() => {
-                    const pkgName =
-                      selectedBooking.packages?.name ||
-                      packages.find((p) => p.id === selectedBooking.package_id)?.name ||
-                      selectedBooking.package ||
-                      packages[0]?.name ||
-                      "Event Package";
-                    const totalPax =
-                      (Number(selectedBooking.guest_count) || 50) +
-                      (Number(selectedBooking.additional_pax) || 0);
-                    const corkageInfo = selectedBooking.corkage_info || selectedBooking.logistics_info?.corkage || null;
-                    const equipList = calculatePackageEquipment(
-                      pkgName,
-                      totalPax,
-                      selectedBooking.packages?.inclusions || selectedBooking.inclusions,
-                      undefined,
-                      corkageInfo
-                    );
-
-                    const deductionRec = deductionRecords.find(
-                      (d) => String(d.bookingId) === String(selectedBooking.id),
-                    );
-
-                    const equipBreakdown = equipList.map((eq) => {
-                      const matchedRecItem = deductionRec?.items.find(
-                        (it) => it.itemName.toLowerCase() === eq.itemName.toLowerCase(),
-                      );
-                      const invItem = items.find(
-                        (it) =>
-                          it.status !== "Archived" &&
-                          it.name.toLowerCase() === eq.itemName.toLowerCase(),
-                      );
-
-                      let inHouseQty = 0;
-                      let outsourcedQty = 0;
-
-                      if (matchedRecItem !== undefined) {
-                        inHouseQty = Math.min(matchedRecItem.quantity, eq.quantity);
-                        const remainder = Math.max(0, eq.quantity - inHouseQty);
-                        outsourcedQty = Math.max(matchedRecItem.outsourcedQuantity || 0, remainder);
-                      } else {
-                        const available = invItem ? Math.max(0, invItem.stock) : 0;
-                        inHouseQty = Math.min(available, eq.quantity);
-                        outsourcedQty = Math.max(0, eq.quantity - inHouseQty);
-                      }
-
-                      return {
-                        ...eq,
-                        inHouseQty,
-                        outsourcedQty,
-                      };
-                    });
-
-                    const totalInHouse = equipBreakdown.reduce((acc, eq) => acc + eq.inHouseQty, 0);
-                    const totalOutsourced = equipBreakdown.reduce((acc, eq) => acc + eq.outsourcedQty, 0);
-                    const bookingStatus = selectedBooking.status || "Pending";
-                    const isCompleted = bookingStatus === "Completed";
-                    const isConfirmed = bookingStatus === "Confirmed";
-                    const isCancelled = bookingStatus === "Cancelled";
-
-                    return (
-                      <div className="p-3.5 bg-natural-card/50 border border-natural-border rounded-xl space-y-2.5 shadow-2xs">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 pb-0.5">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h5 className="text-[11px] font-bold text-natural-accent uppercase tracking-wider flex items-center gap-1.5">
-                              <Boxes className="w-3.5 h-3.5" />
-                              Allocated Event Equipment
+                      {selectedBooking.selected_add_ons &&
+                        selectedBooking.selected_add_ons.length > 0 && (
+                          <div className="space-y-1.5 pt-2.5 border-t border-natural-border/60">
+                            <h5 className="text-[10px] font-bold text-natural-accent uppercase tracking-wider">
+                              Additional Services
                             </h5>
-                            {isCompleted ? (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 flex items-center gap-1">
-                                <CheckCheck className="w-3 h-3" /> Returned to Monitoring
-                              </span>
-                            ) : isConfirmed || isBookingDeducted(selectedBooking.id) ? (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border bg-green-50 text-green-700 border-green-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60 flex items-center gap-1">
-                                <CheckCircle2 className="w-3 h-3" /> ✓ Stock Deducted
-                              </span>
-                            ) : isCancelled ? (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60">
-                                Cancelled / Released
-                              </span>
-                            ) : (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30">
-                                Pending Confirmation
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="flex items-center gap-1.5 text-[10px] font-bold flex-wrap">
-                            {isCompleted ? (
-                              <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-                                <CheckCheck className="w-3 h-3" /> Supplies Returned ({totalPax} Pax)
-                              </span>
-                            ) : (
-                              <>
+                            <div className="flex flex-wrap gap-1.5">
+                              {selectedBooking.selected_add_ons.map((s: string) => (
                                 <span
-                                  className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1"
-                                  title={`In-use equipment: ${totalInHouse.toLocaleString()} units`}
+                                  key={s}
+                                  className="px-2.5 py-1 bg-natural-bg border border-natural-border rounded-md text-[11px] font-semibold text-natural-text-main"
                                 >
-                                  <Warehouse className="w-3 h-3" /> In-Use: {totalInHouse.toLocaleString()} units
+                                  {s}
                                 </span>
-                                {totalOutsourced > 0 && (
-                                  <span
-                                    className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30 flex items-center gap-1"
-                                    title={`Equipment to outsource: ${totalOutsourced.toLocaleString()} units`}
-                                  >
-                                    <ArrowUpRight className="w-3 h-3" /> To Outsource: {totalOutsourced.toLocaleString()} units
-                                  </span>
-                                )}
-                              </>
-                            )}
+                              ))}
+                            </div>
                           </div>
-                        </div>
+                        )}
+                    </div>
+                  </div>
+                )}
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2 max-h-56 overflow-y-auto pr-1 custom-scrollbar">
-                          {equipBreakdown.map((eq, i) => (
-                            <div
-                              key={i}
-                              className={cn(
-                                "p-2 rounded-xl border text-[11px] flex flex-col justify-between gap-1.5 transition-all shadow-2xs",
-                                !isCompleted && eq.outsourcedQty > 0
-                                  ? "bg-amber-500/5 dark:bg-amber-950/20 border-amber-300/70 dark:border-amber-800/50"
-                                  : "bg-natural-card border-natural-border",
-                              )}
-                            >
-                              <div className="flex justify-between items-start gap-1">
-                                <span
-                                  className="font-semibold text-natural-text-main leading-tight truncate"
-                                  title={eq.itemName}
+                {/* TAB 4: ALLOCATED EVENT EQUIPMENT (Semantic Compact Table) */}
+                {overviewTab === "equipment" && (
+                  <div
+                    role="tabpanel"
+                    id="overview-panel-equipment"
+                    aria-labelledby="overview-tab-equipment"
+                    className="p-4 bg-natural-card border border-natural-border rounded-xl space-y-3 shadow-2xs"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4
+                          id="equipment-allocation-heading"
+                          className="text-xs font-bold text-natural-text-main uppercase tracking-wider flex items-center gap-1.5"
+                        >
+                          <Boxes
+                            aria-hidden="true"
+                            className="w-4 h-4 text-natural-accent"
+                          />
+                          Allocated Event Equipment ({sortedEquipBreakdown.length} Items)
+                        </h4>
+                        {isCompleted ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 flex items-center gap-1">
+                            <CheckCheck aria-hidden="true" className="w-3 h-3" /> Returned
+                            to Monitoring
+                          </span>
+                        ) : isConfirmed || isBookingDeducted(selectedBooking.id) ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border bg-green-50 text-green-700 border-green-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60 flex items-center gap-1">
+                            <CheckCircle2 aria-hidden="true" className="w-3 h-3" /> Stock
+                            Deducted
+                          </span>
+                        ) : isCancelled ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60">
+                            Cancelled / Released
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30">
+                            Pending Confirmation
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2 text-[11px] font-bold flex-wrap">
+                        {isCompleted ? (
+                          <span className="px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                            <CheckCheck aria-hidden="true" className="w-3.5 h-3.5" />{" "}
+                            Supplies Returned ({totalPax} Pax)
+                          </span>
+                        ) : (
+                          <>
+                            <span className="px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                              <Warehouse aria-hidden="true" className="w-3.5 h-3.5" />{" "}
+                              In-House: {totalInHouse.toLocaleString()} units
+                            </span>
+                            {totalOutsourced > 0 ? (
+                              <span className="px-2.5 py-1 rounded-md bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                                <ArrowUpRight
+                                  aria-hidden="true"
+                                  className="w-3.5 h-3.5"
+                                />{" "}
+                                To Outsource: {totalOutsourced.toLocaleString()} units
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-1 rounded-md bg-natural-bg text-natural-text-light border border-natural-border">
+                                0 Outsourced
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    <div
+                      tabIndex={0}
+                      role="region"
+                      aria-labelledby="equipment-allocation-heading"
+                      className="overflow-x-auto rounded-xl border border-natural-border bg-natural-bg/30 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-natural-accent"
+                    >
+                      <table className="w-full text-xs border-collapse">
+                        <caption className="sr-only">
+                          Allocated event equipment breakdown for {clientName}
+                        </caption>
+                        <thead className="sticky top-0 z-10 bg-natural-card border-b border-natural-border text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
+                          <tr>
+                            <th scope="col" className="text-left py-2.5 px-3.5">
+                              Equipment Item
+                            </th>
+                            <th scope="col" className="text-right py-2.5 px-3">
+                              Required
+                            </th>
+                            <th scope="col" className="text-right py-2.5 px-3">
+                              In-House
+                            </th>
+                            <th scope="col" className="text-right py-2.5 px-3">
+                              Outsource
+                            </th>
+                            <th scope="col" className="text-right py-2.5 px-3.5">
+                              Status
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-natural-border/60">
+                          {sortedEquipBreakdown.map((eq, i) => {
+                            const hasShortage = !isCompleted && eq.outsourcedQty > 0;
+                            return (
+                              <tr
+                                key={`${eq.itemName}-${i}`}
+                                className={cn(
+                                  "transition-colors",
+                                  hasShortage
+                                    ? "bg-amber-500/8 hover:bg-amber-500/12"
+                                    : "hover:bg-natural-card/80"
+                                )}
+                              >
+                                <th
+                                  scope="row"
+                                  className="text-left py-2 px-3.5 font-semibold text-natural-text-main"
                                 >
                                   {eq.itemName}
-                                </span>
-                                <span className="font-serif font-bold text-natural-accent shrink-0 text-xs">
-                                  {eq.quantity} {eq.unit}
-                                </span>
-                              </div>
-
-                              <div className="flex items-center justify-between text-[10.5px] pt-1.5 border-t border-natural-border/50 gap-1.5">
-                                <span
+                                </th>
+                                <td className="text-right py-2 px-3 font-mono font-semibold text-natural-text-main whitespace-nowrap">
+                                  {eq.quantity.toLocaleString()} {eq.unit}
+                                </td>
+                                <td className="text-right py-2 px-3 font-mono text-emerald-700 dark:text-emerald-400 font-semibold whitespace-nowrap">
+                                  {eq.inHouseQty.toLocaleString()}
+                                </td>
+                                <td
                                   className={cn(
-                                    "px-1.5 py-0.5 rounded font-bold flex items-center gap-1 shrink-0",
-                                    eq.inHouseQty > 0
-                                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20"
-                                      : "bg-natural-bg text-natural-text-light/60 border border-natural-border/40",
+                                    "text-right py-2 px-3 font-mono whitespace-nowrap",
+                                    hasShortage
+                                      ? "font-bold text-amber-700 dark:text-amber-300"
+                                      : "text-natural-text-light/60"
                                   )}
-                                  title={`In-Use: ${eq.inHouseQty.toLocaleString()} ${eq.unit}`}
                                 >
-                                  <Warehouse className="w-3 h-3 shrink-0" />
-                                  <span>{eq.inHouseQty.toLocaleString()}</span>
-                                </span>
-
-                                {isCompleted ? (
-                                  <span
-                                    className="text-emerald-700 dark:text-emerald-400 font-semibold text-[10px] shrink-0 flex items-center gap-0.5"
-                                    title="Returned to Monitoring"
-                                  >
-                                    <CheckCheck className="w-3 h-3 shrink-0" /> Returned
-                                  </span>
-                                ) : eq.outsourcedQty > 0 ? (
-                                  <span
-                                    className="px-1.5 py-0.5 rounded font-bold bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30 shrink-0 flex items-center gap-1"
-                                    title={`To Outsource: ${eq.outsourcedQty.toLocaleString()} ${eq.unit}`}
-                                  >
-                                    <ArrowUpRight className="w-3 h-3 shrink-0" />
-                                    <span>{eq.outsourcedQty.toLocaleString()}</span>
-                                  </span>
-                                ) : (
-                                  <span
-                                    className="text-emerald-700 dark:text-emerald-400 font-semibold text-[10px] shrink-0 flex items-center gap-0.5"
-                                    title="Fully covered (in-use)"
-                                  >
-                                    <CheckCircle2 className="w-3 h-3 shrink-0" /> In-Use
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                </div>
+                                  {eq.outsourcedQty > 0
+                                    ? eq.outsourcedQty.toLocaleString()
+                                    : "—"}
+                                </td>
+                                <td className="text-right py-2 px-3.5 whitespace-nowrap">
+                                  {isCompleted ? (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-400">
+                                      <CheckCheck
+                                        aria-hidden="true"
+                                        className="w-3 h-3"
+                                      />{" "}
+                                      Returned
+                                    </span>
+                                  ) : hasShortage ? (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30 text-[10px] font-bold uppercase tracking-wider">
+                                      <ArrowUpRight
+                                        aria-hidden="true"
+                                        className="w-3 h-3"
+                                      />{" "}
+                                      Outsource
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-400">
+                                      <CheckCircle2
+                                        aria-hidden="true"
+                                        className="w-3 h-3"
+                                      />{" "}
+                                      In-House
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
 
-            <div className="py-3.5 px-6 bg-natural-bg/30 border-t border-natural-border flex gap-3 shrink-0">
-              {(selectedBooking.status || "Pending") === "Pending" && (() => {
-                const payment = getBookingPayment(selectedBooking);
-                const totalBudget = calculateBudget(selectedBooking);
-                const is50Percent = payment.payment_scheme === "Standard 50%";
-                const downpaymentDue =
-                  payment.downpayment_amount > 0
-                    ? payment.downpayment_amount
-                    : Math.round(totalBudget * (is50Percent ? 0.5 : 0.2));
-
-                return (
+              {/* Balanced Sticky Footer */}
+              <div className="py-3 px-5 bg-natural-bg/40 border-t border-natural-border flex flex-wrap items-center justify-between gap-3 shrink-0">
+                {bookingStatus === "Pending" && (
                   <>
                     <button
-                      onClick={() =>
-                        setConfirmAction({
-                          type: "confirm",
-                          bookingId: selectedBooking.id,
-                          bookingName:
-                            selectedBooking.profiles?.name ||
-                            selectedBooking.profiles?.full_name ||
-                            "Unknown User",
-                        })
-                      }
-                      className="flex-1 bg-green-600 text-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-green-700 transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <CheckCircle2 className="w-4 h-4" />
-                      Verify Deposit & Confirm (₱{downpaymentDue.toLocaleString()})
-                    </button>
-                    <button
+                      type="button"
                       onClick={() =>
                         setConfirmAction({
                           type: "cancel",
                           bookingId: selectedBooking.id,
-                          bookingName:
-                            selectedBooking.profiles?.name ||
-                            selectedBooking.profiles?.full_name ||
-                            "Unknown User",
+                          bookingName: clientName,
                         })
                       }
-                      className="flex-1 bg-orange-50 text-orange-700 border border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-orange-100/70 dark:hover:bg-orange-950/70 transition-all cursor-pointer flex items-center justify-center gap-2"
+                      className="px-4 py-2 bg-orange-50 text-orange-700 border border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60 rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-orange-100/70 dark:hover:bg-orange-950/70 transition-all cursor-pointer flex items-center gap-1.5"
                     >
-                      <XCircle className="w-4 h-4" />
+                      <XCircle aria-hidden="true" className="w-4 h-4" />
                       Cancel Booking
                     </button>
-                  </>
-                );
-              })()}
-              {(selectedBooking.status || "Pending") === "Confirmed" && (() => {
-                const payment = getBookingPayment(selectedBooking);
-                const isFinalVerified = payment.final_balance_status === "Verified";
 
-                return (
-                  <>
-                    <button
-                      type="button"
-                      disabled={!isFinalVerified}
-                      onClick={() => {
-                        if (!isFinalVerified) return;
-                        setConfirmAction({
-                          type: "complete",
-                          bookingId: selectedBooking.id,
-                          bookingName:
-                            selectedBooking.profiles?.name ||
-                            selectedBooking.profiles?.full_name ||
-                            "Unknown User",
-                        });
-                      }}
-                      className={cn(
-                        "flex-1 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest transition-all shadow-sm flex items-center justify-center gap-1.5 select-none",
-                        isFinalVerified
-                          ? "bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
-                          : "bg-natural-bg/70 dark:bg-natural-sidebar/50 border border-natural-border text-natural-text-light/60 cursor-not-allowed opacity-75",
-                      )}
-                      title={
-                        !isFinalVerified
-                          ? "Final balance payment must be confirmed and verified before completing event"
-                          : "Mark event completed and return equipment to monitoring"
-                      }
-                    >
-                      {!isFinalVerified ? (
-                        <>
-                          <Lock className="w-3.5 h-3.5 text-natural-text-light/60" />
-                          <span>Complete Event (Final Payment Verification Required)</span>
-                        </>
-                      ) : (
-                        <>
-                          <CheckCheck className="w-3.5 h-3.5" />
-                          <span>Complete Event</span>
-                        </>
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedBooking(null)}
-                      className="px-6 border border-natural-border text-natural-text-light hover:text-natural-text-main bg-white dark:bg-natural-card py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest transition-all cursor-pointer shrink-0"
-                    >
-                      Close
-                    </button>
-                  </>
-                );
-              })()}
-              {(selectedBooking.status || "Pending") !== "Pending" &&
-                (selectedBooking.status || "Pending") !== "Confirmed" && (
-                  <>
-                    {(selectedBooking.status || "Pending") === "Archived" && (
+                    <div className="flex items-center gap-2.5 ml-auto">
                       <button
-                        onClick={() => {
-                          setConfirmPassword("");
-                          setPasswordError(false);
+                        type="button"
+                        onClick={() => setSelectedBooking(null)}
+                        className="px-4 py-2 border border-natural-border text-natural-text-light hover:text-natural-text-main bg-white dark:bg-natural-card rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer"
+                      >
+                        Close
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
                           setConfirmAction({
-                            type: "unarchive",
+                            type: "confirm",
                             bookingId: selectedBooking.id,
-                            bookingName:
-                              selectedBooking.profiles?.name ||
-                              selectedBooking.profiles?.full_name ||
-                              "Unknown User",
+                            bookingName: clientName,
+                          })
+                        }
+                        className="px-5 py-2.5 bg-green-600 text-white rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-green-700 transition-all shadow-sm flex items-center gap-2 cursor-pointer"
+                      >
+                        <CheckCircle2 aria-hidden="true" className="w-4 h-4" />
+                        Verify Deposit &amp; Confirm (₱{downpaymentDue.toLocaleString()})
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {isConfirmed && (
+                  <>
+                    <span className="text-xs text-natural-text-light hidden sm:inline">
+                      {isFinalVerified
+                        ? "Final balance verified — ready to mark event complete."
+                        : "Verify final balance in Payments & Billing before completing event."}
+                    </span>
+                    <div className="flex items-center gap-2.5 ml-auto">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedBooking(null)}
+                        className="px-5 py-2 border border-natural-border text-natural-text-light hover:text-natural-text-main bg-white dark:bg-natural-card rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer"
+                      >
+                        Close
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!isFinalVerified}
+                        onClick={() => {
+                          if (!isFinalVerified) return;
+                          setConfirmAction({
+                            type: "complete",
+                            bookingId: selectedBooking.id,
+                            bookingName: clientName,
                           });
                         }}
-                        className="px-6 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                        className={cn(
+                          "px-5 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all shadow-sm flex items-center gap-1.5 select-none",
+                          isFinalVerified
+                            ? "bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+                            : "bg-natural-bg/70 dark:bg-natural-sidebar/50 border border-natural-border text-natural-text-light/60 cursor-not-allowed opacity-75"
+                        )}
+                        title={
+                          !isFinalVerified
+                            ? "Final balance payment must be confirmed and verified before completing event"
+                            : "Mark event completed and return equipment to monitoring"
+                        }
                       >
-                        <RotateCcw className="w-4 h-4" />
-                        <span>Restore Booking</span>
+                        {!isFinalVerified ? (
+                          <>
+                            <Lock aria-hidden="true" className="w-3.5 h-3.5" />
+                            <span>Complete Event (Balance Unverified)</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCheck aria-hidden="true" className="w-3.5 h-3.5" />
+                            <span>Complete Event</span>
+                          </>
+                        )}
                       </button>
-                    )}
+                    </div>
+                  </>
+                )}
+
+                {bookingStatus !== "Pending" && !isConfirmed && (
+                  <>
+                    <div>
+                      {bookingStatus === "Archived" && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConfirmPassword("");
+                            setPasswordError(false);
+                            setConfirmAction({
+                              type: "unarchive",
+                              bookingId: selectedBooking.id,
+                              bookingName: clientName,
+                            });
+                          }}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-all shadow-sm flex items-center gap-2 cursor-pointer"
+                        >
+                          <RotateCcw aria-hidden="true" className="w-4 h-4" />
+                          <span>Restore Booking</span>
+                        </button>
+                      )}
+                    </div>
                     <button
+                      type="button"
                       onClick={() => setSelectedBooking(null)}
-                      className="flex-1 bg-natural-accent text-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm"
+                      className="px-6 py-2.5 bg-natural-accent text-white rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-natural-accent/90 transition-all shadow-sm cursor-pointer ml-auto"
                     >
                       Close View
                     </button>
                   </>
                 )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {confirmAction && (() => {
         const confirmTargetBooking =
