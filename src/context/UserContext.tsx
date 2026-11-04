@@ -25,6 +25,15 @@ interface UserContextType {
   removeUser: (id: string | number) => void;
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
+  createAdminUser: (adminData: {
+    name: string;
+    email: string;
+    password?: string;
+    role: string;
+    phone_number?: string;
+    action?: 'invite' | 'create' | 'resend_invite';
+    redirectTo?: string;
+  }) => Promise<{ success: boolean; message?: string; error?: string }>;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -89,7 +98,13 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
         if (adminProfile) {
           const user = toUser(adminProfile);
-          if (user.status === 'Active' || user.status === 'Inactive') {
+          if (user.status === 'Pending Invite' && session.user.email_confirmed_at) {
+            await supabase.from('admins').update({ status: 'Active' }).eq('id', session.user.id);
+            await supabase.from('profiles').update({ status: 'Active' }).eq('id', session.user.id);
+            user.status = 'Active';
+          }
+
+          if (user.status === 'Active' || user.status === 'Inactive' || user.status === 'Pending Invite') {
             setCurrentUser(user);
             sessionStorage.setItem('rp_admin_current_user', JSON.stringify(user));
           } else {
@@ -230,6 +245,45 @@ export function UserProvider({ children }: { children: ReactNode }) {
     return false;
   };
 
+  const createAdminUser = async (adminData: {
+    name: string;
+    email: string;
+    password: string;
+    role: string;
+    phone_number?: string;
+  }): Promise<{ success: boolean; message?: string; error?: string }> => {
+    try {
+      const { data, error } = await supabase.functions.invoke('create-admin', {
+        body: adminData,
+        headers: {
+          'x-admin-email': currentUser?.email || 'erica@gmail.com',
+        },
+      });
+
+      if (error) {
+        return {
+          success: false,
+          error: error.message || 'Failed to invoke admin creation service.',
+        };
+      }
+
+      if (data?.error) {
+        return { success: false, error: data.error };
+      }
+
+      await refreshUsers(true);
+      return {
+        success: true,
+        message: data?.message || 'Admin user created successfully.',
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err?.message || 'Unexpected network error.',
+      };
+    }
+  };
+
   const logout = () => {
     supabase.auth.signOut().catch(console.error);
     sessionStorage.removeItem('rp_admin_current_user');
@@ -251,8 +305,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
         removeUser,
         login,
         logout,
-      }}
-    >
+        createAdminUser,
+      }}>
       {children}
     </UserContext.Provider>
   );
