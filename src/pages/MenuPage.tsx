@@ -36,11 +36,53 @@ const categories = [
   "All",
   "Main Course",
   "Appetizers",
+  "Soup",
+  "Vegetables",
   "Pasta",
   "Desserts",
   "Beverages",
   "Archived",
 ];
+
+export const isSoup = (item: { name?: string; category?: string; sub_category?: string }) => {
+  const sub = (item.sub_category || "").trim().toLowerCase();
+  const cat = (item.category || "").trim().toLowerCase();
+  const name = (item.name || "").trim().toLowerCase();
+  if (sub === "soup" || cat === "soup") return true;
+  if (
+    name.includes("soup") ||
+    name.includes("broth") ||
+    name.includes("chowder") ||
+    name.includes("sinigang") ||
+    name.includes("nilaga") ||
+    name.includes("sopas") ||
+    name.includes("mami")
+  ) return true;
+  return false;
+};
+
+export const isVegetable = (item: { name?: string; category?: string; sub_category?: string }) => {
+  const sub = (item.sub_category || "").trim().toLowerCase();
+  const cat = (item.category || "").trim().toLowerCase();
+  const name = (item.name || "").trim().toLowerCase();
+  if (isSoup(item)) return false;
+  if (sub === "vegetables" || sub === "vegetable" || cat === "vegetables" || cat === "vegetable") return true;
+  if (
+    name.includes("vegetable") ||
+    name.includes("veggie") ||
+    name.includes("chopseuy") ||
+    name.includes("chopsuey") ||
+    name.includes("lumpiang sariwa")
+  ) return true;
+  return false;
+};
+
+export const isAppetizer = (item: { name?: string; category?: string; sub_category?: string }) => {
+  const sub = (item.sub_category || "").trim().toLowerCase();
+  const cat = (item.category || "").trim().toLowerCase();
+  if (isSoup(item) || isVegetable(item)) return false;
+  return cat.includes("appetizer") || sub.includes("appetizer");
+};
 
 export function MenuPage() {
   // State management for UI and Data
@@ -108,7 +150,15 @@ export function MenuPage() {
       }
 
       const matchesCategory =
-        activeCategory === "All" || item.category === activeCategory;
+        activeCategory === "All"
+          ? true
+          : activeCategory === "Soup"
+            ? isSoup(item)
+            : activeCategory === "Vegetables"
+              ? isVegetable(item)
+              : activeCategory === "Appetizers"
+                ? isAppetizer(item)
+                : item.category === activeCategory;
 
       const isNotArchived = item.status !== "Archived";
       return matchesCategory && matchesSearch && isNotArchived;
@@ -202,7 +252,11 @@ export function MenuPage() {
             formData.category,
           )
             ? formData.sub_category
-            : null,
+            : formData.category === "Soup"
+              ? "Soup"
+              : formData.category === "Vegetables"
+                ? "Vegetables"
+                : null,
           status: formData.status || "Available",
           image_url: formData.image_url || null,
         },
@@ -229,7 +283,11 @@ export function MenuPage() {
             formData.category,
           )
             ? formData.sub_category
-            : null,
+            : formData.category === "Soup"
+              ? "Soup"
+              : formData.category === "Vegetables"
+                ? "Vegetables"
+                : null,
           status: formData.status,
           image_url: formData.image_url || null,
         })
@@ -347,7 +405,13 @@ export function MenuPage() {
 
       <div className="mb-2">
         <p className="text-xs font-bold text-natural-accent uppercase tracking-wider mb-1">
-          {item.category}
+          {isSoup(item)
+            ? "Soup"
+            : isVegetable(item)
+              ? "Vegetables"
+              : isAppetizer(item)
+                ? "Appetizers"
+                : item.category}
         </p>
         <h4 className="text-base font-bold text-natural-text-main tracking-normal leading-snug">
           {item.name}
@@ -449,7 +513,7 @@ export function MenuPage() {
           </div>
         </div>
 
-        {["Desserts", "Beverages", "Pasta", "Archived"].includes(
+        {["Desserts", "Beverages", "Pasta", "Soup", "Vegetables", "Appetizers", "Archived"].includes(
           activeCategory,
         ) ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-0 divide-x divide-y divide-natural-border bg-white border-t border-natural-border">
@@ -557,20 +621,15 @@ export function MenuPage() {
                   },
                   {
                     title: "Appetizer",
-                    match: (i: MenuItem) =>
-                      i.sub_category === "Appetizer" &&
-                      i.category === "Appetizers",
-                  },
-                  {
-                    title: "Vegetables",
-                    match: (i: MenuItem) =>
-                      i.sub_category === "Vegetables" &&
-                      i.category === "Appetizers",
+                    match: (i: MenuItem) => isAppetizer(i),
                   },
                   {
                     title: "Soup",
-                    match: (i: MenuItem) =>
-                      i.sub_category === "Soup" && i.category === "Appetizers",
+                    match: (i: MenuItem) => isSoup(i),
+                  },
+                  {
+                    title: "Vegetables",
+                    match: (i: MenuItem) => isVegetable(i),
                   },
                   {
                     title: "Pasta",
@@ -587,25 +646,17 @@ export function MenuPage() {
                   {
                     title: "Other Dishes",
                     match: (i: MenuItem) =>
-                      (![
+                      ![
                         "Beef",
                         "Pork",
                         "Chicken",
                         "Fish & Shrimp",
                         "Rice",
                       ].includes(i.sub_category || "") &&
-                        i.category === "Main Course") ||
-                      (!["Appetizer", "Vegetables", "Soup"].includes(
-                        i.sub_category || "",
-                      ) &&
-                        i.category === "Appetizers") ||
-                      ![
-                        "Main Course",
-                        "Appetizers",
-                        "Desserts",
-                        "Beverages",
-                        "Pasta",
-                      ].includes(i.category),
+                      !isAppetizer(i) &&
+                      !isSoup(i) &&
+                      !isVegetable(i) &&
+                      !["Pasta", "Desserts", "Beverages"].includes(i.category),
                   },
                 ];
               }
@@ -723,7 +774,12 @@ export function MenuPage() {
                     setFormData({
                       ...formData,
                       category: newCategory,
-                      sub_category: "",
+                      sub_category:
+                        newCategory === "Soup"
+                          ? "Soup"
+                          : newCategory === "Vegetables"
+                            ? "Vegetables"
+                            : "",
                     });
                   }}
                   className="w-full px-4 py-2.5 bg-natural-bg border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 transition-all font-medium"

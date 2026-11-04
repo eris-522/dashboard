@@ -389,7 +389,15 @@ export function CMSPage() {
       map.set(key, {
         id: item.id,
         name: item.name,
-        category: item.category || existing?.category || "Main Course",
+        category: (() => {
+          const sub = (item.sub_category || "").trim().toLowerCase();
+          const cat = (item.category || existing?.category || "Main Course").trim();
+          const name = (item.name || "").trim().toLowerCase();
+          if (sub === "soup" || cat.toLowerCase() === "soup" || name.includes("soup") || name.includes("broth") || name.includes("chowder")) return "Soup";
+          if (sub === "vegetables" || sub === "vegetable" || cat.toLowerCase() === "vegetables" || cat.toLowerCase() === "vegetable" || name.includes("vegetable") || name.includes("veggie") || name.includes("chopseuy") || name.includes("chopsuey") || name.includes("lumpiang sariwa")) return "Vegetables";
+          if (cat.toLowerCase().includes("appetizer")) return "Appetizers";
+          return cat || "Main Course";
+        })(),
         sub_category: item.sub_category,
         description:
           item.description || existing?.description || item.sub_category || "",
@@ -428,7 +436,7 @@ export function CMSPage() {
 
   const menuGroupedByCategory = useMemo(() => {
     const grouped: Record<string, typeof displayMenuItems> = {};
-    const priority = ["Main Course", "Appetizers", "Pasta", "Desserts", "Beverages"];
+    const priority = ["Appetizers", "Soup", "Vegetables", "Main Course", "Pasta", "Desserts", "Beverages"];
 
     displayMenuItems.forEach((dish) => {
       const cat = dish.category || "Main Course";
