@@ -75,6 +75,7 @@ export function InventoryPage() {
     addItem,
     updateStock,
     archiveItem,
+    unarchiveItem,
     updateItem,
     getAllocatedStock,
     getOutsourcedStock,
@@ -267,6 +268,7 @@ export function InventoryPage() {
   const [customReasonNote, setCustomReasonNote] = useState<string>("");
   const [formError, setFormError] = useState<string | null>(null);
   const [itemToArchive, setItemToArchive] = useState<string | number | null>(null);
+  const [itemToUnarchive, setItemToUnarchive] = useState<string | number | null>(null);
 
   // New Item State
   const [newItem, setNewItem] = useState<Partial<InventoryItem>>({
@@ -1076,9 +1078,14 @@ export function InventoryPage() {
                                 </button>
                               </>
                             ) : (
-                              <span className="text-xs font-bold text-natural-text-light/60 dark:text-natural-text-light uppercase tracking-wider bg-natural-bg/50 dark:bg-natural-bg/30 px-2.5 py-1 rounded border border-natural-border/40">
-                                Archived
-                              </span>
+                              <button
+                                onClick={() => setItemToUnarchive(item.id)}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-all shadow-xs"
+                                title="Restore Item"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" />
+                                <span>Restore</span>
+                              </button>
                             )}
                           </div>
                         </td>
@@ -1709,6 +1716,60 @@ export function InventoryPage() {
               >
                 Save Changes
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: UNARCHIVE CONFIRMATION */}
+      {itemToUnarchive !== null && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200 border border-natural-border relative">
+            <div className="p-8 text-center">
+              <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 bg-emerald-600 text-white shadow-lg shadow-emerald-200">
+                <RotateCcw className="w-8 h-8" />
+              </div>
+
+              <h3 className="text-xl font-serif font-bold text-natural-text-main mb-2">
+                Restore Equipment?
+              </h3>
+
+              <p className="text-sm text-natural-text-light mb-8 leading-relaxed">
+                Are you sure you want to restore{" "}
+                <span className="font-bold text-natural-text-main">
+                  {items.find((i) => String(i.id) === String(itemToUnarchive))?.name}
+                </span>
+                ? It will be returned to active inventory tracking.
+              </p>
+
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={async () => {
+                    if (itemToUnarchive !== null) {
+                      const item = items.find((i) => String(i.id) === String(itemToUnarchive));
+                      await unarchiveItem(itemToUnarchive);
+                      if (item) {
+                        await logAuditAction({
+                          action: "Unarchived Equipment Item",
+                          target: item.name,
+                          type: "Update",
+                          details: "Restored item to active equipment inventory",
+                        });
+                      }
+                    }
+                    setItemToUnarchive(null);
+                  }}
+                  className="w-full py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] text-white bg-emerald-600 hover:bg-emerald-700 transition-all shadow-md active:scale-[0.98]"
+                >
+                  Confirm Restore
+                </button>
+                <button
+                  onClick={() => setItemToUnarchive(null)}
+                  className="w-full py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] text-natural-text-light border border-natural-border hover:bg-natural-bg transition-all active:scale-[0.98]"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           </div>
         </div>

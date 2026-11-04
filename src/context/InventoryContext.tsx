@@ -75,6 +75,7 @@ interface InventoryContextType {
   addItem: (item: Omit<InventoryItem, 'id' | 'status'>) => Promise<void>;
   updateStock: (id: string | number, quantity: number, reason?: string, type?: StockMovement['type']) => Promise<void>;
   archiveItem: (id: string | number) => Promise<void>;
+  unarchiveItem: (id: string | number) => Promise<void>;
   updateItem: (id: string | number, updates: Partial<InventoryItem>) => Promise<void>;
   calculatePackageEquipment: (packageName: string, pax: number, inclusions?: string[], currentItemsList?: InventoryItem[], corkageData?: any) => EquipmentRequirement[];
   checkInventoryAvailability: (packageName: string, pax: number, inclusions?: string[]) => {
@@ -1542,6 +1543,22 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const unarchiveItem = async (id: string | number) => {
+    const target = items.find(item => String(item.id) === String(id));
+    const restoredStatus = target ? getStatus(target.stock, target.minStock) : 'Normal';
+    setItems(prev => prev.map(item => String(item.id) === String(id) ? { ...item, status: restoredStatus } : item));
+    
+    const { error: unarchiveError } = await supabase.from('inventory').update({ status: restoredStatus }).eq('id', id);
+    
+    if (unarchiveError) {
+      console.error("Error unarchiving item:", unarchiveError);
+      alert("Supabase Error: " + unarchiveError.message);
+      refreshInventoryItemsOnly();
+    } else {
+      broadcastInventoryChange('items');
+    }
+  };
+
   const updateItem = async (id: string | number, updates: Partial<InventoryItem>) => {
     setItems(prev => prev.map(item => {
       if (String(item.id) === String(id)) {
@@ -1591,6 +1608,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       addItem,
       updateStock,
       archiveItem,
+      unarchiveItem,
       updateItem,
       calculatePackageEquipment,
       checkInventoryAvailability,

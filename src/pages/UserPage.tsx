@@ -12,6 +12,7 @@ import {
   X,
   Check,
   Archive,
+  RotateCcw,
   Edit3,
   Trash2,
   Lock,
@@ -61,7 +62,7 @@ export function UserPage() {
     {},
   );
   const [confirmAction, setConfirmAction] = useState<{
-    type: "edit" | "archive";
+    type: "edit" | "archive" | "unarchive";
     userId?: string;
     userName: string;
   } | null>(null);
@@ -198,6 +199,14 @@ export function UserPage() {
     });
   };
 
+  const handleUnarchiveClick = (id: string, name: string) => {
+    setConfirmAction({
+      type: "unarchive",
+      userId: id,
+      userName: name,
+    });
+  };
+
   const handleEditClick = (user: User) => {
     setEditingUser(user);
     setFormData(user);
@@ -252,6 +261,23 @@ export function UserPage() {
           target: confirmAction.userName,
           type: "Delete",
           details: `Archived user account and restricted access`,
+        });
+      }
+    } else if (confirmAction.type === "unarchive" && confirmAction.userId) {
+      const { error: unarchiveError } = await supabase
+        .from("profiles")
+        .update({
+          status: "Active",
+        })
+        .eq("id", confirmAction.userId);
+      if (unarchiveError) {
+        console.error("Error unarchiving profile:", unarchiveError.message);
+      } else {
+        await logAuditAction({
+          action: "Unarchived User Account",
+          target: confirmAction.userName,
+          type: "Update",
+          details: `Restored user account to Active status`,
         });
       }
     }
@@ -476,9 +502,16 @@ export function UserPage() {
                           )}
                         </>
                       ) : (
-                        <span className="text-xs font-bold text-natural-text-light/60 uppercase tracking-wider bg-natural-bg/50 px-2.5 py-1 rounded">
-                          Archived - Read Only
-                        </span>
+                        <button
+                          onClick={() =>
+                            handleUnarchiveClick(user.id, user.name || "User")
+                          }
+                          className="flex items-center gap-1 px-2.5 py-1 text-natural-accent hover:text-white hover:bg-natural-accent border border-natural-accent/30 rounded-lg transition-all text-xs font-bold uppercase tracking-wider shadow-xs cursor-pointer"
+                          title="Unarchive User"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          Restore
+                        </button>
                       )}
                     </div>
                   </td>
@@ -611,7 +644,9 @@ export function UserPage() {
                   "w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 rotate-3 shadow-lg transition-transform hover:rotate-0",
                   confirmAction.type === "edit"
                     ? "bg-natural-accent shadow-natural-accent/20"
-                    : "bg-red-600 shadow-red-200",
+                    : confirmAction.type === "unarchive"
+                      ? "bg-emerald-600 shadow-emerald-200"
+                      : "bg-red-600 shadow-red-200",
                 )}
               >
                 {confirmAction.type === "edit" && (
@@ -620,12 +655,17 @@ export function UserPage() {
                 {confirmAction.type === "archive" && (
                   <Archive className="w-8 h-8 text-white" />
                 )}
+                {confirmAction.type === "unarchive" && (
+                  <RotateCcw className="w-8 h-8 text-white" />
+                )}
               </div>
 
               <h3 className="text-xl font-serif font-bold text-natural-text-main mb-2">
                 {confirmAction.type === "edit"
                   ? "Save Changes?"
-                  : "Archive Account?"}
+                  : confirmAction.type === "unarchive"
+                    ? "Unarchive Account?"
+                    : "Archive Account?"}
               </h3>
 
               <p className="text-sm text-natural-text-light mb-8 leading-relaxed">
@@ -636,6 +676,14 @@ export function UserPage() {
                       {confirmAction.userName}
                     </span>
                     . Continue?
+                  </>
+                ) : confirmAction.type === "unarchive" ? (
+                  <>
+                    This will restore{" "}
+                    <span className="font-bold text-natural-text-main">
+                      {confirmAction.userName}
+                    </span>
+                    's account back to Active status, allowing them to access the platform.
                   </>
                 ) : (
                   <>
@@ -656,7 +704,9 @@ export function UserPage() {
                     "w-full py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] text-white transition-all shadow-md active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-inherit",
                     confirmAction.type === "edit"
                       ? "bg-natural-accent hover:bg-natural-accent/90"
-                      : "bg-red-600 hover:bg-red-700",
+                      : confirmAction.type === "unarchive"
+                        ? "bg-emerald-600 hover:bg-emerald-700"
+                        : "bg-red-600 hover:bg-red-700",
                   )}
                 >
                   Confirm {confirmAction.type}

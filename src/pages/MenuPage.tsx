@@ -15,6 +15,7 @@ import {
   Check,
   ArrowLeft,
   ChevronDown,
+  RotateCcw,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { supabase } from "../utils/supabase";
@@ -101,7 +102,7 @@ export function MenuPage() {
   });
 
   const [confirmAction, setConfirmAction] = useState<{
-    type: "create" | "edit" | "archive";
+    type: "create" | "edit" | "archive" | "unarchive";
     itemId?: string;
     itemName: string;
   } | null>(null);
@@ -198,6 +199,15 @@ export function MenuPage() {
   const handleArchiveClick = (item: MenuItem) => {
     setConfirmAction({
       type: "archive",
+      itemId: item.id,
+      itemName: item.name,
+    });
+  };
+
+  // Opens the confirmation dialogue specifically for restoring an archived item
+  const handleUnarchiveClick = (item: MenuItem) => {
+    setConfirmAction({
+      type: "unarchive",
       itemId: item.id,
       itemName: item.name,
     });
@@ -322,6 +332,25 @@ export function MenuPage() {
         type: "Delete",
         details: `Moved dish to archives`,
       });
+    } else if (confirmAction.type === "unarchive" && confirmAction.itemId) {
+      // Restores an archived item to 'Available'
+      const { error } = await supabase
+        .from("menu_items")
+        .update({
+          status: "Available",
+        })
+        .eq("id", confirmAction.itemId);
+      if (error) {
+        console.error("Error unarchiving item:", error.message);
+        setFormError("Failed to unarchive dish.");
+        return;
+      }
+      await logAuditAction({
+        action: "Unarchived Menu Item",
+        target: confirmAction.itemName,
+        type: "Update",
+        details: `Restored dish to active menu catalog`,
+      });
     }
 
     // Refreshes the UI data from the database, broadcasts to live clients, and resets the form states
@@ -361,7 +390,14 @@ export function MenuPage() {
           "bg-natural-bg/40 opacity-60 grayscale-[0.5]",
       )}
     >
-      <div className="absolute top-4 right-4 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div
+        className={cn(
+          "absolute top-4 right-4 flex items-center gap-1 transition-opacity",
+          item.status === "Archived"
+            ? "opacity-100"
+            : "opacity-0 group-hover:opacity-100",
+        )}
+      >
         {item.status !== "Archived" ? (
           <>
             <button
@@ -380,9 +416,14 @@ export function MenuPage() {
             </button>
           </>
         ) : (
-          <span className="text-xs font-bold text-natural-text-light/50 uppercase tracking-wider bg-natural-bg/50 px-2.5 py-1 rounded">
-            Archived
-          </span>
+          <button
+            onClick={() => handleUnarchiveClick(item)}
+            className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-all shadow-xs"
+            title="Restore Dish"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Restore</span>
+          </button>
         )}
       </div>
 
@@ -906,7 +947,9 @@ export function MenuPage() {
                     ? "bg-blue-600 shadow-blue-200"
                     : confirmAction.type === "edit"
                       ? "bg-natural-accent shadow-natural-accent/20"
-                      : "bg-red-600 shadow-red-200",
+                      : confirmAction.type === "unarchive"
+                        ? "bg-emerald-600 shadow-emerald-200"
+                        : "bg-red-600 shadow-red-200",
                 )}
               >
                 {confirmAction.type === "create" && (
@@ -918,6 +961,9 @@ export function MenuPage() {
                 {confirmAction.type === "archive" && (
                   <Archive className="w-8 h-8 text-white" />
                 )}
+                {confirmAction.type === "unarchive" && (
+                  <RotateCcw className="w-8 h-8 text-white" />
+                )}
               </div>
 
               <h3 className="text-xl font-serif font-bold text-natural-text-main mb-2">
@@ -925,7 +971,9 @@ export function MenuPage() {
                   ? "Add to Catalog?"
                   : confirmAction.type === "edit"
                     ? "Update Dish?"
-                    : "Archive Dish?"}
+                    : confirmAction.type === "unarchive"
+                      ? "Restore Dish to Catalog?"
+                      : "Archive Dish?"}
               </h3>
 
               <p className="text-sm text-natural-text-light mb-8 leading-relaxed">
@@ -944,6 +992,14 @@ export function MenuPage() {
                       {confirmAction.itemName}
                     </span>
                     . Continue?
+                  </>
+                ) : confirmAction.type === "unarchive" ? (
+                  <>
+                    Are you sure you want to restore{" "}
+                    <span className="font-bold text-natural-text-main">
+                      {confirmAction.itemName}
+                    </span>{" "}
+                    back to the active catalog as Available?
                   </>
                 ) : (
                   <>
@@ -986,10 +1042,12 @@ export function MenuPage() {
                       "w-full py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] text-white transition-all shadow-md active:scale-[0.98]",
                       confirmAction.type === "edit"
                         ? "bg-natural-accent hover:bg-natural-accent/90"
-                        : "bg-red-600 hover:bg-red-700",
+                        : confirmAction.type === "unarchive"
+                          ? "bg-emerald-600 hover:bg-emerald-700"
+                          : "bg-red-600 hover:bg-red-700",
                     )}
                   >
-                    Confirm {confirmAction.type}
+                    Confirm {confirmAction.type === "unarchive" ? "Restore" : confirmAction.type}
                   </button>
                 )}
                 <button

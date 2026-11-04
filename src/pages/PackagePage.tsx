@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ArrowLeft,
   Boxes,
+  RotateCcw,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { supabase } from "../utils/supabase"; // Database connection
@@ -77,7 +78,7 @@ export function PackagePage() {
   const [newCategoryName, setNewCategoryName] = useState("");
 
   const [confirmAction, setConfirmAction] = useState<{
-    type: "create" | "edit" | "archive" | "delete";
+    type: "create" | "edit" | "archive" | "unarchive" | "delete";
     itemType: "package" | "category" | "item";
     itemId?: string;
     itemName: string;
@@ -175,6 +176,16 @@ export function PackagePage() {
   const handleArchiveClick = (pkg: CateringPackage) => {
     setConfirmAction({
       type: "archive",
+      itemType: "package",
+      itemId: pkg.id,
+      itemName: pkg.name,
+    });
+  };
+
+  // Feature: Triggers the unarchive confirmation dialog for packages
+  const handleUnarchiveClick = (pkg: CateringPackage) => {
+    setConfirmAction({
+      type: "unarchive",
       itemType: "package",
       itemId: pkg.id,
       itemName: pkg.name,
@@ -564,6 +575,24 @@ export function PackagePage() {
             details: `Moved package to archives`,
           });
         }
+      } else if (confirmAction.type === "unarchive" && confirmAction.itemId) {
+        // Unarchives package back to 'Available'
+        const { error } = await supabase
+          .from("packages")
+          .update({ status: "Available" })
+          .eq("id", confirmAction.itemId);
+        if (error) {
+          console.error("Error unarchiving package:", error);
+          setFormError(error.message);
+          return;
+        } else {
+          await logAuditAction({
+            action: "Unarchived Package",
+            target: confirmAction.itemName,
+            type: "Update",
+            details: `Restored package from archives to active offerings`,
+          });
+        }
       }
     }
 
@@ -684,7 +713,14 @@ export function PackagePage() {
                     </h3>
                   </div>
                 </div>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div
+                  className={cn(
+                    "flex items-center gap-1 transition-opacity",
+                    pkg.status === "Archived"
+                      ? "opacity-100"
+                      : "opacity-0 group-hover:opacity-100",
+                  )}
+                >
                   {pkg.status !== "Archived" ? (
                     <>
                       <button
@@ -703,9 +739,14 @@ export function PackagePage() {
                       </button>
                     </>
                   ) : (
-                    <span className="text-xs font-bold text-natural-text-light/60 dark:text-natural-text-light uppercase tracking-wider bg-natural-bg/50 dark:bg-natural-bg/30 px-2.5 py-1 rounded ml-1 border border-natural-border/40">
-                      Archived
-                    </span>
+                    <button
+                      onClick={() => handleUnarchiveClick(pkg)}
+                      className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-all shadow-xs"
+                      title="Restore Package"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Restore</span>
+                    </button>
                   )}
                 </div>
               </div>
@@ -1451,7 +1492,9 @@ export function PackagePage() {
                     ? "bg-blue-600 shadow-blue-200"
                     : confirmAction.type === "edit"
                       ? "bg-natural-accent shadow-natural-accent/20"
-                      : "bg-red-600 shadow-red-200",
+                      : confirmAction.type === "unarchive"
+                        ? "bg-emerald-600 shadow-emerald-200"
+                        : "bg-red-600 shadow-red-200",
                 )}
               >
                 {confirmAction.type === "create" && (
@@ -1463,13 +1506,18 @@ export function PackagePage() {
                 {confirmAction.type === "archive" && (
                   <Archive className="w-8 h-8 text-white" />
                 )}
+                {confirmAction.type === "unarchive" && (
+                  <RotateCcw className="w-8 h-8 text-white" />
+                )}
                 {confirmAction.type === "delete" && (
                   <Trash2 className="w-8 h-8 text-white" />
                 )}
               </div>
 
               <h3 className="text-xl font-serif font-bold text-natural-text-main mb-2 capitalize">
-                {confirmAction.type} {confirmAction.itemType}?
+                {confirmAction.type === "unarchive"
+                  ? "Restore Package?"
+                  : `${confirmAction.type} ${confirmAction.itemType}?`}
               </h3>
 
               <p className="text-sm text-natural-text-light mb-8 leading-relaxed">
@@ -1496,6 +1544,14 @@ export function PackagePage() {
                       {confirmAction.itemName}
                     </span>
                     ? This action cannot be undone.
+                  </>
+                ) : confirmAction.type === "unarchive" ? (
+                  <>
+                    Are you sure you want to restore{" "}
+                    <span className="font-bold text-natural-text-main">
+                      {confirmAction.itemName}
+                    </span>{" "}
+                    back to active offerings?
                   </>
                 ) : (
                   <>
@@ -1524,10 +1580,12 @@ export function PackagePage() {
                       ? "bg-blue-600 hover:bg-blue-700"
                       : confirmAction.type === "edit"
                         ? "bg-natural-accent hover:bg-natural-accent/90"
-                        : "bg-red-600 hover:bg-red-700",
+                        : confirmAction.type === "unarchive"
+                          ? "bg-emerald-600 hover:bg-emerald-700"
+                          : "bg-red-600 hover:bg-red-700",
                   )}
                 >
-                  Confirm {confirmAction.type}
+                  Confirm {confirmAction.type === "unarchive" ? "Restore" : confirmAction.type}
                 </button>
                 <button
                   onClick={() => {

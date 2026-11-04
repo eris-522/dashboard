@@ -481,6 +481,7 @@ export function BookingPage() {
       | "confirm"
       | "cancel"
       | "archive"
+      | "unarchive"
       | "create"
       | "complete"
       | "verify_final_payment";
@@ -1017,7 +1018,7 @@ export function BookingPage() {
       return;
     }
 
-    if (["confirm", "cancel", "archive"].includes(type)) {
+    if (["confirm", "cancel", "archive", "unarchive"].includes(type)) {
       if (!confirmPassword) {
         setPasswordError("Password is required to proceed.");
         return;
@@ -1187,9 +1188,20 @@ export function BookingPage() {
         details: `Marked event as Completed for ${confirmAction.bookingName} and returned all allocated equipment to equipment monitoring`,
       });
     } else if (type === "archive" && bookingId) {
+      const currentBooking = bookings.find((b) => String(b.id) === String(bookingId));
+      const prevStatus = currentBooking?.status || "Pending";
+      const existingLogistics = currentBooking?.logistics_info || {};
+      const updatedLogistics = {
+        ...existingLogistics,
+        archived_from_status: prevStatus,
+      };
+
       const { error: archiveErr } = await supabase
         .from("bookings")
-        .update({ status: "Archived" })
+        .update({
+          status: "Archived",
+          logistics_info: updatedLogistics,
+        })
         .eq("id", bookingId);
 
       if (archiveErr) {
@@ -1207,6 +1219,51 @@ export function BookingPage() {
         target: confirmAction.bookingName,
         type: "Delete",
         details: `Moved booking for ${confirmAction.bookingName} to archives`,
+      });
+    } else if (type === "unarchive" && bookingId) {
+      const currentBooking = bookings.find((b) => String(b.id) === String(bookingId));
+      const targetStatus =
+        currentBooking?.logistics_info?.archived_from_status ||
+        (currentBooking?.cancellation_reason ? "Cancelled" : "Pending");
+
+      const existingLogistics = currentBooking?.logistics_info || {};
+      const { archived_from_status, ...cleanedLogistics } = existingLogistics;
+
+      const { error: unarchiveErr } = await supabase
+        .from("bookings")
+        .update({
+          status: targetStatus,
+          logistics_info: cleanedLogistics,
+        })
+        .eq("id", bookingId);
+
+      if (unarchiveErr) {
+        console.error("Error unarchiving booking:", unarchiveErr.message);
+        setFetchError(`Failed to restore booking: ${unarchiveErr.message}`);
+        setConfirmAction(null);
+        return;
+      }
+
+      // If restoring back to Confirmed, re-deduct equipment if appropriate
+      if (targetStatus === "Confirmed" && currentBooking) {
+        const pkg = packages.find((p) => p.id === currentBooking.package_id);
+        const pkgName = pkg?.name || currentBooking.package_name || "Event Package";
+        const totalPax = (Number(currentBooking.guest_count) || 50) + (Number(currentBooking.additional_pax) || 0);
+        await deductBookingInventory(
+          currentBooking.id,
+          currentBooking.customer_name || confirmAction.bookingName,
+          pkgName,
+          totalPax,
+          pkg?.inclusions,
+          currentBooking.corkage_data
+        );
+      }
+
+      await logAuditAction({
+        action: "Unarchived Booking",
+        target: confirmAction.bookingName,
+        type: "Update",
+        details: `Restored booking #${bookingId} to status: ${targetStatus}`,
       });
     } else if (type === "create") {
       const locationString = `${newBooking.event_type || "Event"} - ${newBooking.venueName || "Venue"}, ${newBooking.venueAddress || "Address"}`;
@@ -3179,13 +3236,34 @@ export function BookingPage() {
                           </>
                         )}
                         {(booking.status || "Pending") === "Archived" && (
-                          <button
-                            onClick={() => setSelectedBooking(booking)}
-                            className="p-2 text-natural-text-light/50 hover:text-natural-text-main hover:bg-natural-bg/50 rounded-lg transition-all"
-                            title="View Archived Details"
-                          >
-                            <AlertCircle className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => setSelectedBooking(booking)}
+                              className="p-2 text-natural-text-light/50 hover:text-natural-text-main hover:bg-natural-bg/50 rounded-lg transition-all"
+                              title="View Archived Details"
+                            >
+                              <AlertCircle className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => {
+                                setConfirmPassword("");
+                                setPasswordError(false);
+                                setConfirmAction({
+                                  type: "unarchive",
+                                  bookingId: booking.id,
+                                  bookingName:
+                                    booking.profiles?.name ||
+                                    booking.profiles?.full_name ||
+                                    "Unknown User",
+                                });
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-all shadow-xs"
+                              title="Restore Booking"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              <span>Restore</span>
+                            </button>
+                          </div>
                         )}
                       </div>
                     </td>
@@ -5861,12 +5939,34 @@ export function BookingPage() {
               })()}
               {(selectedBooking.status || "Pending") !== "Pending" &&
                 (selectedBooking.status || "Pending") !== "Confirmed" && (
-                  <button
-                    onClick={() => setSelectedBooking(null)}
-                    className="flex-1 bg-natural-accent text-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm"
-                  >
-                    Close View
-                  </button>
+                  <>
+                    {(selectedBooking.status || "Pending") === "Archived" && (
+                      <button
+                        onClick={() => {
+                          setConfirmPassword("");
+                          setPasswordError(false);
+                          setConfirmAction({
+                            type: "unarchive",
+                            bookingId: selectedBooking.id,
+                            bookingName:
+                              selectedBooking.profiles?.name ||
+                              selectedBooking.profiles?.full_name ||
+                              "Unknown User",
+                          });
+                        }}
+                        className="px-6 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                        <span>Restore Booking</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setSelectedBooking(null)}
+                      className="flex-1 bg-natural-accent text-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm"
+                    >
+                      Close View
+                    </button>
+                  </>
                 )}
             </div>
           </div>
@@ -5933,9 +6033,11 @@ export function BookingPage() {
                         ? "bg-emerald-100 dark:bg-emerald-950/60"
                         : confirmAction.type === "cancel"
                           ? "bg-orange-100 dark:bg-orange-950/60"
-                          : confirmAction.type === "archive"
-                            ? "bg-gray-100 dark:bg-natural-bg/50"
-                            : "bg-blue-100 dark:bg-blue-950/60",
+                          : confirmAction.type === "unarchive"
+                            ? "bg-emerald-100 dark:bg-emerald-950/60"
+                            : confirmAction.type === "archive"
+                              ? "bg-gray-100 dark:bg-natural-bg/50"
+                              : "bg-blue-100 dark:bg-blue-950/60",
                   )}
                 >
                   {confirmAction.type === "confirm" && (
@@ -5950,6 +6052,9 @@ export function BookingPage() {
                   {confirmAction.type === "archive" && (
                     <Archive className="w-7 h-7 text-gray-600 dark:text-natural-text-light" />
                   )}
+                  {confirmAction.type === "unarchive" && (
+                    <RotateCcw className="w-7 h-7 text-emerald-600 dark:text-emerald-400" />
+                  )}
                   {confirmAction.type === "create" && (
                     <Plus className="w-7 h-7 text-blue-600 dark:text-blue-400" />
                   )}
@@ -5962,7 +6067,9 @@ export function BookingPage() {
                     ? "Complete Event?"
                     : confirmAction.type === "verify_final_payment"
                       ? "Confirm Final Payment?"
-                      : `${confirmAction.type} Booking?`}
+                      : confirmAction.type === "unarchive"
+                        ? "Restore Booking?"
+                        : `${confirmAction.type} Booking?`}
                 </h3>
                 <p className={cn("text-sm text-natural-text-light", hasShortage ? "mb-3" : "mb-4")}>
                   {confirmAction.type === "create"
@@ -5971,7 +6078,9 @@ export function BookingPage() {
                       ? `Are you sure the event for ${confirmAction.bookingName} is finished? This will mark the booking as Completed and return all allocated equipment back to equipment monitoring.`
                       : confirmAction.type === "verify_final_payment"
                         ? `Confirming the final payment will record the client's balance settlement and unlock the Mark Event Complete action for ${confirmAction.bookingName}.`
-                        : `Are you sure you want to ${confirmAction.type} the booking for ${confirmAction.bookingName}?`}
+                        : confirmAction.type === "unarchive"
+                          ? `Are you sure you want to restore the booking for ${confirmAction.bookingName} from the archives back to active status?`
+                          : `Are you sure you want to ${confirmAction.type} the booking for ${confirmAction.bookingName}?`}
                 </p>
 
                 {confirmAction.type === "verify_final_payment" && (() => {
@@ -6417,7 +6526,7 @@ export function BookingPage() {
                   );
                 })()}
 
-                {["confirm", "cancel", "archive"].includes(
+                {["confirm", "cancel", "archive", "unarchive"].includes(
                   confirmAction.type,
                 ) && (
                   <div className="mb-4 space-y-3 text-left animate-in slide-in-from-bottom-2 duration-300">
@@ -6489,13 +6598,15 @@ export function BookingPage() {
                         ? "bg-green-600 hover:bg-green-700"
                         : confirmAction.type === "complete"
                           ? "bg-emerald-600 hover:bg-emerald-700"
-                          : confirmAction.type === "verify_final_payment"
-                            ? "bg-blue-600 hover:bg-blue-700"
-                            : confirmAction.type === "cancel"
-                              ? "bg-orange-600 hover:bg-orange-700"
-                              : confirmAction.type === "archive"
-                                ? "bg-gray-600 hover:bg-gray-700"
-                                : "bg-blue-600 hover:bg-blue-700",
+                          : confirmAction.type === "unarchive"
+                            ? "bg-emerald-600 hover:bg-emerald-700"
+                            : confirmAction.type === "verify_final_payment"
+                              ? "bg-blue-600 hover:bg-blue-700"
+                              : confirmAction.type === "cancel"
+                                ? "bg-orange-600 hover:bg-orange-700"
+                                : confirmAction.type === "archive"
+                                  ? "bg-gray-600 hover:bg-gray-700"
+                                  : "bg-blue-600 hover:bg-blue-700",
                     )}
                   >
                     Yes,{" "}
@@ -6505,7 +6616,9 @@ export function BookingPage() {
                         ? "Complete Event"
                         : confirmAction.type === "verify_final_payment"
                           ? "Confirm Final Payment"
-                          : confirmAction.type}
+                          : confirmAction.type === "unarchive"
+                            ? "Restore Booking"
+                            : confirmAction.type}
                   </button>
                   <button
                     onClick={() => setConfirmAction(null)}
