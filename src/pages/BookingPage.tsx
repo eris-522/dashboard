@@ -152,13 +152,34 @@ export interface PostEventBillingInfo {
   due_date: string;
   due_date_iso?: string;
   billed_at: string;
-  payment_status: "Pending" | "Paid" | "None";
+  updated_at?: string;
+  last_action?: "charged" | "removed" | "none";
+  last_action_at?: string;
+  payment_status: "Unpaid" | "Pending" | "Pending Verification" | "Verified" | "Paid" | "None";
+  payment_method?: string;
+  reference_number?: string;
+  receipt_url?: string;
+  submitted_at?: string;
+  verified_at?: string;
 }
 
 export interface RainLaundryHistoryItem {
   id: string;
   action: "charged" | "removed";
   fee: number;
+  timestamp: string;
+  appliedBy?: string;
+  note?: string;
+}
+
+export interface ExcessHeadcountHistoryItem {
+  id: string;
+  action: "charged" | "removed";
+  fee: number;
+  actual_headcount: number;
+  guaranteed_headcount: number;
+  excess_guests: number;
+  due_date: string;
   timestamp: string;
   appliedBy?: string;
   note?: string;
@@ -184,6 +205,7 @@ export interface BookingLogisticsInfo {
   rainLaundryRemovedAt?: string | null;
   rainLaundryLastAction?: "charged" | "removed";
   rainLaundryHistory?: RainLaundryHistoryItem[];
+  excessHeadcountHistory?: ExcessHeadcountHistoryItem[];
   post_event_billing?: PostEventBillingInfo | null;
 }
 
@@ -366,6 +388,7 @@ export const getBookingLogistics = (booking: any): BookingLogisticsInfo => {
   const rainLaundryRemovedAt = raw?.rainLaundryRemovedAt || null;
   const rainLaundryLastAction = (raw?.rainLaundryLastAction as "charged" | "removed" | undefined) || (rainLaundryApplied ? "charged" : undefined);
   const rainLaundryHistory = Array.isArray(raw?.rainLaundryHistory) ? raw.rainLaundryHistory : [];
+  const excessHeadcountHistory = Array.isArray(raw?.excessHeadcountHistory) ? raw.excessHeadcountHistory : [];
   const post_event_billing = raw?.post_event_billing || (booking as any)?.post_event_billing || null;
 
   return {
@@ -388,6 +411,7 @@ export const getBookingLogistics = (booking: any): BookingLogisticsInfo => {
     rainLaundryRemovedAt,
     rainLaundryLastAction,
     rainLaundryHistory,
+    excessHeadcountHistory,
     post_event_billing,
   };
 };
@@ -544,10 +568,18 @@ export function BookingPage() {
       | "unarchive"
       | "create"
       | "complete"
-      | "verify_final_payment";
+      | "verify_final_payment"
+      | "verify_excess_payment";
     bookingId?: string;
     bookingName: string;
   } | null>(null);
+
+  // Post-Event Excess Headcount Surcharge Editor state (only active when status === "Completed")
+  const [isEditingExcessSurcharge, setIsEditingExcessSurcharge] = useState(false);
+  const [editExcessActualHeadcount, setEditExcessActualHeadcount] = useState("");
+  const [editExcessFeeInput, setEditExcessFeeInput] = useState("");
+  const [isSavingExcessSurcharge, setIsSavingExcessSurcharge] = useState(false);
+  const [excessSaveMessage, setExcessSaveMessage] = useState("");
 
   useEffect(() => {
     if (confirmAction?.type === "complete" && confirmAction.bookingId) {
@@ -598,6 +630,8 @@ export function BookingPage() {
       setCustomHaulingFeeInput(String(logInfo.haulingFee || 0));
       setCustomLogisticsNotes(logInfo.notes || "");
       setLogisticsSaveMessage("");
+      setIsEditingExcessSurcharge(false);
+      setExcessSaveMessage("");
       setOverviewTab("payments");
       const dayOfInfo = selectedBooking.overtime_info?.day_of;
       const hasAppliedDayOfOt = Boolean(
@@ -722,8 +756,21 @@ export function BookingPage() {
       }
     };
 
+    let bc: BroadcastChannel | null = null;
+    try {
+      bc = new BroadcastChannel("roxan_catering_events");
+      bc.onmessage = () => handleBookingsChange();
+    } catch (e) {}
+
+    const handleStorageSync = (ev: StorageEvent) => {
+      if (ev.key === "roxan_last_booking_update") {
+        handleBookingsChange();
+      }
+    };
+
     window.addEventListener("bookingsUpdated", handleBookingsChange);
     window.addEventListener("bookingsRealtimeSync", handleBookingsChange);
+    window.addEventListener("storage", handleStorageSync);
     window.addEventListener("focus", handleVisibilityOrFocus);
     document.addEventListener("visibilitychange", handleVisibilityOrFocus);
 
@@ -774,8 +821,14 @@ export function BookingPage() {
       if (syncDebounce) clearTimeout(syncDebounce);
       if (menuDebounce) clearTimeout(menuDebounce);
       unsubscribeCatalog();
+      if (bc) {
+        try {
+          bc.close();
+        } catch (e) {}
+      }
       window.removeEventListener("bookingsUpdated", handleBookingsChange);
       window.removeEventListener("bookingsRealtimeSync", handleBookingsChange);
+      window.removeEventListener("storage", handleStorageSync);
       window.removeEventListener("focus", handleVisibilityOrFocus);
       document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
     };
@@ -950,9 +1003,9 @@ export function BookingPage() {
       Number(otData?.total_overtime_fee) || (prebookedOTFee + dayOfOTFee);
 
     const rainLaundryFee = Number(logistics.rainLaundryFee) || (logistics.rainLaundryApplied ? 2000 : 0);
-    const postEventBilling = logistics.post_event_billing || (booking as any)?.post_event_billing;
-    const excessGuestFee = Number(postEventBilling?.excess_guest_fee) || 0;
 
+    // Note: Post-event excess headcount surcharge is tracked as a separate post-event balance
+    // and is intentionally NOT merged into the pre-event settled contract balance.
     return (
       basePrice +
       additionalPaxTotal +
@@ -961,12 +1014,30 @@ export function BookingPage() {
       logistics.travelFee +
       corkageFee +
       totalOvertimeFee +
-      rainLaundryFee +
-      excessGuestFee
+      rainLaundryFee
     );
   };
 
-
+  const getExcessHeadcountBilling = (booking: any) => {
+    const logistics = getBookingLogistics(booking);
+    const postEventBilling: PostEventBillingInfo | null =
+      logistics.post_event_billing || (booking as any)?.post_event_billing || null;
+    const excessFee = Number(postEventBilling?.excess_guest_fee) || 0;
+    const isSettled =
+      postEventBilling?.payment_status === "Verified" ||
+      postEventBilling?.payment_status === "Paid";
+    const isUnderReview =
+      !isSettled &&
+      excessFee > 0 &&
+      (postEventBilling?.payment_status === "Pending Verification" ||
+        Boolean(postEventBilling?.receipt_url));
+    return {
+      postEventBilling,
+      excessFee,
+      isSettled,
+      isUnderReview,
+    };
+  };
 
   const getInitialDownpaymentDue = (
     booking: any,
@@ -987,10 +1058,8 @@ export function BookingPage() {
     }
     const dayOfFee = Number(otData?.day_of?.total_day_of_fee) || 0;
     const rainLaundryFee = Number(logistics.rainLaundryFee) || (logistics.rainLaundryApplied ? 2000 : 0);
-    const postEventBilling = logistics.post_event_billing || (booking as any)?.post_event_billing;
-    const excessGuestFee = Number(postEventBilling?.excess_guest_fee) || 0;
     // Initial security deposit strictly excludes post-booking additions
-    const initialBase = Math.max(0, totalBudget - travelFee - dayOfFee - rainLaundryFee - excessGuestFee);
+    const initialBase = Math.max(0, totalBudget - travelFee - dayOfFee - rainLaundryFee);
     return Math.round(initialBase * (is50Percent ? 0.5 : 0.2));
   };
 
@@ -1263,6 +1332,7 @@ export function BookingPage() {
       const dueDateStr = tomorrow.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
       const dueDateIso = tomorrow.toISOString().split("T")[0];
 
+      const nowIso = new Date().toISOString();
       const postEventBilling: PostEventBillingInfo = {
         actual_headcount_served: actualCount,
         guaranteed_headcount: guaranteedCount,
@@ -1271,23 +1341,63 @@ export function BookingPage() {
         excess_guest_fee: excessFee,
         due_date: dueDateStr,
         due_date_iso: dueDateIso,
-        billed_at: new Date().toISOString(),
-        payment_status: excessGuests > 0 ? "Pending" : "None",
+        billed_at: nowIso,
+        updated_at: nowIso,
+        last_action: excessGuests > 0 ? "charged" : "none",
+        last_action_at: nowIso,
+        payment_status: excessGuests > 0 ? "Unpaid" : "None",
       };
 
       const existingLogistics = targetBooking?.logistics_info || {};
+      const historyItem: ExcessHeadcountHistoryItem = {
+        id: `eh-${Date.now()}`,
+        action: excessGuests > 0 ? "charged" : "removed",
+        fee: excessFee,
+        actual_headcount: actualCount,
+        guaranteed_headcount: guaranteedCount,
+        excess_guests: excessGuests,
+        due_date: dueDateStr,
+        timestamp: nowIso,
+        appliedBy: currentUser?.name || "Admin",
+        note: excessGuests > 0
+          ? `Charged ₱${excessFee.toLocaleString()} excess headcount surcharge (${excessGuests} excess attendees).`
+          : "Completed with guaranteed headcount.",
+      };
+
+      const updatedHistory: ExcessHeadcountHistoryItem[] = [
+        ...(existingLogistics.excessHeadcountHistory || []),
+        historyItem,
+      ];
+
       const updatedLogistics = {
         ...existingLogistics,
         post_event_billing: postEventBilling,
-        updated_at: new Date().toISOString(),
+        excessHeadcountHistory: updatedHistory,
+        updated_at: nowIso,
       };
+
+      let updatedAllergies = targetBooking?.food_allergies || "";
+      try {
+        if (typeof updatedAllergies === "string" && updatedAllergies.includes("__PAYMENT_METADATA__:")) {
+          const parts = updatedAllergies.split("__PAYMENT_METADATA__:");
+          const meta = JSON.parse(parts[1]);
+          meta.logistics = updatedLogistics;
+          updatedAllergies = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+        }
+      } catch (e) {}
+
+      const completePayload: any = {
+        status: "Completed",
+        logistics_info: updatedLogistics,
+        user_id: targetBooking?.user_id,
+      };
+      if (updatedAllergies !== (targetBooking?.food_allergies || "")) {
+        completePayload.food_allergies = updatedAllergies;
+      }
 
       const { error: completeErr } = await supabase
         .from("bookings")
-        .update({
-          status: "Completed",
-          logistics_info: updatedLogistics,
-        })
+        .update(completePayload)
         .eq("id", bookingId);
 
       if (completeErr) {
@@ -1296,6 +1406,15 @@ export function BookingPage() {
         setConfirmAction(null);
         return;
       }
+
+      try {
+        const bc = new BroadcastChannel("roxan_catering_events");
+        bc.postMessage({ type: "BOOKINGS_UPDATED", bookingId, action: "completed" });
+        bc.close();
+      } catch (e) {}
+      try {
+        localStorage.setItem("roxan_last_booking_update", String(Date.now()));
+      } catch (e) {}
 
       // Update local state
       setBookings((prev) =>
@@ -1457,12 +1576,281 @@ export function BookingPage() {
       await handleVerifyFinalBalance(bookingId);
       setConfirmAction(null);
       return;
+    } else if (type === "verify_excess_payment" && bookingId) {
+      await handleVerifyExcessPayment(bookingId);
+      setConfirmAction(null);
+      return;
     }
 
     window.dispatchEvent(new CustomEvent("bookingsUpdated"));
     await fetchAllData(true);
     setConfirmAction(null);
     setSelectedBooking(null);
+  };
+
+  const handleSaveExcessSurcharge = async (bookingId: number | string) => {
+    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId));
+    if (!targetBooking) return;
+
+    // Strict guard: Admin may ONLY edit excess headcount surcharge after the event is Completed
+    if (String(targetBooking.status || "").trim().toLowerCase() !== "completed") {
+      setFetchError("Excess headcount surcharge can only be edited after the event is marked Completed.");
+      return;
+    }
+
+    setIsSavingExcessSurcharge(true);
+    setExcessSaveMessage("");
+
+    try {
+      const clientName =
+        targetBooking.profiles?.name || targetBooking.profiles?.full_name || "Client";
+      const guaranteedCount =
+        (Number(targetBooking.guest_count) || 50) + (Number(targetBooking.additional_pax) || 0);
+      const parsedActual = Math.max(
+        1,
+        parseInt(editExcessActualHeadcount, 10) || guaranteedCount
+      );
+      const excessGuests = Math.max(0, parsedActual - guaranteedCount);
+      const parsedFee = Math.max(0, Math.round(Number(editExcessFeeInput) || 0));
+
+      const existingLogistics = targetBooking.logistics_info || {};
+      const existingBilling: PostEventBillingInfo | undefined =
+        existingLogistics.post_event_billing || (targetBooking as any)?.post_event_billing;
+
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const fallbackDueStr = tomorrow.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+      const fallbackDueIso = tomorrow.toISOString().split("T")[0];
+
+      const prevFee = Number(existingBilling?.excess_guest_fee) || 0;
+      const prevStatus = existingBilling?.payment_status;
+      let nextPaymentStatus: PostEventBillingInfo["payment_status"] = "Unpaid";
+
+      if (parsedFee <= 0) {
+        nextPaymentStatus = "None";
+      } else if (prevStatus === "Verified" || prevStatus === "Paid") {
+        // If admin increases the surcharge above what was already verified, mark unpaid so client can settle difference; otherwise keep Verified
+        nextPaymentStatus = parsedFee > prevFee ? "Unpaid" : "Verified";
+      } else if (Boolean(existingBilling?.receipt_url)) {
+        nextPaymentStatus = "Pending Verification";
+      } else {
+        nextPaymentStatus = "Unpaid";
+      }
+
+      const nowIso = new Date().toISOString();
+      const updatedPostEventBilling: PostEventBillingInfo = {
+        ...(existingBilling || {}),
+        actual_headcount_served: parsedActual,
+        guaranteed_headcount: guaranteedCount,
+        excess_guests: excessGuests,
+        excess_guest_rate: 500,
+        excess_guest_fee: parsedFee,
+        due_date: existingBilling?.due_date || fallbackDueStr,
+        due_date_iso: existingBilling?.due_date_iso || fallbackDueIso,
+        billed_at: existingBilling?.billed_at || nowIso,
+        updated_at: nowIso,
+        last_action: parsedFee > 0 ? "charged" : "removed",
+        last_action_at: nowIso,
+        payment_status: nextPaymentStatus,
+      };
+
+      const historyItem: ExcessHeadcountHistoryItem = {
+        id: `eh-${Date.now()}`,
+        action: parsedFee > 0 ? "charged" : "removed",
+        fee: parsedFee,
+        actual_headcount: parsedActual,
+        guaranteed_headcount: guaranteedCount,
+        excess_guests: excessGuests,
+        due_date: existingBilling?.due_date || fallbackDueStr,
+        timestamp: nowIso,
+        appliedBy: currentUser?.name || "Admin",
+        note: parsedFee > 0
+          ? `Charged ₱${parsedFee.toLocaleString()} excess headcount surcharge (${excessGuests} excess attendees).`
+          : "Removed excess headcount surcharge.",
+      };
+
+      const updatedHistory: ExcessHeadcountHistoryItem[] = [
+        ...(existingLogistics.excessHeadcountHistory || []),
+        historyItem,
+      ];
+
+      const updatedLogistics = {
+        ...existingLogistics,
+        post_event_billing: updatedPostEventBilling,
+        excessHeadcountHistory: updatedHistory,
+        updated_at: nowIso,
+      };
+
+      let updatedAllergies = targetBooking.food_allergies || "";
+      try {
+        if (
+          typeof updatedAllergies === "string" &&
+          updatedAllergies.includes("__PAYMENT_METADATA__:")
+        ) {
+          const parts = updatedAllergies.split("__PAYMENT_METADATA__:");
+          const meta = JSON.parse(parts[1]);
+          meta.logistics = updatedLogistics;
+          updatedAllergies = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+        }
+      } catch (e) {}
+
+      const updatePayload: any = {
+        logistics_info: updatedLogistics,
+        user_id: targetBooking.user_id,
+      };
+      if (updatedAllergies !== (targetBooking.food_allergies || "")) {
+        updatePayload.food_allergies = updatedAllergies;
+      }
+
+      const { error } = await supabase
+        .from("bookings")
+        .update(updatePayload)
+        .eq("id", bookingId);
+
+      if (error) throw error;
+
+      setBookings((prev) =>
+        prev.map((b) =>
+          String(b.id) === String(bookingId)
+            ? { ...b, logistics_info: updatedLogistics, food_allergies: updatedAllergies }
+            : b
+        )
+      );
+      setSelectedBooking((prev: any) =>
+        prev && String(prev.id) === String(bookingId)
+          ? { ...prev, logistics_info: updatedLogistics, food_allergies: updatedAllergies }
+          : prev
+      );
+
+      await logAuditAction({
+        action: "Updated Excess Headcount Surcharge",
+        target: clientName,
+        type: "Update",
+        details:
+          parsedFee > 0
+            ? `Updated post-event headcount for ${clientName} (Booking #${bookingId}): ${parsedActual} served vs ${guaranteedCount} guaranteed (${excessGuests} excess pax, surcharge ₱${parsedFee.toLocaleString()}).`
+            : `Cleared post-event excess headcount surcharge for ${clientName} (Booking #${bookingId}): ${parsedActual} served vs ${guaranteedCount} guaranteed (₱0).`,
+      });
+
+      try {
+        const bc = new BroadcastChannel("roxan_catering_events");
+        bc.postMessage({
+          type: "BOOKINGS_UPDATED",
+          bookingId,
+          action: parsedFee > 0 ? "excess_surcharge_charged" : "excess_surcharge_removed",
+        });
+        bc.close();
+      } catch (e) {}
+      try {
+        localStorage.setItem("roxan_last_booking_update", String(Date.now()));
+      } catch (e) {}
+
+      window.dispatchEvent(new CustomEvent("bookingsUpdated"));
+      setIsEditingExcessSurcharge(false);
+      setExcessSaveMessage(
+        parsedFee > 0
+          ? `Excess surcharge updated to ₱${parsedFee.toLocaleString()}.`
+          : "Excess surcharge cleared (₱0)."
+      );
+      setTimeout(() => setExcessSaveMessage(""), 4000);
+    } catch (err: any) {
+      console.error("Error updating excess headcount surcharge:", err);
+      setFetchError(err.message || "Failed to update excess headcount surcharge.");
+    } finally {
+      setIsSavingExcessSurcharge(false);
+    }
+  };
+
+  const handleVerifyExcessPayment = async (bookingId: number | string) => {
+    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId));
+    if (!targetBooking) return;
+    const clientName =
+      targetBooking.profiles?.name || targetBooking.profiles?.full_name || "Client";
+    const existingLogistics = targetBooking.logistics_info || {};
+    const existingBilling: PostEventBillingInfo | undefined =
+      existingLogistics.post_event_billing || (targetBooking as any)?.post_event_billing;
+    if (!existingBilling) return;
+
+    const nowIso = new Date().toISOString();
+    const updatedPostEventBilling: PostEventBillingInfo = {
+      ...existingBilling,
+      payment_status: "Verified",
+      verified_at: nowIso,
+      updated_at: nowIso,
+    };
+
+    const updatedLogistics = {
+      ...existingLogistics,
+      post_event_billing: updatedPostEventBilling,
+      updated_at: nowIso,
+    };
+
+    let updatedAllergies = targetBooking.food_allergies || "";
+    try {
+      if (
+        typeof updatedAllergies === "string" &&
+        updatedAllergies.includes("__PAYMENT_METADATA__:")
+      ) {
+        const parts = updatedAllergies.split("__PAYMENT_METADATA__:");
+        const meta = JSON.parse(parts[1]);
+        meta.logistics = updatedLogistics;
+        updatedAllergies = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+      }
+    } catch (e) {}
+
+    const updatePayload: any = {
+      logistics_info: updatedLogistics,
+    };
+    if (updatedAllergies !== (targetBooking.food_allergies || "")) {
+      updatePayload.food_allergies = updatedAllergies;
+    }
+
+    const { error } = await supabase
+      .from("bookings")
+      .update(updatePayload)
+      .eq("id", bookingId);
+
+    if (error) {
+      console.error("Error verifying excess surcharge payment:", error.message);
+      setFetchError(`Failed to verify excess surcharge payment: ${error.message}`);
+      return;
+    }
+
+    await logAuditAction({
+      action: "Verified Excess Headcount Surcharge Payment",
+      target: clientName,
+      type: "Update",
+      details: `Admin confirmed and verified post-event excess headcount surcharge of ₱${(Number(existingBilling.excess_guest_fee) || 0).toLocaleString()} for ${clientName} (Booking #${bookingId}).`,
+    });
+
+    setBookings((prev) =>
+      prev.map((b) =>
+        String(b.id) === String(bookingId)
+          ? { ...b, logistics_info: updatedLogistics, food_allergies: updatedAllergies }
+          : b
+      )
+    );
+    setSelectedBooking((prev: any) =>
+      prev && String(prev.id) === String(bookingId)
+        ? { ...prev, logistics_info: updatedLogistics, food_allergies: updatedAllergies }
+        : prev
+    );
+
+    try {
+      const bc = new BroadcastChannel("roxan_catering_events");
+      bc.postMessage({ type: "BOOKINGS_UPDATED", bookingId, action: "excess_surcharge_verified" });
+      bc.close();
+    } catch (e) {}
+    try {
+      localStorage.setItem("roxan_last_booking_update", String(Date.now()));
+    } catch (e) {}
+
+    window.dispatchEvent(new CustomEvent("bookingsUpdated"));
+    await fetchAllData(true);
   };
 
   const handleVerifyFinalBalance = async (bookingId: number | string) => {
@@ -3348,6 +3736,15 @@ export function BookingPage() {
                         {booking.additional_pax > 0 &&
                           ` (+${booking.additional_pax})`}
                       </p>
+                      {(() => {
+                        const ex = getExcessHeadcountBilling(booking);
+                        if (ex.excessFee <= 0) return null;
+                        return (
+                          <p className="text-[11px] font-semibold text-rose-600 dark:text-rose-400 mt-1">
+                            +₱{ex.excessFee.toLocaleString()} Excess
+                          </p>
+                        );
+                      })()}
                     </td>
                     <td className="px-6 py-5.5 border-b border-natural-border/50">
                       {(() => {
@@ -3358,7 +3755,9 @@ export function BookingPage() {
                         const effectiveBalance = Math.max(0, estBudget - downpaymentDue);
                         const isVerified =
                           payment.payment_status === "Verified" ||
-                          (booking.status || "Pending") === "Confirmed";
+                          (booking.status || "Pending") === "Confirmed" ||
+                          (booking.status || "Pending") === "Completed";
+                        const ex = getExcessHeadcountBilling(booking);
 
                         return (
                           <div className="flex flex-col gap-2 min-w-[140px]">
@@ -3451,7 +3850,7 @@ export function BookingPage() {
                                           "Client",
                                         ref: payment.final_balance_reference,
                                         method: payment.final_balance_method,
-                                        amount: payment.final_balance_amount,
+                                        amount: effectiveBalance,
                                         title: "Final Balance Settlement",
                                       });
                                     }}
@@ -3459,6 +3858,59 @@ export function BookingPage() {
                                   >
                                     <Receipt className="w-3.5 h-3.5" />
                                     View Balance Slip
+                                  </button>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Separate Post-Event Excess Headcount Surcharge Row */}
+                            {ex.excessFee > 0 && (
+                              <div className="pt-2 mt-1 border-t border-natural-border/50 flex flex-col gap-1.5">
+                                <div className="flex items-center justify-between gap-1.5 text-xs">
+                                  <span className="text-rose-600 dark:text-rose-400 font-medium">Excess Surcharge:</span>
+                                  <span className="font-bold text-rose-700 dark:text-rose-300 font-serif">
+                                    ₱{ex.excessFee.toLocaleString()}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <span
+                                    className={cn(
+                                      "text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded border",
+                                      ex.isSettled
+                                        ? "bg-green-50 text-green-700 border-green-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60"
+                                        : ex.isUnderReview
+                                          ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60"
+                                          : "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/50 dark:text-rose-300 dark:border-rose-800/60"
+                                    )}
+                                  >
+                                    {ex.isSettled
+                                      ? "Excess Paid"
+                                      : ex.isUnderReview
+                                        ? "Verify Excess"
+                                        : "Excess Due"}
+                                  </span>
+                                </div>
+                                {ex.postEventBilling?.receipt_url && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setViewingReceipt({
+                                        url: ex.postEventBilling!.receipt_url!,
+                                        bookingName:
+                                          booking.profiles?.name ||
+                                          booking.profiles?.full_name ||
+                                          "Client",
+                                        ref: ex.postEventBilling?.reference_number,
+                                        method: ex.postEventBilling?.payment_method,
+                                        amount: ex.excessFee,
+                                        title: "Excess Headcount Surcharge Slip",
+                                      });
+                                    }}
+                                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-natural-accent hover:underline cursor-pointer mt-0.5"
+                                  >
+                                    <Receipt className="w-3.5 h-3.5" />
+                                    View Excess Slip
                                   </button>
                                 )}
                               </div>
@@ -4124,6 +4576,7 @@ export function BookingPage() {
           payment.payment_status === "Verified" || isConfirmed || isCompleted;
         const isFinalVerified = payment.final_balance_status === "Verified";
         const hasFinalReceipt = Boolean(payment.final_balance_receipt);
+        const excessInfo = getExcessHeadcountBilling(selectedBooking);
 
         const hasPendingInstallmentSlip =
           !is50Percent &&
@@ -4138,7 +4591,8 @@ export function BookingPage() {
         const needsPaymentReview =
           (!isDepositVerified && Boolean(payment.receipt_url)) ||
           (is50Percent && !isFinalVerified && hasFinalReceipt) ||
-          hasPendingInstallmentSlip;
+          hasPendingInstallmentSlip ||
+          excessInfo.isUnderReview;
 
         const prebookedCatering =
           Number(selectedBooking.overtime_info?.prebooked?.catering_hours) || 0;
@@ -4444,6 +4898,24 @@ export function BookingPage() {
                         Dep: ₱{downpaymentDue.toLocaleString()} · Bal: ₱
                         {balanceDue.toLocaleString()}
                       </p>
+                      {excessInfo.excessFee > 0 && (
+                        <p
+                          className={cn(
+                            "text-[10px] font-bold truncate mt-0.5",
+                            excessInfo.isSettled
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : "text-rose-600 dark:text-rose-400"
+                          )}
+                        >
+                          Excess Bal: ₱{excessInfo.excessFee.toLocaleString()} (
+                          {excessInfo.isSettled
+                            ? "Paid"
+                            : excessInfo.isUnderReview
+                              ? "Review"
+                              : "Unpaid"}
+                          )
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -5020,25 +5492,6 @@ export function BookingPage() {
                               </div>
                             )}
 
-                            {Boolean(logistics.post_event_billing && logistics.post_event_billing.excess_guest_fee > 0) && (
-                              <div className="pt-1 border-t border-natural-border/40 space-y-1">
-                                <div className="flex justify-between items-center gap-2">
-                                  <dt className="text-rose-700 dark:text-rose-400 font-semibold flex items-center gap-1.5">
-                                    <Users className="w-3.5 h-3.5 text-rose-500" />
-                                    <span>Excess Headcount Surcharge</span>
-                                    <span className="text-[9px] px-1.5 py-0.5 bg-rose-500/15 text-rose-700 dark:text-rose-300 rounded border border-rose-500/30 font-bold uppercase">
-                                      Due {logistics.post_event_billing?.due_date}
-                                    </span>
-                                  </dt>
-                                  <dd className="font-semibold text-rose-600 dark:text-rose-400 font-mono">
-                                    +₱{(logistics.post_event_billing?.excess_guest_fee || 0).toLocaleString()}
-                                  </dd>
-                                </div>
-                                <p className="text-[10px] text-natural-text-light leading-relaxed">
-                                  {logistics.post_event_billing?.actual_headcount_served} served vs {logistics.post_event_billing?.guaranteed_headcount} guaranteed (+{logistics.post_event_billing?.excess_guests} pax @ ₱500/pax)
-                                </p>
-                              </div>
-                            )}
                           </dl>
 
                           <div className="pt-2.5 border-t border-natural-border grid grid-cols-3 gap-2 text-center bg-natural-bg/50 p-2.5 rounded-lg">
@@ -5062,11 +5515,66 @@ export function BookingPage() {
                               <p className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
                                 Balance Due
                               </p>
-                              <p className="text-sm font-bold text-natural-text-main font-serif">
+                              <p
+                                className={cn(
+                                  "text-sm font-bold font-serif",
+                                  isFinalVerified
+                                    ? "text-emerald-600 dark:text-emerald-400"
+                                    : "text-natural-text-main"
+                                )}
+                              >
                                 ₱{finalBalanceAmount.toLocaleString()}
                               </p>
+                              {isFinalVerified && (
+                                <p className="text-[9px] font-bold uppercase text-emerald-600 dark:text-emerald-400">
+                                  Settled
+                                </p>
+                              )}
                             </div>
                           </div>
+
+                          {/* Separate Post-Event Excess Surcharge Summary (Not merged into settled balance) */}
+                          {excessInfo.excessFee > 0 && (
+                            <div className="p-2.5 rounded-lg bg-rose-500/5 border border-rose-500/25 space-y-1">
+                              <div className="flex items-center justify-between gap-2 text-xs">
+                                <span className="font-bold text-rose-700 dark:text-rose-400 flex items-center gap-1.5">
+                                  <Users className="w-3.5 h-3.5 text-rose-500" />
+                                  <span>Excess Headcount Balance</span>
+                                  <span
+                                    className={cn(
+                                      "text-[9px] px-1.5 py-0.5 rounded border font-bold uppercase",
+                                      excessInfo.isSettled
+                                        ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
+                                        : excessInfo.isUnderReview
+                                          ? "bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-500/30"
+                                          : "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30"
+                                    )}
+                                  >
+                                    {excessInfo.isSettled
+                                      ? "Settled"
+                                      : excessInfo.isUnderReview
+                                        ? "Under Review"
+                                        : `Due ${excessInfo.postEventBilling?.due_date || "Next Day"}`}
+                                  </span>
+                                </span>
+                                <span
+                                  className={cn(
+                                    "font-bold font-mono text-xs",
+                                    excessInfo.isSettled
+                                      ? "text-emerald-600 dark:text-emerald-400"
+                                      : "text-rose-600 dark:text-rose-400"
+                                  )}
+                                >
+                                  ₱{excessInfo.excessFee.toLocaleString()}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-natural-text-light leading-relaxed">
+                                {excessInfo.postEventBilling?.actual_headcount_served} served vs{" "}
+                                {excessInfo.postEventBilling?.guaranteed_headcount} guaranteed (+
+                                {excessInfo.postEventBilling?.excess_guests} pax @ ₱500/pax) · Separate post-event balance
+                              </p>
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -5416,6 +5924,295 @@ export function BookingPage() {
                             )}
                           </div>
                         )}
+
+                        {/* Dedicated Post-Event Excess Headcount Surcharge Card (Editable ONLY when event is Completed) */}
+                        {(isCompleted || excessInfo.excessFee > 0) && (
+                          <div className="p-4 bg-natural-card border border-natural-border rounded-xl space-y-3 shadow-2xs">
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-natural-border/60 pb-2.5">
+                              <div>
+                                <h4 className="text-xs font-bold text-natural-text-main flex items-center gap-1.5 uppercase tracking-wider">
+                                  <Users
+                                    aria-hidden="true"
+                                    className="w-4 h-4 text-rose-500"
+                                  />
+                                  Excess Headcount Surcharge
+                                </h4>
+                                <p className="text-[10px] text-natural-text-light mt-0.5">
+                                  Separate post-event balance
+                                  {excessInfo.postEventBilling?.due_date && excessInfo.excessFee > 0
+                                    ? ` · Due ${excessInfo.postEventBilling.due_date}`
+                                    : ""}
+                                </p>
+                              </div>
+
+                              <div className="flex items-center gap-1.5">
+                                {excessInfo.excessFee <= 0 ? (
+                                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-natural-bg text-natural-text-light border border-natural-border">
+                                    No Excess Fee
+                                  </span>
+                                ) : excessInfo.isSettled ? (
+                                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                                    <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" />{" "}
+                                    Settled &amp; Verified
+                                  </span>
+                                ) : excessInfo.isUnderReview ? (
+                                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                                    <Clock aria-hidden="true" className="w-3.5 h-3.5" />{" "}
+                                    Pending Review
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/30 flex items-center gap-1">
+                                    <AlertCircle aria-hidden="true" className="w-3.5 h-3.5" />{" "}
+                                    Unpaid
+                                  </span>
+                                )}
+
+                                {/* Admin Edit Button — Strictly available ONLY after event is Completed */}
+                                {isCompleted && !isEditingExcessSurcharge && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const curActual =
+                                        excessInfo.postEventBilling?.actual_headcount_served ||
+                                        totalPax;
+                                      const curFee = excessInfo.excessFee;
+                                      setEditExcessActualHeadcount(String(curActual));
+                                      setEditExcessFeeInput(String(curFee));
+                                      setExcessSaveMessage("");
+                                      setIsEditingExcessSurcharge(true);
+                                    }}
+                                    className="min-h-7 px-2.5 py-1 rounded-md bg-natural-bg hover:bg-natural-accent/10 border border-natural-border hover:border-natural-accent/40 text-natural-text-main text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Sliders aria-hidden="true" className="w-3 h-3 text-natural-accent" />
+                                    Edit Surcharge
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {excessSaveMessage && (
+                              <div className="p-2 px-3 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-emerald-700 dark:text-emerald-300 text-xs font-medium flex items-center gap-1.5">
+                                <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />
+                                <span>{excessSaveMessage}</span>
+                              </div>
+                            )}
+
+                            {/* Inline Editor (Strictly rendered ONLY when isCompleted === true) */}
+                            {isCompleted && isEditingExcessSurcharge && (
+                              <div className="p-3 rounded-xl bg-natural-bg/70 dark:bg-natural-sidebar/50 border border-natural-accent/40 space-y-3">
+                                <div className="flex items-center justify-between text-[11px]">
+                                  <span className="font-bold uppercase tracking-wider text-natural-accent">
+                                    Edit Post-Event Excess Surcharge
+                                  </span>
+                                  <span className="text-natural-text-light">
+                                    Guaranteed: <strong className="text-natural-text-main">{totalPax} Pax</strong>
+                                  </span>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                  <div className="space-y-1">
+                                    <label className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block">
+                                      Actual Headcount Served
+                                    </label>
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      value={editExcessActualHeadcount}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        setEditExcessActualHeadcount(val);
+                                        const parsed = Math.max(1, parseInt(val, 10) || totalPax);
+                                        const autoExcess = Math.max(0, parsed - totalPax);
+                                        setEditExcessFeeInput(String(autoExcess * 500));
+                                      }}
+                                      className="w-full px-3 py-1.5 text-xs font-semibold bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                                    />
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <label className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block">
+                                      Excess Surcharge Amount (₱)
+                                    </label>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="100"
+                                      value={editExcessFeeInput}
+                                      onChange={(e) => setEditExcessFeeInput(e.target.value)}
+                                      className="w-full px-3 py-1.5 text-xs font-semibold bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                                    />
+                                  </div>
+                                </div>
+
+                                <p className="text-[10px] text-natural-text-light">
+                                  {Math.max(0, (parseInt(editExcessActualHeadcount, 10) || totalPax) - totalPax)} excess guest(s) beyond {totalPax} guaranteed pax (standard rate: ₱500/pax).
+                                </p>
+
+                                <div className="flex items-center justify-end gap-2 pt-1">
+                                  <button
+                                    type="button"
+                                    disabled={isSavingExcessSurcharge}
+                                    onClick={() => setIsEditingExcessSurcharge(false)}
+                                    className="px-3 py-1.5 rounded-lg border border-natural-border text-natural-text-light hover:bg-natural-card text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={isSavingExcessSurcharge}
+                                    onClick={() => handleSaveExcessSurcharge(selectedBooking.id)}
+                                    className="px-3.5 py-1.5 rounded-lg bg-natural-accent hover:bg-natural-accent/90 text-white text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50"
+                                  >
+                                    {isSavingExcessSurcharge ? "Saving..." : "Save Surcharge"}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {excessInfo.excessFee > 0 ? (
+                              <>
+                                <dl className="space-y-1.5 text-xs">
+                                  <div className="flex justify-between items-center gap-2">
+                                    <dt className="text-natural-text-light">
+                                      Excess Surcharge Due:
+                                    </dt>
+                                    <dd className="font-bold text-rose-600 dark:text-rose-400 font-serif text-sm">
+                                      ₱{excessInfo.excessFee.toLocaleString()}
+                                    </dd>
+                                  </div>
+                                  <div className="flex justify-between items-center gap-2">
+                                    <dt className="text-natural-text-light">Headcount Served:</dt>
+                                    <dd className="font-semibold text-natural-text-main">
+                                      {excessInfo.postEventBilling?.actual_headcount_served || totalPax} served vs{" "}
+                                      {excessInfo.postEventBilling?.guaranteed_headcount || totalPax} guaranteed (+
+                                      {excessInfo.postEventBilling?.excess_guests || 0} pax)
+                                    </dd>
+                                  </div>
+                                  <div className="flex justify-between items-center gap-2">
+                                    <dt className="text-natural-text-light">Payment Method:</dt>
+                                    <dd className="font-semibold text-natural-text-main">
+                                      {excessInfo.postEventBilling?.payment_method || "Pending submission"}
+                                    </dd>
+                                  </div>
+                                  <div className="flex justify-between items-center gap-2">
+                                    <dt className="text-natural-text-light">
+                                      Reference Number:
+                                    </dt>
+                                    <dd className="font-mono font-semibold text-natural-text-main">
+                                      {excessInfo.postEventBilling?.reference_number || "N/A"}
+                                    </dd>
+                                  </div>
+                                </dl>
+
+                                {excessInfo.postEventBilling?.receipt_url ? (
+                                  <div className="flex items-center justify-between gap-2.5 bg-natural-bg/70 dark:bg-natural-sidebar/50 p-2.5 rounded-lg border border-natural-border">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <img
+                                        src={excessInfo.postEventBilling.receipt_url}
+                                        alt="Excess surcharge receipt slip thumbnail"
+                                        className="w-10 h-10 object-cover rounded-md border border-natural-border cursor-pointer hover:opacity-80 transition-opacity shrink-0"
+                                        onError={(e) => {
+                                          (e.target as HTMLImageElement).src =
+                                            "https://images.unsplash.com/photo-1554415707-9e4c07d3882d?auto=format&fit=crop&q=80&w=800";
+                                        }}
+                                        onClick={() =>
+                                          setViewingReceipt({
+                                            url: excessInfo.postEventBilling!.receipt_url!,
+                                            bookingName: clientName,
+                                            ref: excessInfo.postEventBilling?.reference_number,
+                                            method: excessInfo.postEventBilling?.payment_method,
+                                            amount: excessInfo.excessFee,
+                                            title: "Post-Event Excess Headcount Surcharge Slip",
+                                          })
+                                        }
+                                      />
+                                      <div className="min-w-0">
+                                        <p className="text-xs font-bold text-natural-text-main truncate">
+                                          Excess Surcharge Slip
+                                        </p>
+                                        <p className="text-[11px] font-serif font-bold text-rose-600 dark:text-rose-400">
+                                          ₱{excessInfo.excessFee.toLocaleString()}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      aria-label="Inspect excess surcharge receipt slip"
+                                      onClick={() =>
+                                        setViewingReceipt({
+                                          url: excessInfo.postEventBilling!.receipt_url!,
+                                          bookingName: clientName,
+                                          ref: excessInfo.postEventBilling?.reference_number,
+                                          method: excessInfo.postEventBilling?.payment_method,
+                                          amount: excessInfo.excessFee,
+                                          title: "Post-Event Excess Headcount Surcharge Slip",
+                                        })
+                                      }
+                                      className="min-h-7 px-2.5 py-1.5 bg-natural-accent hover:bg-natural-accent/90 text-white text-[11px] font-bold uppercase tracking-wider rounded-md transition-all flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
+                                    >
+                                      <Eye aria-hidden="true" className="w-3 h-3" /> Inspect
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="p-2.5 bg-natural-bg/60 dark:bg-natural-sidebar/30 rounded-lg border border-natural-border text-center">
+                                    <p className="text-xs text-natural-text-light italic">
+                                      No excess surcharge slip uploaded yet.
+                                    </p>
+                                  </div>
+                                )}
+
+                                {excessInfo.isSettled ? (
+                                  <div className="w-full py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5">
+                                    <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" />
+                                    Excess Surcharge Confirmed
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    disabled={!Boolean(excessInfo.postEventBilling?.receipt_url)}
+                                    onClick={() => {
+                                      if (!excessInfo.postEventBilling?.receipt_url) return;
+                                      setConfirmAction({
+                                        type: "verify_excess_payment",
+                                        bookingId: selectedBooking.id,
+                                        bookingName: clientName,
+                                      });
+                                    }}
+                                    className={cn(
+                                      "w-full py-2 px-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shadow-xs select-none",
+                                      excessInfo.postEventBilling?.receipt_url
+                                        ? "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+                                        : "bg-natural-bg/70 dark:bg-natural-sidebar/40 border border-natural-border text-natural-text-light/60 cursor-not-allowed opacity-75"
+                                    )}
+                                    title={
+                                      !excessInfo.postEventBilling?.receipt_url
+                                        ? "Client must upload an excess surcharge payment slip before it can be confirmed"
+                                        : "Verify and confirm excess surcharge payment"
+                                    }
+                                  >
+                                    {excessInfo.postEventBilling?.receipt_url ? (
+                                      <>
+                                        <CheckCheck aria-hidden="true" className="w-3.5 h-3.5" />
+                                        <span>Confirm Excess Payment</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Lock aria-hidden="true" className="w-3 h-3" />
+                                        <span>Confirm (Slip Required)</span>
+                                      </>
+                                    )}
+                                  </button>
+                                )}
+                              </>
+                            ) : (
+                              !isEditingExcessSurcharge && (
+                                <p className="text-xs text-natural-text-light">
+                                  Actual headcount served ({excessInfo.postEventBilling?.actual_headcount_served || totalPax} pax) matched the guaranteed count ({totalPax} pax). Use <strong>Edit Surcharge</strong> if post-event headcount needs adjustment.
+                                </p>
+                              )
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -5560,9 +6357,9 @@ export function BookingPage() {
                             >
                               <CloudRain className="w-3.5 h-3.5" />
                               {isCancelled
-                                ? "Rain Laundry Locked (Cancelled)"
+                                ? "Rain Laundry Locked"
                                 : isCompleted
-                                  ? "Rain Laundry Locked (Event Completed)"
+                                  ? "Rain Laundry Locked"
                                   : logistics.rainLaundryApplied
                                     ? "Remove Rain Laundry Fee (-₱2,000)"
                                     : "Charge Rain Laundry Fee (+₱2,000)"}
@@ -5578,7 +6375,7 @@ export function BookingPage() {
                                   Outdoor Weather Advisory:
                                 </span>
                                 <span className="italic">
-                                  &ldquo;Php 2,000.00 laundry charge applies in case of rain without client-provided tents.&rdquo;
+                                  Php 2,000.00 laundry charge applies in case of rain without client-provided tents.
                                 </span>
                               </div>
                             </div>
@@ -7058,7 +7855,8 @@ export function BookingPage() {
                   : confirmAction.type === "complete"
                     ? "max-w-xl"
                     : confirmAction.type === "confirm" ||
-                        confirmAction.type === "verify_final_payment"
+                        confirmAction.type === "verify_final_payment" ||
+                        confirmAction.type === "verify_excess_payment"
                       ? "max-w-md"
                       : "max-w-sm",
               )}
@@ -7108,7 +7906,8 @@ export function BookingPage() {
                   {confirmAction.type === "create" && (
                     <Plus className="w-7 h-7 text-blue-600 dark:text-blue-400" />
                   )}
-                  {confirmAction.type === "verify_final_payment" && (
+                  {(confirmAction.type === "verify_final_payment" ||
+                    confirmAction.type === "verify_excess_payment") && (
                     <CheckCheck className="w-7 h-7 text-blue-600 dark:text-blue-400" />
                   )}
                 </div>
@@ -7117,9 +7916,11 @@ export function BookingPage() {
                     ? "Complete Event?"
                     : confirmAction.type === "verify_final_payment"
                       ? "Confirm Final Payment?"
-                      : confirmAction.type === "unarchive"
-                        ? "Restore Booking?"
-                        : `${confirmAction.type} Booking?`}
+                      : confirmAction.type === "verify_excess_payment"
+                        ? "Confirm Excess Surcharge Payment?"
+                        : confirmAction.type === "unarchive"
+                          ? "Restore Booking?"
+                          : `${confirmAction.type} Booking?`}
                 </h3>
                 <p className={cn("text-sm text-natural-text-light", hasShortage ? "mb-3" : "mb-4")}>
                   {confirmAction.type === "create"
@@ -7128,10 +7929,80 @@ export function BookingPage() {
                       ? `Are you sure the event for ${confirmAction.bookingName} is finished? This will mark the booking as Completed and return all allocated equipment back to equipment monitoring.`
                       : confirmAction.type === "verify_final_payment"
                         ? `Confirming the final payment will record the client's balance settlement and unlock the Mark Event Complete action for ${confirmAction.bookingName}.`
-                        : confirmAction.type === "unarchive"
-                          ? `Are you sure you want to restore the booking for ${confirmAction.bookingName} from the archives back to active status?`
-                          : `Are you sure you want to ${confirmAction.type} the booking for ${confirmAction.bookingName}?`}
+                        : confirmAction.type === "verify_excess_payment"
+                          ? `Confirming this receipt will mark the post-event excess headcount surcharge as Settled & Verified for ${confirmAction.bookingName}.`
+                          : confirmAction.type === "unarchive"
+                            ? `Are you sure you want to restore the booking for ${confirmAction.bookingName} from the archives back to active status?`
+                            : `Are you sure you want to ${confirmAction.type} the booking for ${confirmAction.bookingName}?`}
                 </p>
+
+                {confirmAction.type === "verify_excess_payment" && (() => {
+                  const targetBooking = bookings.find((b) => b.id === confirmAction.bookingId);
+                  const ex = targetBooking ? getExcessHeadcountBilling(targetBooking) : null;
+
+                  return (
+                    <div className="space-y-3 mb-5">
+                      <div className="p-3.5 bg-blue-50/90 dark:bg-blue-950/30 border border-blue-200/90 dark:border-blue-800/40 rounded-xl text-left space-y-2">
+                        <div className="flex items-center justify-between text-blue-900 dark:text-blue-300 font-bold text-xs">
+                          <div className="flex items-center gap-1.5">
+                            <CheckCheck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                            <span>Excess Headcount Surcharge</span>
+                          </div>
+                          <span className="font-mono text-blue-800 dark:text-blue-300 font-bold text-sm">
+                            ₱{(ex?.excessFee || 0).toLocaleString()}
+                          </span>
+                        </div>
+
+                        <div className="text-xs text-blue-950/80 dark:text-blue-200/90 space-y-1.5">
+                          <div className="flex justify-between">
+                            <span className="text-natural-text-light">Excess Pax Served:</span>
+                            <span className="font-semibold text-natural-text-main">
+                              +{ex?.postEventBilling?.excess_guests || 0} pax ({ex?.postEventBilling?.actual_headcount_served} served vs {ex?.postEventBilling?.guaranteed_headcount} guaranteed)
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-natural-text-light">Payment Method:</span>
+                            <span className="font-semibold text-natural-text-main">
+                              {ex?.postEventBilling?.payment_method || "Manual / In-Person"}
+                            </span>
+                          </div>
+                          {ex?.postEventBilling?.reference_number && (
+                            <div className="flex justify-between">
+                              <span className="text-natural-text-light">Reference:</span>
+                              <span className="font-mono font-bold text-natural-accent">
+                                {ex.postEventBilling.reference_number}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {ex?.postEventBilling?.receipt_url && (
+                          <div className="pt-2 border-t border-blue-200/70 dark:border-blue-800/40 flex items-center justify-between">
+                            <span className="text-xs text-natural-text-light">
+                              Receipt attached by client
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setViewingReceipt({
+                                  url: ex.postEventBilling!.receipt_url!,
+                                  bookingName: confirmAction.bookingName,
+                                  ref: ex.postEventBilling?.reference_number,
+                                  method: ex.postEventBilling?.payment_method,
+                                  amount: ex.excessFee,
+                                  title: "Post-Event Excess Headcount Surcharge Receipt",
+                                })
+                              }
+                              className="px-2.5 py-1 bg-blue-600 text-white text-xs font-bold uppercase tracking-wider rounded hover:bg-blue-700 transition-all flex items-center gap-1 cursor-pointer"
+                            >
+                              <Eye className="w-3.5 h-3.5" /> Inspect Slip
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {confirmAction.type === "verify_final_payment" && (() => {
                   const targetBooking = bookings.find((b) => b.id === confirmAction.bookingId);
@@ -7731,7 +8602,9 @@ export function BookingPage() {
                         ? "Complete Event"
                         : confirmAction.type === "verify_final_payment"
                           ? "Confirm Final Payment"
-                          : confirmAction.type === "unarchive"
+                          : confirmAction.type === "verify_excess_payment"
+                            ? "Confirm Excess Payment"
+                            : confirmAction.type === "unarchive"
                             ? "Restore Booking"
                             : confirmAction.type}
                   </button>
