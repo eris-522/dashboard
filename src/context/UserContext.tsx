@@ -12,6 +12,16 @@ export interface User {
   joined: string;
 }
 
+export interface CreateAdminData {
+  name: string;
+  email: string;
+  password?: string;
+  role?: string;
+  phone_number?: string;
+  action?: 'invite' | 'create' | 'resend_invite';
+  redirectTo?: string;
+}
+
 interface UserContextType {
   users: User[];
   currentUser: User | null;
@@ -25,15 +35,7 @@ interface UserContextType {
   removeUser: (id: string | number) => void;
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
-  createAdminUser: (adminData: {
-    name: string;
-    email: string;
-    password?: string;
-    role: string;
-    phone_number?: string;
-    action?: 'invite' | 'create' | 'resend_invite';
-    redirectTo?: string;
-  }) => Promise<{ success: boolean; message?: string; error?: string }>;
+  createAdminUser: (adminData: CreateAdminData) => Promise<{ success: boolean; message?: string; error?: string }>;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -68,7 +70,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       if (!silent) setIsLoading(true);
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, name, email, role, status, phone_number, created_at')
+        .select('id, name, email, status, phone_number, created_at')
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -245,13 +247,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
     return false;
   };
 
-  const createAdminUser = async (adminData: {
-    name: string;
-    email: string;
-    password: string;
-    role: string;
-    phone_number?: string;
-  }): Promise<{ success: boolean; message?: string; error?: string }> => {
+  const createAdminUser = async (
+    adminData: CreateAdminData
+  ): Promise<{ success: boolean; message?: string; error?: string }> => {
     try {
       const { data, error } = await supabase.functions.invoke('create-admin', {
         body: adminData,

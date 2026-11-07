@@ -25,7 +25,7 @@ import { supabase } from "../utils/supabase";
 import { useUser } from "../context/UserContext";
 import { logAuditAction } from "../utils/auditLogger";
 
-type SortField = "name" | "role" | "created_at" | "status";
+type SortField = "name" | "created_at" | "status";
 type SortOrder = "asc" | "desc" | null;
 
 interface SortConfig {
@@ -37,7 +37,6 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  role: string;
   status: string;
   created_at: string;
   phone?: string;
@@ -48,7 +47,6 @@ export function UserPage() {
   const { currentUser } = useUser();
   const [users, setUsers] = useState<User[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [roleFilter, setRoleFilter] = useState("All Roles");
   const [statusFilter, setStatusFilter] = useState("All Status");
   const [sortConfig, setSortConfig] = useState<SortConfig>({
     field: null,
@@ -142,31 +140,26 @@ export function UserPage() {
 
   const filteredUsers = useMemo(() => {
     return users.filter((user) => {
-      // Hide the currently logged-in user, the fallback admin ("0"), and any legacy 'Admin'/'Owner' accounts left in profiles
+      // Hide the currently logged-in user and the fallback admin ("0")
       if (
         String(user.id) === String(currentUser?.id) ||
-        String(user.id) === "0" ||
-        user.role === "Admin" ||
-        user.role === "Owner"
+        String(user.id) === "0"
       )
         return false;
 
       const query = searchQuery.toLowerCase();
       const matchesSearch =
         (user.name || "").toLowerCase().includes(query) ||
-        (user.email || "").toLowerCase().includes(query) ||
-        (user.role || "").toLowerCase().includes(query);
+        (user.email || "").toLowerCase().includes(query);
 
-      const matchesRole =
-        roleFilter === "All Roles" || user.role === roleFilter;
       const matchesStatus =
         statusFilter === "All Status"
           ? user.status !== "Archived"
           : user.status === statusFilter;
 
-      return matchesSearch && matchesRole && matchesStatus;
+      return matchesSearch && matchesStatus;
     });
-  }, [users, searchQuery, roleFilter, statusFilter, currentUser?.id]);
+  }, [users, searchQuery, statusFilter, currentUser?.id]);
 
   const sortedUsers = useMemo(() => {
     if (!sortConfig.field || !sortConfig.order) return filteredUsers;
@@ -232,7 +225,6 @@ export function UserPage() {
         .from("profiles")
         .update({
           name: trimmedName,
-          role: formData.role,
           status: formData.status,
         })
         .eq("id", confirmAction.userId);
@@ -243,7 +235,7 @@ export function UserPage() {
           action: "Updated User Profile",
           target: trimmedName || confirmAction.userName,
           type: "Update",
-          details: `Modified user role or status`,
+          details: `Modified user status`,
         });
       }
     } else if (confirmAction.type === "archive" && confirmAction.userId) {
@@ -325,14 +317,6 @@ export function UserPage() {
 
           <div className="flex items-center gap-3 w-full md:w-auto">
             <select
-              value={roleFilter}
-              onChange={(e) => setRoleFilter(e.target.value)}
-              className="px-4 py-2 border border-natural-border rounded-lg text-xs font-bold text-natural-text-main bg-white outline-none cursor-pointer uppercase tracking-wider shadow-xs"
-            >
-              <option>All Roles</option>
-              <option>Customer</option>
-            </select>
-            <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               className="px-4 py-2 border border-natural-border rounded-lg text-xs font-bold text-natural-text-main bg-white outline-none cursor-pointer uppercase tracking-wider shadow-xs"
@@ -355,14 +339,6 @@ export function UserPage() {
                 >
                   <div className="flex items-center">
                     User Info <SortIcon field="name" />
-                  </div>
-                </th>
-                <th
-                  className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
-                  onClick={() => handleSort("role")}
-                >
-                  <div className="flex items-center">
-                    Role <SortIcon field="role" />
                   </div>
                 </th>
                 <th className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border">
@@ -425,11 +401,6 @@ export function UserPage() {
                         </p>
                       </div>
                     </div>
-                  </td>
-                  <td className="px-6 py-5.5 border-b border-natural-border/50">
-                    <span className="text-xs font-bold uppercase tracking-wider text-natural-sidebar px-3 py-1 bg-natural-sidebar/5 rounded-md inline-block">
-                      {user.role || "Unassigned"}
-                    </span>
                   </td>
                   <td className="px-6 py-5.5 border-b border-natural-border/50">
                     <div className="space-y-1">
@@ -579,40 +550,21 @@ export function UserPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider pl-1">
-                    User Role
-                  </label>
-                  <select
-                    value={formData.role || "Customer"}
-                    onChange={(e) =>
-                      setFormData({ ...formData, role: e.target.value })
-                    }
-                    disabled={
-                      String(editingUser?.id) === String(currentUser?.id)
-                    }
-                    className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white transition-all shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <option>Customer</option>
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider pl-1">
-                    Status
-                  </label>
-                  <select
-                    value={formData.status || "Active"}
-                    onChange={(e) =>
-                      setFormData({ ...formData, status: e.target.value })
-                    }
-                    disabled={editingUser?.id === currentUser?.id}
-                    className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white transition-all shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <option>Active</option>
-                    <option>Inactive</option>
-                  </select>
-                </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider pl-1">
+                  Status
+                </label>
+                <select
+                  value={formData.status || "Active"}
+                  onChange={(e) =>
+                    setFormData({ ...formData, status: e.target.value })
+                  }
+                  disabled={editingUser?.id === currentUser?.id}
+                  className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white transition-all shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <option>Active</option>
+                  <option>Inactive</option>
+                </select>
               </div>
             </div>
 

@@ -67,7 +67,6 @@ async function main() {
         id: authId,
         email: adminEmail,
         name: adminFullName,
-        role: 'Admin',
         status: 'Active',
         phone_number: 9467158519,
       });
@@ -83,7 +82,6 @@ async function main() {
         id: authId,
         email: adminEmail,
         name: adminFullName,
-        role: 'Admin',
         status: 'Active',
       });
 

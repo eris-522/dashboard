@@ -23,6 +23,7 @@ import {
   XCircle,
   Boxes,
   Warehouse,
+  Check,
   CheckCheck,
   PackageCheck,
   Eye,
@@ -33,6 +34,9 @@ import {
   Wine,
   AlertTriangle,
   RefreshCw,
+  CloudRain,
+  Flame,
+  Users,
   RotateCcw,
   Sliders,
   ChevronDown,
@@ -139,6 +143,27 @@ export const getBookingPayment = (booking: any): BookingPaymentInfo => {
   };
 };
 
+export interface PostEventBillingInfo {
+  actual_headcount_served: number;
+  guaranteed_headcount: number;
+  excess_guests: number;
+  excess_guest_rate: number;
+  excess_guest_fee: number;
+  due_date: string;
+  due_date_iso?: string;
+  billed_at: string;
+  payment_status: "Pending" | "Paid" | "None";
+}
+
+export interface RainLaundryHistoryItem {
+  id: string;
+  action: "charged" | "removed";
+  fee: number;
+  timestamp: string;
+  appliedBy?: string;
+  note?: string;
+}
+
 export interface BookingLogisticsInfo {
   isOutsideTaytay: boolean;
   isSecondFloorOrHigher: boolean;
@@ -151,6 +176,15 @@ export interface BookingLogisticsInfo {
   notes?: string;
   hasLechonTable?: boolean;
   corkage?: any;
+  venueType?: "Indoor" | "Outdoor";
+  isOutdoor?: boolean;
+  rainLaundryFee?: number;
+  rainLaundryApplied?: boolean;
+  rainLaundryAppliedAt?: string | null;
+  rainLaundryRemovedAt?: string | null;
+  rainLaundryLastAction?: "charged" | "removed";
+  rainLaundryHistory?: RainLaundryHistoryItem[];
+  post_event_billing?: PostEventBillingInfo | null;
 }
 
 export const hasLateModification = (booking: any): boolean => {
@@ -324,6 +358,16 @@ export const getBookingLogistics = (booking: any): BookingLogisticsInfo => {
     (Array.isArray(booking?.selected_add_ons) && booking.selected_add_ons.some((a: string) => a.toLowerCase().includes("lechon")))
   );
 
+  const venueType = (raw?.venueType as "Indoor" | "Outdoor") || (raw?.isOutdoor ? "Outdoor" : (loc.includes("garden") || loc.includes("outdoor") ? "Outdoor" : "Indoor"));
+  const isOutdoor = Boolean(raw?.isOutdoor || venueType === "Outdoor");
+  const rainLaundryFee = Number(raw?.rainLaundryFee) || (raw?.rainLaundryApplied ? 2000 : 0);
+  const rainLaundryApplied = Boolean(raw?.rainLaundryApplied || rainLaundryFee > 0);
+  const rainLaundryAppliedAt = raw?.rainLaundryAppliedAt || null;
+  const rainLaundryRemovedAt = raw?.rainLaundryRemovedAt || null;
+  const rainLaundryLastAction = (raw?.rainLaundryLastAction as "charged" | "removed" | undefined) || (rainLaundryApplied ? "charged" : undefined);
+  const rainLaundryHistory = Array.isArray(raw?.rainLaundryHistory) ? raw.rainLaundryHistory : [];
+  const post_event_billing = raw?.post_event_billing || (booking as any)?.post_event_billing || null;
+
   return {
     isOutsideTaytay,
     isSecondFloorOrHigher,
@@ -336,6 +380,15 @@ export const getBookingLogistics = (booking: any): BookingLogisticsInfo => {
     notes,
     hasLechonTable,
     corkage,
+    venueType,
+    isOutdoor,
+    rainLaundryFee,
+    rainLaundryApplied,
+    rainLaundryAppliedAt,
+    rainLaundryRemovedAt,
+    rainLaundryLastAction,
+    rainLaundryHistory,
+    post_event_billing,
   };
 };
 
@@ -408,6 +461,8 @@ export function BookingPage() {
   const [isRevertingOvertime, setIsRevertingOvertime] = useState<boolean>(false);
   const [showRevertOTConfirm, setShowRevertOTConfirm] = useState<boolean>(false);
   const [overtimeSaveMessage, setOvertimeSaveMessage] = useState<string>("");
+  const [isSavingRainLaundry, setIsSavingRainLaundry] = useState<boolean>(false);
+  const [completeActualHeadcount, setCompleteActualHeadcount] = useState<string>("");
   // Product Unavailability & Substitution Tool State
   const [isSubModalOpen, setIsSubModalOpen] = useState<boolean>(false);
   const [subOriginalDish, setSubOriginalDish] = useState<string>("");
@@ -493,6 +548,15 @@ export function BookingPage() {
     bookingId?: string;
     bookingName: string;
   } | null>(null);
+
+  useEffect(() => {
+    if (confirmAction?.type === "complete" && confirmAction.bookingId) {
+      const b = bookings.find((bk) => bk.id === confirmAction.bookingId);
+      const guaranteed = (Number(b?.guest_count) || 50) + (Number(b?.additional_pax) || 0);
+      const existingActual = b?.logistics_info?.post_event_billing?.actual_headcount_served;
+      setCompleteActualHeadcount(String(existingActual || guaranteed));
+    }
+  }, [confirmAction, bookings]);
 
   const [newBooking, setNewBooking] = useState<{
     user_id: string;
@@ -885,6 +949,10 @@ export function BookingPage() {
     const totalOvertimeFee =
       Number(otData?.total_overtime_fee) || (prebookedOTFee + dayOfOTFee);
 
+    const rainLaundryFee = Number(logistics.rainLaundryFee) || (logistics.rainLaundryApplied ? 2000 : 0);
+    const postEventBilling = logistics.post_event_billing || (booking as any)?.post_event_billing;
+    const excessGuestFee = Number(postEventBilling?.excess_guest_fee) || 0;
+
     return (
       basePrice +
       additionalPaxTotal +
@@ -892,7 +960,9 @@ export function BookingPage() {
       logistics.haulingFee +
       logistics.travelFee +
       corkageFee +
-      totalOvertimeFee
+      totalOvertimeFee +
+      rainLaundryFee +
+      excessGuestFee
     );
   };
 
@@ -916,8 +986,11 @@ export function BookingPage() {
       } catch (e) {}
     }
     const dayOfFee = Number(otData?.day_of?.total_day_of_fee) || 0;
+    const rainLaundryFee = Number(logistics.rainLaundryFee) || (logistics.rainLaundryApplied ? 2000 : 0);
+    const postEventBilling = logistics.post_event_billing || (booking as any)?.post_event_billing;
+    const excessGuestFee = Number(postEventBilling?.excess_guest_fee) || 0;
     // Initial security deposit strictly excludes post-booking additions
-    const initialBase = Math.max(0, totalBudget - travelFee - dayOfFee);
+    const initialBase = Math.max(0, totalBudget - travelFee - dayOfFee - rainLaundryFee - excessGuestFee);
     return Math.round(initialBase * (is50Percent ? 0.5 : 0.2));
   };
 
@@ -1181,9 +1254,40 @@ export function BookingPage() {
         return;
       }
 
+      const guaranteedCount = (Number(targetBooking?.guest_count) || 50) + (Number(targetBooking?.additional_pax) || 0);
+      const actualCount = Math.max(1, parseInt(completeActualHeadcount, 10) || guaranteedCount);
+      const excessGuests = Math.max(0, actualCount - guaranteedCount);
+      const excessFee = excessGuests * 500;
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const dueDateStr = tomorrow.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+      const dueDateIso = tomorrow.toISOString().split("T")[0];
+
+      const postEventBilling: PostEventBillingInfo = {
+        actual_headcount_served: actualCount,
+        guaranteed_headcount: guaranteedCount,
+        excess_guests: excessGuests,
+        excess_guest_rate: 500,
+        excess_guest_fee: excessFee,
+        due_date: dueDateStr,
+        due_date_iso: dueDateIso,
+        billed_at: new Date().toISOString(),
+        payment_status: excessGuests > 0 ? "Pending" : "None",
+      };
+
+      const existingLogistics = targetBooking?.logistics_info || {};
+      const updatedLogistics = {
+        ...existingLogistics,
+        post_event_billing: postEventBilling,
+        updated_at: new Date().toISOString(),
+      };
+
       const { error: completeErr } = await supabase
         .from("bookings")
-        .update({ status: "Completed" })
+        .update({
+          status: "Completed",
+          logistics_info: updatedLogistics,
+        })
         .eq("id", bookingId);
 
       if (completeErr) {
@@ -1193,6 +1297,20 @@ export function BookingPage() {
         return;
       }
 
+      // Update local state
+      setBookings((prev) =>
+        prev.map((b) =>
+          b.id === bookingId
+            ? { ...b, status: "Completed", logistics_info: updatedLogistics }
+            : b
+        )
+      );
+      setSelectedBooking((prev: any) =>
+        prev && prev.id === bookingId
+          ? { ...prev, status: "Completed", logistics_info: updatedLogistics }
+          : prev
+      );
+
       // Automatically restore package equipment back to equipment monitoring
       await restoreBookingInventory(
         bookingId,
@@ -1200,11 +1318,15 @@ export function BookingPage() {
         `Event Completed - All equipment returned to warehouse equipment monitoring (Booking #${bookingId})`
       );
 
+      const excessDetails = excessGuests > 0
+        ? ` Auto-billed ${excessGuests} excess attendees served (+₱${excessFee.toLocaleString()} due ${dueDateStr}).`
+        : ` Actual headcount (${actualCount}) served matched guaranteed count.`;
+
       await logAuditAction({
         action: "Completed Booking",
         target: confirmAction.bookingName,
         type: "Update",
-        details: `Marked event as Completed for ${confirmAction.bookingName} and returned all allocated equipment to equipment monitoring`,
+        details: `Marked event as Completed for ${confirmAction.bookingName} and returned all allocated equipment.${excessDetails}`,
       });
     } else if (type === "archive" && bookingId) {
       const currentBooking = bookings.find((b) => String(b.id) === String(bookingId));
@@ -1569,6 +1691,7 @@ export function BookingPage() {
         currentLogistics.requiresStairsIngress || newHaulingFee > 0,
       notes: customLogisticsNotes.trim(),
       updated_at: new Date().toISOString(),
+      logistics_fees_updated_at: new Date().toISOString(),
     };
 
     const tempBooking = {
@@ -1679,6 +1802,228 @@ export function BookingPage() {
     window.dispatchEvent(new CustomEvent("bookingsUpdated"));
     setLogisticsSaveMessage("Logistics surcharge saved & balance updated.");
     setTimeout(() => setLogisticsSaveMessage(""), 4000);
+  };
+
+  const handleToggleRainLaundryFee = async (bookingId: number | string) => {
+    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId)) || selectedBooking;
+    if (!targetBooking) return;
+
+    const isCancelled = targetBooking.status === "Cancelled";
+    const isCompleted = targetBooking.status === "Completed";
+    if (isCancelled || isCompleted) {
+      setFetchError(
+        `Cannot modify rain laundry fee: event is already ${targetBooking.status.toLowerCase()}.`
+      );
+      return;
+    }
+
+    const currentLogistics = getBookingLogistics(targetBooking);
+    const willApply = !currentLogistics.rainLaundryApplied;
+    const clientName =
+      targetBooking.profiles?.name ||
+      targetBooking.profiles?.full_name ||
+      "Client";
+
+    setIsSavingRainLaundry(true);
+    try {
+      const actionTimestamp = new Date().toISOString();
+      const historyEntry: RainLaundryHistoryItem = {
+        id: `rl-${Date.now()}`,
+        action: willApply ? "charged" : "removed",
+        fee: willApply ? 2000 : 0,
+        timestamp: actionTimestamp,
+        appliedBy: currentUser?.name || "Admin",
+        note: willApply
+          ? "Charged ₱2,000 Rain Laundry Fee for soiled linens due to lack of client-provided tents during rain."
+          : "Removed ₱2,000 Rain Laundry Fee from booking logistics and final balance.",
+      };
+
+      const updatedHistory: RainLaundryHistoryItem[] = [
+        ...(currentLogistics.rainLaundryHistory || []),
+        historyEntry,
+      ];
+
+      const updatedLogistics: any = {
+        ...(targetBooking.logistics_info || {}),
+        rainLaundryApplied: willApply,
+        rainLaundryFee: willApply ? 2000 : 0,
+        rainLaundryAppliedAt: willApply ? actionTimestamp : currentLogistics.rainLaundryAppliedAt,
+        rainLaundryRemovedAt: !willApply ? actionTimestamp : null,
+        rainLaundryLastAction: willApply ? "charged" : "removed",
+        rainLaundryLastActionAt: actionTimestamp,
+        rainLaundryHistory: updatedHistory,
+      };
+
+      const tempBooking = {
+        ...targetBooking,
+        logistics_info: updatedLogistics,
+      };
+      const newTotalBudget = calculateBudget(tempBooking);
+      const payment = getBookingPayment(tempBooking);
+      const downpaymentDue = getInitialDownpaymentDue(tempBooking, payment, newTotalBudget);
+      const newRemainingBalance = Math.max(0, newTotalBudget - downpaymentDue);
+
+      let updatedSchedule = payment.installment_schedule
+        ? [...payment.installment_schedule]
+        : null;
+
+      if (updatedSchedule && updatedSchedule.length > 0) {
+        let paidTotal = 0;
+        let unpaidIndices: number[] = [];
+        updatedSchedule.forEach((m: any, idx: number) => {
+          if (m.status === "Verified" || m.status === "Paid") {
+            paidTotal += Number(m.amount) || 0;
+          } else {
+            unpaidIndices.push(idx);
+          }
+        });
+
+        if (unpaidIndices.length > 0) {
+          const remainingToDistribute = Math.max(0, newRemainingBalance - paidTotal);
+          const perMilestone = Math.floor(remainingToDistribute / unpaidIndices.length);
+          let acc = 0;
+          unpaidIndices.forEach((mIdx, i) => {
+            const isLast = i === unpaidIndices.length - 1;
+            const amt = isLast ? remainingToDistribute - acc : perMilestone;
+            acc += amt;
+            updatedSchedule![mIdx] = {
+              ...updatedSchedule![mIdx],
+              amount: amt,
+            };
+          });
+        }
+      }
+
+      let updatedAllergies = targetBooking.food_allergies || "";
+      try {
+        if (updatedAllergies.includes("__PAYMENT_METADATA__:")) {
+          const parts = updatedAllergies.split("__PAYMENT_METADATA__:");
+          const meta = JSON.parse(parts[1]);
+          meta.logistics = updatedLogistics;
+          meta.balance = newRemainingBalance;
+          if (updatedSchedule) meta.installments = updatedSchedule;
+          updatedAllergies = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+        }
+      } catch (e) {}
+
+      const updatePayload: any = {
+        logistics_info: updatedLogistics,
+        final_balance_amount: newRemainingBalance,
+      };
+      if (updatedSchedule) {
+        updatePayload.installment_schedule = updatedSchedule;
+      }
+      if (updatedAllergies !== (targetBooking.food_allergies || "")) {
+        updatePayload.food_allergies = updatedAllergies;
+      }
+
+      const { error } = await supabase
+        .from("bookings")
+        .update(updatePayload)
+        .eq("id", bookingId);
+
+      if (error) throw error;
+
+      setBookings((prev) =>
+        prev.map((b) =>
+          String(b.id) === String(bookingId)
+            ? {
+                ...b,
+                logistics_info: updatedLogistics,
+                final_balance_amount: newRemainingBalance,
+                installment_schedule: updatedSchedule || b.installment_schedule,
+                food_allergies: updatedAllergies,
+              }
+            : b
+        )
+      );
+      setSelectedBooking((prev: any) =>
+        prev && String(prev.id) === String(bookingId)
+          ? {
+              ...prev,
+              logistics_info: updatedLogistics,
+              final_balance_amount: newRemainingBalance,
+              installment_schedule: updatedSchedule || prev.installment_schedule,
+              food_allergies: updatedAllergies,
+            }
+          : prev
+      );
+
+      await logAuditAction({
+        action: willApply ? "Applied Rain Laundry Surcharge" : "Removed Rain Laundry Surcharge",
+        target: clientName || `Booking #${bookingId}`,
+        type: "Update",
+        details: willApply
+          ? `Charged ₱2,000 Rain Laundry Fee for soiled linens due to lack of client-provided tents during rain. Updated final balance to ₱${newRemainingBalance.toLocaleString()}. Notification sent to customer.`
+          : `Removed ₱2,000 Rain Laundry Fee from booking logistics. Restored final balance to ₱${newRemainingBalance.toLocaleString()}. Notification sent to customer.`,
+      });
+
+      // Broadcast to other tabs & client apps
+      try {
+        const bc = new BroadcastChannel("roxan_catering_events");
+        bc.postMessage({ type: "BOOKINGS_UPDATED", bookingId, action: willApply ? "charged" : "removed" });
+        bc.close();
+      } catch (e) {}
+      try {
+        localStorage.setItem("roxan_last_booking_update", String(Date.now()));
+      } catch (e) {}
+
+      window.dispatchEvent(new CustomEvent("bookingsUpdated"));
+      setLogisticsSaveMessage(
+        willApply
+          ? "Rain laundry fee (+₱2,000) applied and client notified."
+          : "Rain laundry fee removed (-₱2,000) and client notified."
+      );
+      setTimeout(() => setLogisticsSaveMessage(""), 4000);
+    } catch (err: any) {
+      console.error("Error updating rain laundry fee:", err);
+      setFetchError(`Failed to update rain laundry fee: ${err.message}`);
+    } finally {
+      setIsSavingRainLaundry(false);
+    }
+  };
+
+  const handleToggleVenueType = async (bookingId: number | string, newType: "Indoor" | "Outdoor") => {
+    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId)) || selectedBooking;
+    if (!targetBooking) return;
+
+    if (targetBooking.status === "Cancelled" || targetBooking.status === "Completed") {
+      setFetchError(`Cannot change venue type: event is already ${targetBooking.status.toLowerCase()}.`);
+      return;
+    }
+
+    try {
+      const updatedLogistics = {
+        ...(targetBooking.logistics_info || {}),
+        venueType: newType,
+        isOutdoor: newType === "Outdoor",
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error } = await supabase
+        .from("bookings")
+        .update({ logistics_info: updatedLogistics })
+        .eq("id", bookingId);
+
+      if (error) throw error;
+
+      setBookings((prev) =>
+        prev.map((b) => (String(b.id) === String(bookingId) ? { ...b, logistics_info: updatedLogistics } : b))
+      );
+      setSelectedBooking((prev: any) =>
+        prev && String(prev.id) === String(bookingId) ? { ...prev, logistics_info: updatedLogistics } : prev
+      );
+
+      await logAuditAction({
+        action: "Updated Venue Setting",
+        target: targetBooking.profiles?.name || targetBooking.profiles?.full_name || `Booking #${bookingId}`,
+        type: "Update",
+        details: `Updated venue setting to ${newType}.`,
+      });
+    } catch (err: any) {
+      console.error("Error setting venue type:", err);
+      setFetchError(`Failed to update venue type: ${err.message}`);
+    }
   };
 
   const handleApplyDayOfOvertime = async (bookingId: number | string) => {
@@ -4650,6 +4995,50 @@ export function BookingPage() {
                                   )}
                               </div>
                             )}
+
+                            {(logistics.rainLaundryFee || 0) > 0 && (
+                              <div className="pt-1 border-t border-natural-border/40 space-y-1">
+                                <div className="flex justify-between items-center gap-2">
+                                  <dt className="text-amber-700 dark:text-amber-400 font-semibold flex items-center gap-1.5">
+                                    <CloudRain className="w-3.5 h-3.5 text-amber-500" />
+                                    <span>Rain / Laundry Surcharge</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setOverviewTab("logistics")}
+                                      className="text-[10px] font-bold underline cursor-pointer"
+                                    >
+                                      Manage →
+                                    </button>
+                                  </dt>
+                                  <dd className="font-semibold text-amber-600 dark:text-amber-400 font-mono">
+                                    +₱{(logistics.rainLaundryFee || 0).toLocaleString()}
+                                  </dd>
+                                </div>
+                                <p className="text-[10px] text-natural-text-light leading-relaxed">
+                                  Soiled linens due to rain without client-provided tents
+                                </p>
+                              </div>
+                            )}
+
+                            {Boolean(logistics.post_event_billing && logistics.post_event_billing.excess_guest_fee > 0) && (
+                              <div className="pt-1 border-t border-natural-border/40 space-y-1">
+                                <div className="flex justify-between items-center gap-2">
+                                  <dt className="text-rose-700 dark:text-rose-400 font-semibold flex items-center gap-1.5">
+                                    <Users className="w-3.5 h-3.5 text-rose-500" />
+                                    <span>Excess Headcount Surcharge</span>
+                                    <span className="text-[9px] px-1.5 py-0.5 bg-rose-500/15 text-rose-700 dark:text-rose-300 rounded border border-rose-500/30 font-bold uppercase">
+                                      Due {logistics.post_event_billing?.due_date}
+                                    </span>
+                                  </dt>
+                                  <dd className="font-semibold text-rose-600 dark:text-rose-400 font-mono">
+                                    +₱{(logistics.post_event_billing?.excess_guest_fee || 0).toLocaleString()}
+                                  </dd>
+                                </div>
+                                <p className="text-[10px] text-natural-text-light leading-relaxed">
+                                  {logistics.post_event_billing?.actual_headcount_served} served vs {logistics.post_event_billing?.guaranteed_headcount} guaranteed (+{logistics.post_event_billing?.excess_guests} pax @ ₱500/pax)
+                                </p>
+                              </div>
+                            )}
                           </dl>
 
                           <div className="pt-2.5 border-t border-natural-border grid grid-cols-3 gap-2 text-center bg-natural-bg/50 p-2.5 rounded-lg">
@@ -5107,6 +5496,93 @@ export function BookingPage() {
                               </span>
                             )}
                           </div>
+                        </div>
+
+                        {/* Venue Environment & Rain/Laundry Management */}
+                        <div className="p-3 bg-natural-bg/50 rounded-lg border border-natural-border space-y-2.5 text-xs">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-natural-text-main uppercase tracking-wider text-[10px]">
+                                Venue Environment
+                              </span>
+                              <div className="inline-flex rounded-lg border border-natural-border p-0.5 bg-natural-card">
+                                <button
+                                  type="button"
+                                  disabled={isCancelled || isCompleted}
+                                  onClick={() => handleToggleVenueType(selectedBooking.id, "Indoor")}
+                                  className={cn(
+                                    "px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all",
+                                    isCancelled || isCompleted ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+                                    !logistics.isOutdoor
+                                      ? "bg-natural-accent text-white shadow-2xs"
+                                      : "text-natural-text-light hover:text-natural-text-main"
+                                  )}
+                                >
+                                  Indoor
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isCancelled || isCompleted}
+                                  onClick={() => handleToggleVenueType(selectedBooking.id, "Outdoor")}
+                                  className={cn(
+                                    "px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all",
+                                    isCancelled || isCompleted ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+                                    logistics.isOutdoor
+                                      ? "bg-amber-600 text-white shadow-2xs"
+                                      : "text-natural-text-light hover:text-natural-text-main"
+                                  )}
+                                >
+                                  Outdoor
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* One-Click Rain / Laundry Fee Toggle Button */}
+                            <button
+                              type="button"
+                              disabled={isSavingRainLaundry || isCancelled || isCompleted}
+                              onClick={() => handleToggleRainLaundryFee(selectedBooking.id)}
+                              title={
+                                isCancelled
+                                  ? "Cannot modify laundry fee: Event is cancelled"
+                                  : isCompleted
+                                    ? "Cannot modify laundry fee: Event is completed"
+                                    : undefined
+                              }
+                              className={cn(
+                                "px-3 py-1.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all flex items-center gap-1.5 shadow-2xs",
+                                isCancelled || isCompleted
+                                  ? "bg-natural-bg/80 text-natural-text-light/60 border border-natural-border/80 cursor-not-allowed opacity-60"
+                                  : logistics.rainLaundryApplied
+                                    ? "bg-rose-600 hover:bg-rose-700 text-white cursor-pointer"
+                                    : "bg-amber-600 hover:bg-amber-700 text-white cursor-pointer"
+                              )}
+                            >
+                              <CloudRain className="w-3.5 h-3.5" />
+                              {isCancelled
+                                ? "Rain Laundry Locked (Cancelled)"
+                                : isCompleted
+                                  ? "Rain Laundry Locked (Event Completed)"
+                                  : logistics.rainLaundryApplied
+                                    ? "Remove Rain Laundry Fee (-₱2,000)"
+                                    : "Charge Rain Laundry Fee (+₱2,000)"}
+                            </button>
+                          </div>
+
+                          {/* Outdoor Weather Advisory Note */}
+                          {logistics.isOutdoor && (
+                            <div className="p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-md text-[11px] text-amber-800 dark:text-amber-200 flex items-start gap-2">
+                              <CloudRain className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+                              <div>
+                                <span className="font-bold text-amber-700 dark:text-amber-300 block">
+                                  Outdoor Weather Advisory:
+                                </span>
+                                <span className="italic">
+                                  &ldquo;Php 2,000.00 laundry charge applies in case of rain without client-provided tents.&rdquo;
+                                </span>
+                              </div>
+                            </div>
+                          )}
                         </div>
 
                         <div className="grid grid-cols-3 gap-2 p-2.5 bg-natural-bg/50 rounded-lg border border-natural-border text-xs">
@@ -6743,9 +7219,74 @@ export function BookingPage() {
                   const is50Percent = payment?.payment_scheme === "Standard 50%";
                   const downpaymentDue = payment ? getInitialDownpaymentDue(targetBooking, payment, totalBudget) : 0;
                   const finalBalanceAmount = Math.max(0, totalBudget - downpaymentDue);
+                  const guaranteedCount = (Number(targetBooking?.guest_count) || 50) + (Number(targetBooking?.additional_pax) || 0);
+                  const actualCount = Math.max(1, parseInt(completeActualHeadcount, 10) || guaranteedCount);
+                  const excessPax = Math.max(0, actualCount - guaranteedCount);
+                  const excessFee = excessPax * 500;
+                  const tomorrow = new Date();
+                  tomorrow.setDate(tomorrow.getDate() + 1);
+                  const dueDateStr = tomorrow.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
                   return (
                     <div className="space-y-3 mb-5 text-left">
+                      {/* Event Headcount Reconciliation & Excess Guest Billing */}
+                      <div className="p-3 bg-natural-card border border-natural-border/80 rounded-xl space-y-2.5 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-natural-text-main uppercase tracking-wider flex items-center gap-1.5">
+                            <Users className="w-3.5 h-3.5 text-natural-accent" />
+                            Actual Headcount Served &amp; Excess Billing
+                          </span>
+                          <span className="text-[10px] font-semibold text-natural-text-light">
+                            Guaranteed: <strong className="text-natural-text-main">{guaranteedCount} Pax</strong>
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2.5">
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-natural-accent block">
+                              Actual Headcount Served *
+                            </label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={completeActualHeadcount}
+                              onChange={(e) => setCompleteActualHeadcount(e.target.value)}
+                              placeholder={String(guaranteedCount)}
+                              className="w-full px-3 py-1.5 text-xs font-semibold bg-natural-bg/70 border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block">
+                              Excess Billing Terms
+                            </label>
+                            <div className="px-3 py-1.5 text-xs font-semibold bg-natural-bg/50 border border-natural-border rounded-lg text-natural-text-light">
+                              ₱500 / pax (Due Next Day)
+                            </div>
+                          </div>
+                        </div>
+
+                        {excessPax > 0 ? (
+                          <div className="p-2.5 bg-amber-500/15 border border-amber-500/40 rounded-lg text-xs space-y-1">
+                            <div className="flex items-center justify-between font-bold text-amber-700 dark:text-amber-300">
+                              <span className="flex items-center gap-1">
+                                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                                Excess Attendees Detected: +{excessPax} Pax
+                              </span>
+                              <span className="font-mono text-sm">
+                                +₱{excessFee.toLocaleString()}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-natural-text-light leading-snug">
+                              Auto-billing <strong>{excessPax} excess guest{excessPax > 1 ? "s" : ""}</strong> beyond guaranteed count ({guaranteedCount} pax). Surcharge of <strong>₱{excessFee.toLocaleString()}</strong> will be due tomorrow (<strong>{dueDateStr}</strong>).
+                            </p>
+                          </div>
+                        ) : (
+                          <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                            ✓ Actual attendees served equals guaranteed count ({guaranteedCount} pax). No excess guest fee.
+                          </p>
+                        )}
+                      </div>
+
                       {/* Financial Overview Strip */}
                       <div className="grid grid-cols-3 gap-2 p-3 bg-natural-bg/70 dark:bg-natural-sidebar/50 border border-natural-border/70 rounded-xl text-center">
                         <div>
