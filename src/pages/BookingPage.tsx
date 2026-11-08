@@ -41,6 +41,11 @@ import {
   Sliders,
   ChevronDown,
   UtensilsCrossed,
+  Download,
+  Scale,
+  MessageSquare,
+  Camera,
+  Trash2,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { EventCalendar } from "../components/EventCalendar";
@@ -49,6 +54,7 @@ import { useUser } from "../context/UserContext";
 import { useInventory } from "../context/InventoryContext";
 import { logAuditAction } from "../utils/auditLogger";
 import { subscribeCatalogBroadcast } from "../utils/liveBroadcast";
+import { downloadSignedContractPdf } from "../utils/contractPdfGenerator";
 import {
   OVERTIME_SERVICE_RATES,
   calculateServiceWindow,
@@ -185,6 +191,70 @@ export interface ExcessHeadcountHistoryItem {
   note?: string;
 }
 
+export interface DamageAppraisalItem {
+  id: string;
+  item_id?: string | number;
+  item_name: string;
+  incident_type: "Broken / Damaged" | "Lost / Missing";
+  quantity_damaged: number;
+  unit: string;
+  unit_cost: number;
+  subtotal: number;
+  photo_url?: string;
+  notes?: string;
+  warehouse_deducted_qty?: number;
+}
+
+export interface DamageAppraisalInfo {
+  items: DamageAppraisalItem[];
+  total_damage_fee: number;
+  due_date: string;
+  general_notes?: string;
+  appraised_at: string;
+  updated_at: string;
+  appraised_by: string;
+  payment_status: "None" | "Unpaid" | "Pending Verification" | "Verified" | "Paid";
+  payment_method?: string;
+  reference_number?: string;
+  receipt_url?: string;
+  submitted_at?: string;
+  verified_at?: string;
+}
+
+export interface DamageHistoryItem {
+  id: string;
+  action: "charged" | "updated" | "removed";
+  total_fee: number;
+  item_count: number;
+  due_date: string;
+  timestamp: string;
+  appliedBy?: string;
+  note?: string;
+}
+
+export interface PostEventComplaintItem {
+  id: string;
+  booking_id?: string | number;
+  category: string;
+  subject: string;
+  details: string;
+  photo_url?: string | null;
+  submitted_at: string;
+  completed_at_reference?: string;
+  hours_after_completion?: number;
+  within_24h_window?: boolean;
+  submitter_user_id?: string;
+  submitter_email?: string;
+  submitter_name?: string;
+  recorded_contract_signer?: string;
+  is_verified_signer?: boolean;
+  dispute_clause_acknowledged?: boolean;
+  status: "Pending Review" | "Under Investigation" | "Resolved" | "Dismissed";
+  resolution_notes?: string;
+  resolved_by?: string;
+  resolved_at?: string | null;
+}
+
 export interface BookingLogisticsInfo {
   isOutsideTaytay: boolean;
   isSecondFloorOrHigher: boolean;
@@ -207,6 +277,11 @@ export interface BookingLogisticsInfo {
   rainLaundryHistory?: RainLaundryHistoryItem[];
   excessHeadcountHistory?: ExcessHeadcountHistoryItem[];
   post_event_billing?: PostEventBillingInfo | null;
+  completed_at?: string | null;
+  contract_signature?: any;
+  damage_appraisal?: DamageAppraisalInfo | null;
+  damageHistory?: DamageHistoryItem[];
+  post_event_complaints?: PostEventComplaintItem[];
 }
 
 export const hasLateModification = (booking: any): boolean => {
@@ -390,6 +465,11 @@ export const getBookingLogistics = (booking: any): BookingLogisticsInfo => {
   const rainLaundryHistory = Array.isArray(raw?.rainLaundryHistory) ? raw.rainLaundryHistory : [];
   const excessHeadcountHistory = Array.isArray(raw?.excessHeadcountHistory) ? raw.excessHeadcountHistory : [];
   const post_event_billing = raw?.post_event_billing || (booking as any)?.post_event_billing || null;
+  const completed_at = raw?.completed_at || null;
+  const contract_signature = raw?.contract_signature || null;
+  const damage_appraisal = raw?.damage_appraisal || null;
+  const damageHistory = Array.isArray(raw?.damageHistory) ? raw.damageHistory : [];
+  const post_event_complaints = Array.isArray(raw?.post_event_complaints) ? raw.post_event_complaints : [];
 
   return {
     isOutsideTaytay,
@@ -413,6 +493,11 @@ export const getBookingLogistics = (booking: any): BookingLogisticsInfo => {
     rainLaundryHistory,
     excessHeadcountHistory,
     post_event_billing,
+    completed_at,
+    contract_signature,
+    damage_appraisal,
+    damageHistory,
+    post_event_complaints,
   };
 };
 
@@ -451,6 +536,7 @@ export function BookingPage() {
     completeBookingAndReturnInventory,
     reconcileCompletedEvents,
     isBookingDeducted,
+    updateStock,
   } = useInventory();
   const [bookings, setBookings] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
@@ -470,7 +556,9 @@ export function BookingPage() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState<any | null>(null);
-  const [overviewTab, setOverviewTab] = useState<"payments" | "logistics" | "menu" | "equipment">("payments");
+  const [overviewTab, setOverviewTab] = useState<
+    "payments" | "logistics" | "menu" | "equipment" | "complaints"
+  >("payments");
   const [isDayOfOtExpanded, setIsDayOfOtExpanded] = useState<boolean>(false);
   const overviewTabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [customTravelFeeInput, setCustomTravelFeeInput] = useState<string>("0");
@@ -569,7 +657,8 @@ export function BookingPage() {
       | "create"
       | "complete"
       | "verify_final_payment"
-      | "verify_excess_payment";
+      | "verify_excess_payment"
+      | "verify_damage_payment";
     bookingId?: string;
     bookingName: string;
   } | null>(null);
@@ -580,6 +669,48 @@ export function BookingPage() {
   const [editExcessFeeInput, setEditExcessFeeInput] = useState("");
   const [isSavingExcessSurcharge, setIsSavingExcessSurcharge] = useState(false);
   const [excessSaveMessage, setExcessSaveMessage] = useState("");
+
+  // Post-Event Equipment Damage & Loss Appraisal Tool state (strictly post-event when status === "Completed")
+  const [damageRows, setDamageRows] = useState<DamageAppraisalItem[]>([]);
+  const [damageDueDateInput, setDamageDueDateInput] = useState<string>("");
+  const [damageGeneralNotes, setDamageGeneralNotes] = useState<string>("");
+  const [isSavingDamage, setIsSavingDamage] = useState<boolean>(false);
+  const [damageSaveMessage, setDamageSaveMessage] = useState<string>("");
+  const [damageFormError, setDamageFormError] = useState<string>("");
+
+  // Post-Event Complaint Management & Contract PDF state
+  const [complaintDrafts, setComplaintDrafts] = useState<
+    Record<string, { status: PostEventComplaintItem["status"]; resolution_notes: string; error?: string }>
+  >({});
+  const [savingComplaintId, setSavingComplaintId] = useState<string | null>(null);
+  const [complaintSaveMessage, setComplaintSaveMessage] = useState<string>("");
+  const [isGeneratingContractPdf, setIsGeneratingContractPdf] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!selectedBooking) return;
+    const log = getBookingLogistics(selectedBooking);
+    const existingAppraisal = log.damage_appraisal;
+    if (existingAppraisal && Array.isArray(existingAppraisal.items)) {
+      setDamageRows(existingAppraisal.items);
+      setDamageDueDateInput(existingAppraisal.due_date || "");
+      setDamageGeneralNotes(existingAppraisal.general_notes || "");
+    } else {
+      setDamageRows([]);
+      const threeDays = new Date();
+      threeDays.setDate(threeDays.getDate() + 3);
+      setDamageDueDateInput(
+        threeDays.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        })
+      );
+      setDamageGeneralNotes("");
+    }
+    setDamageSaveMessage("");
+    setDamageFormError("");
+    setComplaintSaveMessage("");
+  }, [selectedBooking?.id]);
 
   useEffect(() => {
     if (confirmAction?.type === "complete" && confirmAction.bookingId) {
@@ -632,7 +763,12 @@ export function BookingPage() {
       setLogisticsSaveMessage("");
       setIsEditingExcessSurcharge(false);
       setExcessSaveMessage("");
-      setOverviewTab("payments");
+      if (pendingOpenTabRef.current) {
+        setOverviewTab(pendingOpenTabRef.current);
+        pendingOpenTabRef.current = null;
+      } else {
+        setOverviewTab("payments");
+      }
       const dayOfInfo = selectedBooking.overtime_info?.day_of;
       const hasAppliedDayOfOt = Boolean(
         dayOfInfo?.total_day_of_fee !== undefined && dayOfInfo?.applied_at
@@ -663,15 +799,26 @@ export function BookingPage() {
   ]);
 
   const pendingOpenBookingIdRef = React.useRef<string | number | null>(null);
+  const pendingOpenTabRef = React.useRef<
+    "payments" | "logistics" | "menu" | "equipment" | "complaints" | null
+  >(null);
 
   useEffect(() => {
     const handleOpenOverview = (e: any) => {
       const targetId = e.detail?.bookingId;
+      const targetTab = e.detail?.tab || null;
       if (!targetId) return;
+      pendingOpenTabRef.current = targetTab;
       setBookings((currentList) => {
         const match = currentList.find((b) => String(b.id) === String(targetId));
         if (match) {
-          setSelectedBooking(match);
+          setSelectedBooking((prev: any) => {
+            if (prev && String(prev.id) === String(match.id) && targetTab) {
+              setOverviewTab(targetTab);
+              pendingOpenTabRef.current = null;
+            }
+            return match;
+          });
           pendingOpenBookingIdRef.current = null;
         } else {
           pendingOpenBookingIdRef.current = targetId;
@@ -1371,6 +1518,7 @@ export function BookingPage() {
 
       const updatedLogistics = {
         ...existingLogistics,
+        completed_at: existingLogistics.completed_at || nowIso,
         post_event_billing: postEventBilling,
         excessHeadcountHistory: updatedHistory,
         updated_at: nowIso,
@@ -1578,6 +1726,10 @@ export function BookingPage() {
       return;
     } else if (type === "verify_excess_payment" && bookingId) {
       await handleVerifyExcessPayment(bookingId);
+      setConfirmAction(null);
+      return;
+    } else if (type === "verify_damage_payment" && bookingId) {
+      await handleVerifyDamagePayment(bookingId);
       setConfirmAction(null);
       return;
     }
@@ -1851,6 +2003,706 @@ export function BookingPage() {
 
     window.dispatchEvent(new CustomEvent("bookingsUpdated"));
     await fetchAllData(true);
+  };
+
+  const getDamageAppraisalSummary = (booking: any) => {
+    const log = getBookingLogistics(booking);
+    const damageAppraisal = log.damage_appraisal || null;
+    const damageFee = Number(damageAppraisal?.total_damage_fee) || 0;
+    const isSettled = Boolean(
+      damageAppraisal &&
+        (damageAppraisal.payment_status === "Verified" ||
+          damageAppraisal.payment_status === "Paid")
+    );
+    const isUnderReview = Boolean(
+      damageAppraisal &&
+        !isSettled &&
+        damageFee > 0 &&
+        (damageAppraisal.payment_status === "Pending Verification" ||
+          Boolean(damageAppraisal.receipt_url))
+    );
+    return {
+      damageAppraisal,
+      damageFee,
+      isSettled,
+      isUnderReview,
+    };
+  };
+
+  const compressAndUploadDamagePhoto = async (
+    file: File,
+    bookingId: string | number
+  ): Promise<string> => {
+    const compressToJpeg = (): Promise<{ dataUrl: string; blob: Blob }> =>
+      new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const img = new Image();
+          img.onload = () => {
+            const maxW = 1000;
+            const scale = img.width > maxW ? maxW / img.width : 1;
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, Math.round(img.width * scale));
+            canvas.height = Math.max(1, Math.round(img.height * scale));
+            const ctx = canvas.getContext("2d");
+            if (!ctx) {
+              reject(new Error("Canvas unavailable"));
+              return;
+            }
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            const dataUrl = canvas.toDataURL("image/jpeg", 0.76);
+            canvas.toBlob(
+              (blob) => {
+                if (blob) resolve({ dataUrl, blob });
+                else reject(new Error("Compression failed"));
+              },
+              "image/jpeg",
+              0.76
+            );
+          };
+          img.onerror = () => reject(new Error("Invalid image"));
+          img.src = String(ev.target?.result || "");
+        };
+        reader.onerror = () => reject(new Error("Could not read file"));
+        reader.readAsDataURL(file);
+      });
+
+    const { dataUrl, blob } = await compressToJpeg();
+    try {
+      const filePath = `damage-evidence/${bookingId}/${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 8)}.jpg`;
+      const { error: upErr } = await supabase.storage
+        .from("receipts")
+        .upload(filePath, blob, { contentType: "image/jpeg", upsert: true });
+      if (!upErr) {
+        const { data: pub } = supabase.storage.from("receipts").getPublicUrl(filePath);
+        if (pub?.publicUrl) return pub.publicUrl;
+      }
+    } catch {}
+    return dataUrl;
+  };
+
+  const handleSaveDamageAppraisal = async (
+    e: React.FormEvent,
+    bookingId: number | string,
+    clearAll = false
+  ) => {
+    e.preventDefault();
+    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId));
+    if (!targetBooking) return;
+
+    if (String(targetBooking.status || "").trim().toLowerCase() !== "completed") {
+      setDamageFormError(
+        "Equipment damage and loss appraisal is strictly locked until after the event is marked Completed."
+      );
+      return;
+    }
+
+    const rowsToProcess = clearAll ? [] : damageRows;
+
+    if (!clearAll) {
+      if (rowsToProcess.length === 0) {
+        setDamageFormError(
+          "Add at least one damaged or missing equipment item before issuing an invoice, or click Clear Appraisal."
+        );
+        return;
+      }
+      for (const r of rowsToProcess) {
+        if (!r.item_name || !r.item_name.trim()) {
+          setDamageFormError("Every row must specify an equipment item name.");
+          return;
+        }
+        if ((Number(r.quantity_damaged) || 0) <= 0) {
+          setDamageFormError(`Quantity for "${r.item_name}" must be at least 1.`);
+          return;
+        }
+        if ((Number(r.unit_cost) || 0) <= 0) {
+          setDamageFormError(`Enter a valid appraisal unit cost (₱) for "${r.item_name}".`);
+          return;
+        }
+      }
+    }
+
+    setIsSavingDamage(true);
+    setDamageFormError("");
+    setDamageSaveMessage("");
+
+    try {
+      const clientName =
+        targetBooking.profiles?.name || targetBooking.profiles?.full_name || "Client";
+      const nowIso = new Date().toISOString();
+      const existingLogistics = targetBooking.logistics_info || {};
+      const existingAppraisal: DamageAppraisalInfo | undefined =
+        existingLogistics.damage_appraisal || undefined;
+      const prevItems: DamageAppraisalItem[] = Array.isArray(existingAppraisal?.items)
+        ? existingAppraisal!.items
+        : [];
+
+      // Normalize rows and match to warehouse inventory items
+      const normalizedItems: DamageAppraisalItem[] = rowsToProcess.map((row) => {
+        const qty = Math.max(1, Math.round(Number(row.quantity_damaged) || 1));
+        const unitCost = Math.max(0, Math.round(Number(row.unit_cost) || 0));
+        const matchedInv = items.find(
+          (inv) =>
+            inv.status !== "Archived" &&
+            (String(inv.id) === String(row.item_id) ||
+              inv.name.trim().toLowerCase() === row.item_name.trim().toLowerCase())
+        );
+        return {
+          ...row,
+          item_id: matchedInv ? matchedInv.id : row.item_id,
+          item_name: row.item_name.trim(),
+          unit: row.unit || matchedInv?.unit || "pcs",
+          quantity_damaged: qty,
+          unit_cost: unitCost,
+          subtotal: qty * unitCost,
+          warehouse_deducted_qty: matchedInv ? qty : 0,
+        };
+      });
+
+      // Reconcile warehouse stock deltas cleanly so edits never double-deduct
+      const prevByInvId = new Map<string, number>();
+      prevItems.forEach((p) => {
+        const matchedInv = items.find(
+          (inv) =>
+            String(inv.id) === String(p.item_id) ||
+            inv.name.trim().toLowerCase() === String(p.item_name || "").trim().toLowerCase()
+        );
+        if (matchedInv && (Number(p.warehouse_deducted_qty) || 0) > 0) {
+          const k = String(matchedInv.id);
+          prevByInvId.set(k, (prevByInvId.get(k) || 0) + Number(p.warehouse_deducted_qty));
+        }
+      });
+
+      const nextByInvId = new Map<string, number>();
+      normalizedItems.forEach((n) => {
+        if (n.item_id !== undefined && (Number(n.warehouse_deducted_qty) || 0) > 0) {
+          const k = String(n.item_id);
+          nextByInvId.set(k, (nextByInvId.get(k) || 0) + Number(n.warehouse_deducted_qty));
+        }
+      });
+
+      const allInvKeys = new Set([...prevByInvId.keys(), ...nextByInvId.keys()]);
+      for (const invKey of allInvKeys) {
+        const prevDeducted = prevByInvId.get(invKey) || 0;
+        const nextDeducted = nextByInvId.get(invKey) || 0;
+        const delta = nextDeducted - prevDeducted;
+        const invObj = items.find((inv) => String(inv.id) === invKey);
+        if (!invObj || delta === 0) continue;
+
+        if (delta > 0) {
+          await updateStock(
+            invObj.id,
+            -delta,
+            `Post-event equipment damage/loss appraisal (Booking #${bookingId} - ${clientName})`,
+            "Damaged/Loss"
+          );
+        } else {
+          await updateStock(
+            invObj.id,
+            Math.abs(delta),
+            `Restored adjusted/cleared post-event damage appraisal (Booking #${bookingId} - ${clientName})`,
+            "Restock"
+          );
+        }
+      }
+
+      const totalFee = normalizedItems.reduce((sum, it) => sum + it.subtotal, 0);
+      const prevFee = Number(existingAppraisal?.total_damage_fee) || 0;
+      const prevStatus = existingAppraisal?.payment_status;
+
+      let nextPayStatus: DamageAppraisalInfo["payment_status"] = "Unpaid";
+      if (totalFee <= 0) {
+        nextPayStatus = "None";
+      } else if (prevStatus === "Verified" || prevStatus === "Paid") {
+        nextPayStatus = totalFee > prevFee ? "Unpaid" : "Verified";
+      } else if (Boolean(existingAppraisal?.receipt_url)) {
+        nextPayStatus = "Pending Verification";
+      } else {
+        nextPayStatus = "Unpaid";
+      }
+
+      const dueStr =
+        damageDueDateInput.trim() ||
+        new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        });
+
+      const updatedAppraisal: DamageAppraisalInfo = {
+        items: normalizedItems,
+        total_damage_fee: totalFee,
+        due_date: dueStr,
+        general_notes: damageGeneralNotes.trim(),
+        appraised_at: existingAppraisal?.appraised_at || nowIso,
+        updated_at: nowIso,
+        appraised_by: currentUser?.name || "Admin",
+        payment_status: nextPayStatus,
+        payment_method: totalFee > 0 ? existingAppraisal?.payment_method : undefined,
+        reference_number: totalFee > 0 ? existingAppraisal?.reference_number : undefined,
+        receipt_url: totalFee > 0 ? existingAppraisal?.receipt_url : undefined,
+        submitted_at: totalFee > 0 ? existingAppraisal?.submitted_at : undefined,
+        verified_at: totalFee > 0 ? existingAppraisal?.verified_at : undefined,
+      };
+
+      const historyAction: DamageHistoryItem["action"] =
+        totalFee <= 0 ? "removed" : prevFee > 0 ? "updated" : "charged";
+
+      const damageHistItem: DamageHistoryItem = {
+        id: `dmg-${Date.now()}`,
+        action: historyAction,
+        total_fee: totalFee,
+        item_count: normalizedItems.length,
+        due_date: dueStr,
+        timestamp: nowIso,
+        appliedBy: currentUser?.name || "Admin",
+        note:
+          totalFee > 0
+            ? `Appraised ${normalizedItems.length} item(s) totaling ₱${totalFee.toLocaleString()}.`
+            : "Cleared post-event equipment damage appraisal.",
+      };
+
+      const updatedDamageHistory: DamageHistoryItem[] = [
+        ...(Array.isArray(existingLogistics.damageHistory)
+          ? existingLogistics.damageHistory
+          : []),
+        damageHistItem,
+      ];
+
+      const updatedLogistics = {
+        ...existingLogistics,
+        damage_appraisal: updatedAppraisal,
+        damageHistory: updatedDamageHistory,
+        updated_at: nowIso,
+      };
+
+      let updatedAllergies = targetBooking.food_allergies || "";
+      try {
+        if (
+          typeof updatedAllergies === "string" &&
+          updatedAllergies.includes("__PAYMENT_METADATA__:")
+        ) {
+          const parts = updatedAllergies.split("__PAYMENT_METADATA__:");
+          const meta = JSON.parse(parts[1]);
+          meta.logistics = updatedLogistics;
+          updatedAllergies = `${
+            parts[0].trim() ? parts[0].trim() + "\n" : ""
+          }__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+        }
+      } catch {}
+
+      const updatePayload: any = {
+        logistics_info: updatedLogistics,
+        user_id: targetBooking.user_id,
+      };
+      if (updatedAllergies !== (targetBooking.food_allergies || "")) {
+        updatePayload.food_allergies = updatedAllergies;
+      }
+
+      const { error } = await supabase
+        .from("bookings")
+        .update(updatePayload)
+        .eq("id", bookingId);
+      if (error) throw error;
+
+      setDamageRows(normalizedItems);
+      setBookings((prev) =>
+        prev.map((b) =>
+          String(b.id) === String(bookingId)
+            ? { ...b, logistics_info: updatedLogistics, food_allergies: updatedAllergies }
+            : b
+        )
+      );
+      setSelectedBooking((prev: any) =>
+        prev && String(prev.id) === String(bookingId)
+          ? { ...prev, logistics_info: updatedLogistics, food_allergies: updatedAllergies }
+          : prev
+      );
+
+      await logAuditAction({
+        action:
+          totalFee > 0
+            ? "Issued Post-Event Equipment Damage Invoice"
+            : "Cleared Equipment Damage Invoice",
+        target: clientName,
+        type: "Update",
+        details:
+          totalFee > 0
+            ? `Billed ₱${totalFee.toLocaleString()} across ${normalizedItems.length} damaged/missing item(s) for ${clientName} (Booking #${bookingId}).`
+            : `Cleared post-event equipment damage appraisal for ${clientName} (Booking #${bookingId}).`,
+      });
+
+      try {
+        const bc = new BroadcastChannel("roxan_catering_events");
+        bc.postMessage({
+          type: "BOOKINGS_UPDATED",
+          bookingId,
+          action: totalFee > 0 ? "damage_invoice_issued" : "damage_invoice_removed",
+        });
+        bc.close();
+      } catch {}
+      try {
+        localStorage.setItem("roxan_last_booking_update", String(Date.now()));
+      } catch {}
+
+      window.dispatchEvent(new CustomEvent("bookingsUpdated"));
+      setDamageSaveMessage(
+        totalFee > 0
+          ? `Damage invoice of ₱${totalFee.toLocaleString()} saved and sent to client.`
+          : "Equipment damage appraisal cleared."
+      );
+      setTimeout(() => setDamageSaveMessage(""), 4500);
+    } catch (err: any) {
+      console.error("Error saving damage appraisal:", err);
+      setDamageFormError(err.message || "Failed to save equipment damage appraisal.");
+    } finally {
+      setIsSavingDamage(false);
+    }
+  };
+
+  const handleVerifyDamagePayment = async (bookingId: number | string) => {
+    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId));
+    if (!targetBooking) return;
+    const clientName =
+      targetBooking.profiles?.name || targetBooking.profiles?.full_name || "Client";
+    const existingLogistics = targetBooking.logistics_info || {};
+    const existingAppraisal: DamageAppraisalInfo | undefined =
+      existingLogistics.damage_appraisal;
+    if (!existingAppraisal) return;
+
+    const nowIso = new Date().toISOString();
+    const updatedAppraisal: DamageAppraisalInfo = {
+      ...existingAppraisal,
+      payment_status: "Verified",
+      verified_at: nowIso,
+      updated_at: nowIso,
+    };
+
+    const updatedLogistics = {
+      ...existingLogistics,
+      damage_appraisal: updatedAppraisal,
+      updated_at: nowIso,
+    };
+
+    let updatedAllergies = targetBooking.food_allergies || "";
+    try {
+      if (
+        typeof updatedAllergies === "string" &&
+        updatedAllergies.includes("__PAYMENT_METADATA__:")
+      ) {
+        const parts = updatedAllergies.split("__PAYMENT_METADATA__:");
+        const meta = JSON.parse(parts[1]);
+        meta.logistics = updatedLogistics;
+        updatedAllergies = `${
+          parts[0].trim() ? parts[0].trim() + "\n" : ""
+        }__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+      }
+    } catch {}
+
+    const updatePayload: any = {
+      logistics_info: updatedLogistics,
+      user_id: targetBooking.user_id,
+    };
+    if (updatedAllergies !== (targetBooking.food_allergies || "")) {
+      updatePayload.food_allergies = updatedAllergies;
+    }
+
+    const { error } = await supabase
+      .from("bookings")
+      .update(updatePayload)
+      .eq("id", bookingId);
+
+    if (error) {
+      console.error("Error verifying damage payment:", error.message);
+      setFetchError(`Failed to verify damage invoice payment: ${error.message}`);
+      return;
+    }
+
+    await logAuditAction({
+      action: "Verified Equipment Damage Invoice Payment",
+      target: clientName,
+      type: "Update",
+      details: `Admin confirmed and verified post-event equipment damage invoice of ₱${(
+        Number(existingAppraisal.total_damage_fee) || 0
+      ).toLocaleString()} for ${clientName} (Booking #${bookingId}).`,
+    });
+
+    setBookings((prev) =>
+      prev.map((b) =>
+        String(b.id) === String(bookingId)
+          ? { ...b, logistics_info: updatedLogistics, food_allergies: updatedAllergies }
+          : b
+      )
+    );
+    setSelectedBooking((prev: any) =>
+      prev && String(prev.id) === String(bookingId)
+        ? { ...prev, logistics_info: updatedLogistics, food_allergies: updatedAllergies }
+        : prev
+    );
+
+    try {
+      const bc = new BroadcastChannel("roxan_catering_events");
+      bc.postMessage({
+        type: "BOOKINGS_UPDATED",
+        bookingId,
+        action: "damage_invoice_verified",
+      });
+      bc.close();
+    } catch {}
+    try {
+      localStorage.setItem("roxan_last_booking_update", String(Date.now()));
+    } catch {}
+
+    window.dispatchEvent(new CustomEvent("bookingsUpdated"));
+    await fetchAllData(true);
+  };
+
+  const handleSaveComplaintResolution = async (
+    e: React.FormEvent,
+    bookingId: number | string,
+    complaint: PostEventComplaintItem
+  ) => {
+    e.preventDefault();
+    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId));
+    if (!targetBooking) return;
+
+    const draft = complaintDrafts[complaint.id] || {
+      status: complaint.status === "Pending Review" ? "Resolved" : complaint.status,
+      resolution_notes: complaint.resolution_notes || "",
+    };
+
+    if (draft.resolution_notes.trim().length < 5) {
+      setComplaintDrafts((prev) => ({
+        ...prev,
+        [complaint.id]: {
+          ...draft,
+          error: "Please enter an official resolution or investigation note (at least 5 characters).",
+        },
+      }));
+      return;
+    }
+
+    setSavingComplaintId(complaint.id);
+    try {
+      const clientName =
+        targetBooking.profiles?.name || targetBooking.profiles?.full_name || "Client";
+      const nowIso = new Date().toISOString();
+      const existingLogistics = targetBooking.logistics_info || {};
+      const existingComplaints: PostEventComplaintItem[] = Array.isArray(
+        existingLogistics.post_event_complaints
+      )
+        ? existingLogistics.post_event_complaints
+        : [];
+
+      const updatedComplaints = existingComplaints.map((c) =>
+        c.id === complaint.id
+          ? {
+              ...c,
+              status: draft.status,
+              resolution_notes: draft.resolution_notes.trim(),
+              resolved_by: currentUser?.name || "Admin",
+              resolved_at: nowIso,
+            }
+          : c
+      );
+
+      const updatedLogistics = {
+        ...existingLogistics,
+        post_event_complaints: updatedComplaints,
+        updated_at: nowIso,
+      };
+
+      let updatedAllergies = targetBooking.food_allergies || "";
+      try {
+        if (
+          typeof updatedAllergies === "string" &&
+          updatedAllergies.includes("__PAYMENT_METADATA__:")
+        ) {
+          const parts = updatedAllergies.split("__PAYMENT_METADATA__:");
+          const meta = JSON.parse(parts[1]);
+          meta.logistics = updatedLogistics;
+          updatedAllergies = `${
+            parts[0].trim() ? parts[0].trim() + "\n" : ""
+          }__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+        }
+      } catch {}
+
+      const updatePayload: any = {
+        logistics_info: updatedLogistics,
+        user_id: targetBooking.user_id,
+      };
+      if (updatedAllergies !== (targetBooking.food_allergies || "")) {
+        updatePayload.food_allergies = updatedAllergies;
+      }
+
+      const { error } = await supabase
+        .from("bookings")
+        .update(updatePayload)
+        .eq("id", bookingId);
+      if (error) throw error;
+
+      setBookings((prev) =>
+        prev.map((b) =>
+          String(b.id) === String(bookingId)
+            ? { ...b, logistics_info: updatedLogistics, food_allergies: updatedAllergies }
+            : b
+        )
+      );
+      setSelectedBooking((prev: any) =>
+        prev && String(prev.id) === String(bookingId)
+          ? { ...prev, logistics_info: updatedLogistics, food_allergies: updatedAllergies }
+          : prev
+      );
+
+      await logAuditAction({
+        action: `Recorded Post-Event Complaint Resolution (${draft.status})`,
+        target: clientName,
+        type: "Update",
+        details: `Updated complaint "${complaint.subject}" for ${clientName} (Booking #${bookingId}) to ${draft.status}: "${draft.resolution_notes.trim()}"`,
+      });
+
+      try {
+        const bc = new BroadcastChannel("roxan_catering_events");
+        bc.postMessage({
+          type: "BOOKINGS_UPDATED",
+          bookingId,
+          action: "complaint_resolved",
+        });
+        bc.close();
+      } catch {}
+      try {
+        localStorage.setItem("roxan_last_booking_update", String(Date.now()));
+      } catch {}
+
+      window.dispatchEvent(new CustomEvent("bookingsUpdated"));
+      setComplaintDrafts((prev) => ({
+        ...prev,
+        [complaint.id]: { ...draft, error: undefined },
+      }));
+      setComplaintSaveMessage(`Resolution recorded (${draft.status}) and synced to client.`);
+      setTimeout(() => setComplaintSaveMessage(""), 4000);
+    } catch (err: any) {
+      console.error("Error saving complaint resolution:", err);
+      setComplaintDrafts((prev) => ({
+        ...prev,
+        [complaint.id]: {
+          ...draft,
+          error: err.message || "Failed to save resolution.",
+        },
+      }));
+    } finally {
+      setSavingComplaintId(null);
+    }
+  };
+
+  const handleDownloadContractPdf = async (booking: any) => {
+    if (!booking) return;
+    setIsGeneratingContractPdf(true);
+    try {
+      const clientName =
+        booking.profiles?.name || booking.profiles?.full_name || "Client";
+      const pkg =
+        booking.packages || packages.find((p) => p.id === booking.package_id);
+      const pkgName = pkg?.name || booking.package || "Custom Catering Package";
+      const baseGuests = Number(booking.guest_count) || 50;
+      const extraGuests = Number(booking.additional_pax) || 0;
+      const totalGuests = baseGuests + extraGuests;
+      const basePrice =
+        pkg && pkg.price
+          ? parseFloat(String(pkg.price).replace(/[^\d.-]/g, "")) || 0
+          : 0;
+      const addPrice =
+        pkg && pkg.additional_pax_price
+          ? parseFloat(String(pkg.additional_pax_price).replace(/[^\d.-]/g, "")) || 0
+          : 0;
+      const additionalPaxTotal = extraGuests * addPrice;
+
+      const log = getBookingLogistics(booking);
+      const corkData = booking.corkage_info || log.corkage || null;
+      const corkageFee =
+        Number(corkData?.totalCorkageFee) ||
+        ((corkData?.hasLechonTable ? 1500 : 0) +
+          Number(corkData?.alcoholicBeveragesCount || 0) * 400 +
+          Number(corkData?.outsideFoodCount || 0) * 400) ||
+        0;
+
+      const preOT = booking.overtime_info?.prebooked;
+      const dayOT = booking.overtime_info?.day_of;
+      const prebookedOtFee = Number(preOT?.total_prebooked_fee) || 0;
+      const dayOfOtFee = Number(dayOT?.total_day_of_fee) || 0;
+      const preCateringHrs = Number(preOT?.catering_hours) || 0;
+      const win = calculateServiceWindow(booking.event_time, preCateringHrs);
+
+      const totalBudget = calculateBudget(booking);
+      const pay = getBookingPayment(booking);
+      const downpaymentAmount = getInitialDownpaymentDue(booking, pay, totalBudget);
+      const finalBalanceAmount = Math.max(0, totalBudget - downpaymentAmount);
+      const excessInfo = getExcessHeadcountBilling(booking);
+      const dmgInfo = getDamageAppraisalSummary(booking);
+
+      downloadSignedContractPdf({
+        bookingId: booking.id,
+        status: booking.status || "Pending",
+        createdAt: booking.created_at,
+        clientName,
+        clientEmail: booking.profiles?.email || "",
+        clientPhone: booking.profiles?.phone_number || booking.profiles?.phone || "",
+        clientUserId: booking.user_id,
+        eventDate: formatEventDate(booking.event_date),
+        serviceWindow: win.hasExtraHours
+          ? `${win.extendedWindowText} (+${preCateringHrs}h OT)`
+          : win.standardWindowText,
+        venueLocation: booking.event_location || "Venue TBD",
+        venueType: log.venueType || "Indoor",
+        packageName: pkgName,
+        baseGuests,
+        extraGuests,
+        totalGuests,
+        selectedMenuItems: Array.isArray(booking.selected_menu_items)
+          ? booking.selected_menu_items
+          : [],
+        financials: {
+          basePrice,
+          additionalPaxTotal,
+          travelFee: Number(log.travelFee) || 0,
+          haulingFee: Number(log.haulingFee) || 0,
+          corkageFee,
+          prebookedOtFee,
+          dayOfOtFee,
+          rainLaundryFee: Number(log.rainLaundryFee) || 0,
+          totalContractAmount: totalBudget,
+          paymentScheme: pay.payment_scheme || "Standard 50%",
+          downpaymentAmount,
+          depositStatus:
+            pay.payment_status === "Verified" ||
+            booking.status === "Confirmed" ||
+            booking.status === "Completed"
+              ? "Verified"
+              : pay.payment_status || "Pending",
+          finalBalanceAmount,
+          finalBalanceStatus: pay.final_balance_status || "Unpaid",
+          excessHeadcountFee: excessInfo.excessFee,
+          damageFee: dmgInfo.damageFee,
+        },
+        signature: log.contract_signature || null,
+        termsAccepted: Boolean(pay.terms_accepted),
+      });
+
+      await logAuditAction({
+        action: "Downloaded Signed Contract PDF",
+        target: clientName,
+        type: "Update",
+        details: `Generated official 20-clause signed Catering Service Agreement PDF for ${clientName} (Booking #${booking.id}).`,
+      });
+    } catch (err) {
+      console.error("Error generating contract PDF:", err);
+    } finally {
+      setIsGeneratingContractPdf(false);
+    }
   };
 
   const handleVerifyFinalBalance = async (bookingId: number | string) => {
@@ -4577,6 +5429,15 @@ export function BookingPage() {
         const isFinalVerified = payment.final_balance_status === "Verified";
         const hasFinalReceipt = Boolean(payment.final_balance_receipt);
         const excessInfo = getExcessHeadcountBilling(selectedBooking);
+        const damageInfo = getDamageAppraisalSummary(selectedBooking);
+        const complaintsList: PostEventComplaintItem[] = Array.isArray(
+          logistics.post_event_complaints
+        )
+          ? logistics.post_event_complaints
+          : [];
+        const openComplaintsCount = complaintsList.filter(
+          (c) => c.status === "Pending Review" || c.status === "Under Investigation"
+        ).length;
 
         const hasPendingInstallmentSlip =
           !is50Percent &&
@@ -4592,7 +5453,8 @@ export function BookingPage() {
           (!isDepositVerified && Boolean(payment.receipt_url)) ||
           (is50Percent && !isFinalVerified && hasFinalReceipt) ||
           hasPendingInstallmentSlip ||
-          excessInfo.isUnderReview;
+          excessInfo.isUnderReview ||
+          damageInfo.isUnderReview;
 
         const prebookedCatering =
           Number(selectedBooking.overtime_info?.prebooked?.catering_hours) || 0;
@@ -4695,15 +5557,17 @@ export function BookingPage() {
         );
         const totalEquipUnits = totalInHouse + totalOutsourced;
 
-        const tabOrder: Array<"payments" | "logistics" | "menu" | "equipment"> = [
-          "payments",
-          "logistics",
-          "menu",
-          "equipment",
-        ];
+        const tabOrder: Array<
+          "payments" | "logistics" | "menu" | "equipment" | "complaints"
+        > = ["payments", "logistics", "menu", "equipment", "complaints"];
         const handleTabKeyDown = (
           e: React.KeyboardEvent<HTMLButtonElement>,
-          currentKey: "payments" | "logistics" | "menu" | "equipment"
+          currentKey:
+            | "payments"
+            | "logistics"
+            | "menu"
+            | "equipment"
+            | "complaints"
         ) => {
           const idx = tabOrder.indexOf(currentKey);
           let nextIdx = -1;
@@ -4783,14 +5647,29 @@ export function BookingPage() {
                     </p>
                   </div>
 
-                  <button
-                    type="button"
-                    aria-label="Close booking overview"
-                    onClick={() => setSelectedBooking(null)}
-                    className="min-w-8 min-h-8 p-1.5 hover:bg-natural-bg rounded-lg transition-colors cursor-pointer flex items-center justify-center shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-natural-accent"
-                  >
-                    <X aria-hidden="true" className="w-5 h-5 text-natural-text-light" />
-                  </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      disabled={isGeneratingContractPdf}
+                      onClick={() => handleDownloadContractPdf(selectedBooking)}
+                      className="min-h-8 px-3 py-1.5 rounded-lg bg-natural-bg hover:bg-natural-accent/10 border border-natural-border hover:border-natural-accent/40 text-natural-text-main text-[11px] font-bold uppercase tracking-wider transition-colors inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      title="Download Official 20-Clause Signed Contract PDF"
+                    >
+                      <Download aria-hidden="true" className="w-3.5 h-3.5 text-natural-accent" />
+                      <span className="hidden sm:inline">
+                        {isGeneratingContractPdf ? "Generating..." : "Contract PDF"}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      aria-label="Close booking overview"
+                      onClick={() => setSelectedBooking(null)}
+                      className="min-w-8 min-h-8 p-1.5 hover:bg-natural-bg rounded-lg transition-colors cursor-pointer flex items-center justify-center shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-natural-accent"
+                    >
+                      <X aria-hidden="true" className="w-5 h-5 text-natural-text-light" />
+                    </button>
+                  </div>
                 </div>
 
                 {/* 4-Column Essential Logistics & Unified Financial Strip */}
@@ -4916,6 +5795,24 @@ export function BookingPage() {
                           )
                         </p>
                       )}
+                      {damageInfo.damageFee > 0 && (
+                        <p
+                          className={cn(
+                            "text-[10px] font-bold truncate mt-0.5",
+                            damageInfo.isSettled
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : "text-orange-600 dark:text-orange-400"
+                          )}
+                        >
+                          Damage Bal: ₱{damageInfo.damageFee.toLocaleString()} (
+                          {damageInfo.isSettled
+                            ? "Paid"
+                            : damageInfo.isUnderReview
+                              ? "Review"
+                              : "Unpaid"}
+                          )
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -4924,7 +5821,7 @@ export function BookingPage() {
                 <div
                   role="tablist"
                   aria-label="Booking coordinator sections"
-                  className="flex items-center gap-1.5 overflow-x-auto pt-1 -mb-3.5 border-t border-natural-border/50 no-scrollbar"
+                  className="flex items-center gap-1 overflow-x-auto pt-1 -mb-3.5 border-t border-natural-border/50 no-scrollbar [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                 >
                   {[
                     {
@@ -4964,11 +5861,29 @@ export function BookingPage() {
                       label: "Equipment",
                       icon: Boxes,
                       badge:
-                        !isCompleted && totalOutsourced > 0
-                          ? `${totalOutsourced} Outsource`
-                          : String(totalEquipUnits),
+                        damageInfo.damageFee > 0
+                          ? `₱${damageInfo.damageFee.toLocaleString()} Dmg`
+                          : !isCompleted && totalOutsourced > 0
+                            ? `${totalOutsourced} Outsource`
+                            : String(totalEquipUnits),
                       badgeTone:
-                        !isCompleted && totalOutsourced > 0 ? "amber" : "neutral",
+                        damageInfo.damageFee > 0 && !damageInfo.isSettled
+                          ? "amber"
+                          : !isCompleted && totalOutsourced > 0
+                            ? "amber"
+                            : "neutral",
+                    },
+                    {
+                      key: "complaints" as const,
+                      label: "Complaints & Contract",
+                      icon: Scale,
+                      badge:
+                        openComplaintsCount > 0
+                          ? `${openComplaintsCount} Open`
+                          : complaintsList.length > 0
+                            ? String(complaintsList.length)
+                            : null,
+                      badgeTone: openComplaintsCount > 0 ? "rose" : "neutral",
                     },
                   ].map((tab) => {
                     const Icon = tab.icon;
@@ -4988,7 +5903,7 @@ export function BookingPage() {
                         onClick={() => setOverviewTab(tab.key)}
                         onKeyDown={(e) => handleTabKeyDown(e, tab.key)}
                         className={cn(
-                          "min-h-10 px-3.5 py-2 text-xs font-bold uppercase tracking-wider border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-natural-accent",
+                          "min-h-10 px-3 py-2 text-xs font-bold uppercase tracking-wider border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-natural-accent",
                           isActive
                             ? "border-natural-accent text-natural-accent bg-natural-accent/5"
                             : "border-transparent text-natural-text-light hover:text-natural-text-main hover:bg-natural-bg/50"
@@ -5023,6 +5938,27 @@ export function BookingPage() {
               {/* Single Clean Scrollable Workspace Body */}
               <div className="p-4 sm:p-5 space-y-3.5 overflow-y-auto flex-1">
                 {/* Exception-Only High-Priority Alerts */}
+                {openComplaintsCount > 0 && overviewTab !== "complaints" && (
+                  <div className="p-2.5 px-3.5 bg-rose-500/10 border border-rose-500/30 rounded-xl flex flex-wrap items-center justify-between gap-2 text-rose-800 dark:text-rose-200 text-xs">
+                    <div className="flex items-center gap-2">
+                      <Scale aria-hidden="true" className="w-4 h-4 text-rose-500 shrink-0" />
+                      <span>
+                        <strong className="uppercase tracking-wider text-[11px]">
+                          Post-Event Client Complaint ({openComplaintsCount} Open):
+                        </strong>{" "}
+                        Submitted within the 24-hour window (Clause 19). Verify contract signer and record resolution.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setOverviewTab("complaints")}
+                      className="px-2.5 py-1 rounded-md bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer shrink-0"
+                    >
+                      Review Complaint →
+                    </button>
+                  </div>
+                )}
+
                 {(isLateMod || actionableModCount > 0) && (
                   <div className="p-2.5 px-3.5 bg-rose-500/10 border border-rose-500/30 rounded-xl flex flex-wrap items-center justify-between gap-2 text-rose-800 dark:text-rose-200 text-xs">
                     <div className="flex items-center gap-2">
@@ -5053,29 +5989,32 @@ export function BookingPage() {
                   </div>
                 )}
 
-                {cleanAllergies && overviewTab !== "menu" && (
-                  <div className="p-2.5 px-3.5 bg-orange-50/90 dark:bg-orange-950/30 border border-orange-200/70 dark:border-orange-800/40 rounded-xl flex items-center justify-between gap-2 text-xs">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <AlertCircle
-                        aria-hidden="true"
-                        className="w-4 h-4 text-orange-600 dark:text-orange-400 shrink-0"
-                      />
-                      <p className="text-orange-900 dark:text-orange-200 truncate">
-                        <strong className="uppercase tracking-wider text-[10px] mr-1.5">
-                          Food Allergies:
-                        </strong>
-                        {cleanAllergies}
-                      </p>
+                {cleanAllergies &&
+                  !isCompleted &&
+                  !isCancelled &&
+                  (overviewTab === "payments" || overviewTab === "logistics") && (
+                    <div className="p-2 px-3 bg-orange-50/90 dark:bg-orange-950/30 border border-orange-200/70 dark:border-orange-800/40 rounded-lg flex items-center justify-between gap-2 text-xs">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <AlertCircle
+                          aria-hidden="true"
+                          className="w-3.5 h-3.5 text-orange-600 dark:text-orange-400 shrink-0"
+                        />
+                        <p className="text-orange-900 dark:text-orange-200 truncate">
+                          <strong className="uppercase tracking-wider text-[10px] mr-1.5">
+                            Food Allergies:
+                          </strong>
+                          {cleanAllergies}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setOverviewTab("menu")}
+                        className="text-[10px] font-bold uppercase tracking-wider text-orange-700 dark:text-orange-300 hover:underline shrink-0 cursor-pointer"
+                      >
+                        Details →
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setOverviewTab("menu")}
-                      className="text-[10px] font-bold uppercase tracking-wider text-orange-700 dark:text-orange-300 hover:underline shrink-0 cursor-pointer"
-                    >
-                      Details →
-                    </button>
-                  </div>
-                )}
+                  )}
 
                 {isCancelled && (
                   <div className="p-2.5 px-3.5 bg-red-50 dark:bg-red-950/30 border border-red-200/70 dark:border-red-800/40 rounded-xl flex items-center gap-2 text-xs">
@@ -5206,30 +6145,25 @@ export function BookingPage() {
                               />
                               Date Lock Deposit ({is50Percent ? "50%" : "20%"})
                             </h4>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider bg-natural-bg text-natural-text-light border border-natural-border">
-                                {is50Percent ? "Standard 50%" : "Installment 20%"}
-                              </span>
-                              <span
-                                className={cn(
-                                  "text-[10px] font-bold px-2.5 py-0.5 rounded uppercase tracking-wider border",
-                                  isDepositVerified
-                                    ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
-                                    : payment.receipt_url
-                                      ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60"
-                                      : "bg-natural-bg text-natural-text-light border-natural-border"
-                                )}
-                              >
-                                {isDepositVerified
-                                  ? "Deposit Paid"
+                            <span
+                              className={cn(
+                                "text-[10px] font-bold px-2.5 py-0.5 rounded uppercase tracking-wider border",
+                                isDepositVerified
+                                  ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
                                   : payment.receipt_url
-                                    ? "Pending Review"
-                                    : "Unpaid"}
-                              </span>
-                            </div>
+                                    ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60"
+                                    : "bg-natural-bg text-natural-text-light border-natural-border"
+                              )}
+                            >
+                              {isDepositVerified
+                                ? "✓ Deposit Paid"
+                                : payment.receipt_url
+                                  ? "Pending Review"
+                                  : "Unpaid"}
+                            </span>
                           </div>
 
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs items-center">
                             <dl className="space-y-1.5">
                               <div className="flex justify-between items-center gap-2">
                                 <dt className="text-natural-text-light">Method:</dt>
@@ -5312,15 +6246,6 @@ export function BookingPage() {
                               )}
                             </div>
                           </div>
-
-                          {isDepositVerified && (
-                            <div className="pt-2 border-t border-natural-border/60">
-                              <div className="w-full py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5">
-                                <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" />
-                                Deposit Confirmed &amp; Date Locked
-                              </div>
-                            </div>
-                          )}
                         </div>
 
                         {/* Itemized Cost Ledger */}
@@ -5408,7 +6333,7 @@ export function BookingPage() {
                             {corkageFee > 0 && (
                               <div className="flex justify-between items-center gap-2">
                                 <dt className="text-natural-text-light">
-                                  Corkage &amp; Outside Food (Term 8)
+                                  Corkage &amp; Outside Food
                                 </dt>
                                 <dd className="font-semibold text-natural-text-main font-mono">
                                   +₱{corkageFee.toLocaleString()}
@@ -5417,78 +6342,63 @@ export function BookingPage() {
                             )}
 
                             {preFee > 0 && (
-                              <div className="pt-1 border-t border-natural-border/40 space-y-1">
-                                <div className="flex justify-between items-center gap-2">
-                                  <dt className="text-natural-text-main font-semibold">
-                                    Pre-Booked Overtime
-                                  </dt>
-                                  <dd className="font-semibold text-natural-accent font-mono">
-                                    +₱{preFee.toLocaleString()}
-                                  </dd>
-                                </div>
-                                {prebookedItems.length > 0 && (
-                                  <p className="text-[10px] text-natural-text-light leading-relaxed">
-                                    {prebookedItems.map((it) => it.label).join(" · ")}
-                                  </p>
-                                )}
+                              <div className="flex justify-between items-center gap-2">
+                                <dt className="text-natural-text-light truncate">
+                                  Pre-Booked Overtime
+                                  {prebookedItems.length > 0 && (
+                                    <span className="text-[11px] text-natural-text-light/80 ml-1">
+                                      ({prebookedItems.map((it) => it.label).join(", ")})
+                                    </span>
+                                  )}
+                                </dt>
+                                <dd className="font-semibold text-natural-accent font-mono shrink-0">
+                                  +₱{preFee.toLocaleString()}
+                                </dd>
                               </div>
                             )}
 
                             {dayFee > 0 && (
-                              <div className="pt-1 border-t border-natural-border/40 space-y-1">
-                                <div className="flex justify-between items-center gap-2">
-                                  <dt className="text-amber-700 dark:text-amber-400 font-semibold flex items-center gap-1.5">
-                                    <span>
-                                      Day-of Event OT ({dayOT?.billable_ot_hours}h)
-                                    </span>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setIsDayOfOtExpanded(true);
-                                        setOverviewTab("logistics");
-                                      }}
-                                      className="text-[10px] font-bold underline cursor-pointer"
-                                    >
-                                      Edit →
-                                    </button>
-                                  </dt>
-                                  <dd className="font-semibold text-amber-600 dark:text-amber-400 font-mono">
-                                    +₱{dayFee.toLocaleString()}
-                                  </dd>
-                                </div>
-                                {Array.isArray(dayOT?.services_billed) &&
-                                  dayOT.services_billed.length > 0 && (
-                                    <p className="text-[10px] text-natural-text-light leading-relaxed">
-                                      Actual End {dayOT.actual_end_time} ·{" "}
-                                      {dayOT.services_billed
-                                        .map((s: any) => s.name)
-                                        .join(" · ")}
-                                    </p>
-                                  )}
+                              <div className="flex justify-between items-center gap-2">
+                                <dt className="text-amber-700 dark:text-amber-400 font-semibold flex items-center gap-1.5 min-w-0">
+                                  <span className="truncate">
+                                    Day-of Event OT ({dayOT?.billable_ot_hours}h)
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsDayOfOtExpanded(true);
+                                      setOverviewTab("logistics");
+                                    }}
+                                    className="text-[10px] font-bold underline cursor-pointer shrink-0"
+                                  >
+                                    Edit →
+                                  </button>
+                                </dt>
+                                <dd className="font-semibold text-amber-600 dark:text-amber-400 font-mono shrink-0">
+                                  +₱{dayFee.toLocaleString()}
+                                </dd>
                               </div>
                             )}
 
                             {(logistics.rainLaundryFee || 0) > 0 && (
-                              <div className="pt-1 border-t border-natural-border/40 space-y-1">
-                                <div className="flex justify-between items-center gap-2">
-                                  <dt className="text-amber-700 dark:text-amber-400 font-semibold flex items-center gap-1.5">
-                                    <CloudRain className="w-3.5 h-3.5 text-amber-500" />
-                                    <span>Rain / Laundry Surcharge</span>
-                                    <button
-                                      type="button"
-                                      onClick={() => setOverviewTab("logistics")}
-                                      className="text-[10px] font-bold underline cursor-pointer"
-                                    >
-                                      Manage →
-                                    </button>
-                                  </dt>
-                                  <dd className="font-semibold text-amber-600 dark:text-amber-400 font-mono">
-                                    +₱{(logistics.rainLaundryFee || 0).toLocaleString()}
-                                  </dd>
-                                </div>
-                                <p className="text-[10px] text-natural-text-light leading-relaxed">
-                                  Soiled linens due to rain without client-provided tents
-                                </p>
+                              <div className="flex justify-between items-center gap-2">
+                                <dt className="text-amber-700 dark:text-amber-400 font-semibold flex items-center gap-1.5">
+                                  <CloudRain
+                                    aria-hidden="true"
+                                    className="w-3.5 h-3.5 text-amber-500 shrink-0"
+                                  />
+                                  <span>Rain / Laundry Surcharge</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setOverviewTab("logistics")}
+                                    className="text-[10px] font-bold underline cursor-pointer"
+                                  >
+                                    Manage →
+                                  </button>
+                                </dt>
+                                <dd className="font-semibold text-amber-600 dark:text-amber-400 font-mono shrink-0">
+                                  +₱{(logistics.rainLaundryFee || 0).toLocaleString()}
+                                </dd>
                               </div>
                             )}
 
@@ -5571,7 +6481,7 @@ export function BookingPage() {
                               <p className="text-[10px] text-natural-text-light leading-relaxed">
                                 {excessInfo.postEventBilling?.actual_headcount_served} served vs{" "}
                                 {excessInfo.postEventBilling?.guaranteed_headcount} guaranteed (+
-                                {excessInfo.postEventBilling?.excess_guests} pax @ ₱500/pax) · Separate post-event balance
+                                {excessInfo.postEventBilling?.excess_guests} pax @ ₱500/pax)
                               </p>
                             </div>
                           )}
@@ -5589,13 +6499,13 @@ export function BookingPage() {
                                     aria-hidden="true"
                                     className="w-4 h-4 text-natural-accent"
                                   />
-                                  Installment Breakdown Schedule
+                                  Installment Schedule
                                 </h4>
                                 <p className="text-[10px] text-natural-text-light mt-0.5">
-                                  Final cutoff strictly 15 days prior ({deadlineStr})
+                                  15-day final cutoff: {deadlineStr}
                                 </p>
                               </div>
-                              <span className="text-[10px] font-bold px-2.5 py-1 rounded-md uppercase tracking-wider bg-natural-accent/10 text-natural-accent border border-natural-accent/25">
+                              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded uppercase tracking-wider bg-natural-accent/10 text-natural-accent border border-natural-accent/25">
                                 Monthly Plan
                               </span>
                             </div>
@@ -5609,6 +6519,10 @@ export function BookingPage() {
                                       milestone.title ||
                                       milestone.milestone ||
                                       `Installment #${idx + 1}`;
+                                    const cleanDueDate = String(milestone.dueDate || "").replace(
+                                      /\s*\(Strictly.*?\)/i,
+                                      ""
+                                    );
                                     const isPaid =
                                       milestone.status === "Paid" ||
                                       milestone.status === "Verified" ||
@@ -5651,7 +6565,7 @@ export function BookingPage() {
                                               {milestoneLabel}
                                             </p>
                                             <p className="text-[10px] text-natural-text-light">
-                                              Due: {milestone.dueDate}
+                                              Due: {cleanDueDate}
                                             </p>
                                           </div>
                                         </div>
@@ -5927,42 +6841,47 @@ export function BookingPage() {
 
                         {/* Dedicated Post-Event Excess Headcount Surcharge Card (Editable ONLY when event is Completed) */}
                         {(isCompleted || excessInfo.excessFee > 0) && (
-                          <div className="p-4 bg-natural-card border border-natural-border rounded-xl space-y-3 shadow-2xs">
-                            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-natural-border/60 pb-2.5">
-                              <div>
+                          <div className="p-3.5 bg-natural-card border border-natural-border rounded-xl space-y-2.5 shadow-2xs">
+                            <div
+                              className={cn(
+                                "flex flex-wrap items-center justify-between gap-2",
+                                (excessInfo.excessFee > 0 || isEditingExcessSurcharge) &&
+                                  "border-b border-natural-border/60 pb-2"
+                              )}
+                            >
+                              <div className="min-w-0">
                                 <h4 className="text-xs font-bold text-natural-text-main flex items-center gap-1.5 uppercase tracking-wider">
                                   <Users
                                     aria-hidden="true"
-                                    className="w-4 h-4 text-rose-500"
+                                    className="w-3.5 h-3.5 text-rose-500 shrink-0"
                                   />
-                                  Excess Headcount Surcharge
+                                  <span>Excess Headcount Surcharge</span>
                                 </h4>
-                                <p className="text-[10px] text-natural-text-light mt-0.5">
-                                  Separate post-event balance
-                                  {excessInfo.postEventBilling?.due_date && excessInfo.excessFee > 0
-                                    ? ` · Due ${excessInfo.postEventBilling.due_date}`
-                                    : ""}
+                                <p className="text-[11px] text-natural-text-light mt-0.5">
+                                  {excessInfo.excessFee > 0
+                                    ? `${excessInfo.postEventBilling?.actual_headcount_served || totalPax} served vs ${excessInfo.postEventBilling?.guaranteed_headcount || totalPax} guaranteed${excessInfo.postEventBilling?.due_date ? ` · Due ${excessInfo.postEventBilling.due_date}` : ""}`
+                                    : `${excessInfo.postEventBilling?.actual_headcount_served || totalPax} / ${totalPax} guaranteed pax served`}
                                 </p>
                               </div>
 
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex items-center gap-1.5 shrink-0">
                                 {excessInfo.excessFee <= 0 ? (
-                                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-natural-bg text-natural-text-light border border-natural-border">
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-natural-bg text-natural-text-light border border-natural-border">
                                     No Excess Fee
                                   </span>
                                 ) : excessInfo.isSettled ? (
-                                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                                    <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" />{" "}
-                                    Settled &amp; Verified
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                                    <CheckCircle2 aria-hidden="true" className="w-3 h-3" />{" "}
+                                    Settled
                                   </span>
                                 ) : excessInfo.isUnderReview ? (
-                                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
-                                    <Clock aria-hidden="true" className="w-3.5 h-3.5" />{" "}
-                                    Pending Review
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                                    <Clock aria-hidden="true" className="w-3 h-3" />{" "}
+                                    Review
                                   </span>
                                 ) : (
-                                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/30 flex items-center gap-1">
-                                    <AlertCircle aria-hidden="true" className="w-3.5 h-3.5" />{" "}
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/30 flex items-center gap-1">
+                                    <AlertCircle aria-hidden="true" className="w-3 h-3" />{" "}
                                     Unpaid
                                   </span>
                                 )}
@@ -5981,10 +6900,10 @@ export function BookingPage() {
                                       setExcessSaveMessage("");
                                       setIsEditingExcessSurcharge(true);
                                     }}
-                                    className="min-h-7 px-2.5 py-1 rounded-md bg-natural-bg hover:bg-natural-accent/10 border border-natural-border hover:border-natural-accent/40 text-natural-text-main text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center gap-1 cursor-pointer"
+                                    className="min-h-6 px-2 py-1 rounded bg-natural-bg hover:bg-natural-accent/10 border border-natural-border hover:border-natural-accent/40 text-natural-text-main text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center gap-1 cursor-pointer"
                                   >
                                     <Sliders aria-hidden="true" className="w-3 h-3 text-natural-accent" />
-                                    Edit Surcharge
+                                    Edit
                                   </button>
                                 )}
                               </div>
@@ -5999,22 +6918,17 @@ export function BookingPage() {
 
                             {/* Inline Editor (Strictly rendered ONLY when isCompleted === true) */}
                             {isCompleted && isEditingExcessSurcharge && (
-                              <div className="p-3 rounded-xl bg-natural-bg/70 dark:bg-natural-sidebar/50 border border-natural-accent/40 space-y-3">
-                                <div className="flex items-center justify-between text-[11px]">
-                                  <span className="font-bold uppercase tracking-wider text-natural-accent">
-                                    Edit Post-Event Excess Surcharge
-                                  </span>
-                                  <span className="text-natural-text-light">
-                                    Guaranteed: <strong className="text-natural-text-main">{totalPax} Pax</strong>
-                                  </span>
-                                </div>
-
+                              <div className="p-3 rounded-xl bg-natural-bg/70 dark:bg-natural-sidebar/50 border border-natural-accent/40 space-y-2.5">
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                                   <div className="space-y-1">
-                                    <label className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block">
+                                    <label
+                                      htmlFor="excess-actual-headcount-input"
+                                      className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block"
+                                    >
                                       Actual Headcount Served
                                     </label>
                                     <input
+                                      id="excess-actual-headcount-input"
                                       type="number"
                                       min="1"
                                       value={editExcessActualHeadcount}
@@ -6025,51 +6939,56 @@ export function BookingPage() {
                                         const autoExcess = Math.max(0, parsed - totalPax);
                                         setEditExcessFeeInput(String(autoExcess * 500));
                                       }}
-                                      className="w-full px-3 py-1.5 text-xs font-semibold bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                                      className="w-full px-2.5 py-1.5 text-xs font-semibold bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
                                     />
                                   </div>
 
                                   <div className="space-y-1">
-                                    <label className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block">
-                                      Excess Surcharge Amount (₱)
+                                    <label
+                                      htmlFor="excess-surcharge-amount-input"
+                                      className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block"
+                                    >
+                                      Surcharge Amount (₱)
                                     </label>
                                     <input
+                                      id="excess-surcharge-amount-input"
                                       type="number"
                                       min="0"
                                       step="100"
                                       value={editExcessFeeInput}
                                       onChange={(e) => setEditExcessFeeInput(e.target.value)}
-                                      className="w-full px-3 py-1.5 text-xs font-semibold bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                                      className="w-full px-2.5 py-1.5 text-xs font-semibold bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
                                     />
                                   </div>
                                 </div>
 
-                                <p className="text-[10px] text-natural-text-light">
-                                  {Math.max(0, (parseInt(editExcessActualHeadcount, 10) || totalPax) - totalPax)} excess guest(s) beyond {totalPax} guaranteed pax (standard rate: ₱500/pax).
-                                </p>
-
-                                <div className="flex items-center justify-end gap-2 pt-1">
-                                  <button
-                                    type="button"
-                                    disabled={isSavingExcessSurcharge}
-                                    onClick={() => setIsEditingExcessSurcharge(false)}
-                                    className="px-3 py-1.5 rounded-lg border border-natural-border text-natural-text-light hover:bg-natural-card text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
-                                  >
-                                    Cancel
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={isSavingExcessSurcharge}
-                                    onClick={() => handleSaveExcessSurcharge(selectedBooking.id)}
-                                    className="px-3.5 py-1.5 rounded-lg bg-natural-accent hover:bg-natural-accent/90 text-white text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50"
-                                  >
-                                    {isSavingExcessSurcharge ? "Saving..." : "Save Surcharge"}
-                                  </button>
+                                <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                                  <span className="text-[10px] text-natural-text-light">
+                                    +{Math.max(0, (parseInt(editExcessActualHeadcount, 10) || totalPax) - totalPax)} excess pax (@ ₱500/pax)
+                                  </span>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      disabled={isSavingExcessSurcharge}
+                                      onClick={() => setIsEditingExcessSurcharge(false)}
+                                      className="px-2.5 py-1 rounded-lg border border-natural-border text-natural-text-light hover:bg-natural-card text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={isSavingExcessSurcharge}
+                                      onClick={() => handleSaveExcessSurcharge(selectedBooking.id)}
+                                      className="px-3 py-1 rounded-lg bg-natural-accent hover:bg-natural-accent/90 text-white text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50"
+                                    >
+                                      {isSavingExcessSurcharge ? "Saving..." : "Save"}
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
                             )}
 
-                            {excessInfo.excessFee > 0 ? (
+                            {excessInfo.excessFee > 0 && (
                               <>
                                 <dl className="space-y-1.5 text-xs">
                                   <div className="flex justify-between items-center gap-2">
@@ -6081,25 +7000,12 @@ export function BookingPage() {
                                     </dd>
                                   </div>
                                   <div className="flex justify-between items-center gap-2">
-                                    <dt className="text-natural-text-light">Headcount Served:</dt>
+                                    <dt className="text-natural-text-light">Method &amp; Ref:</dt>
                                     <dd className="font-semibold text-natural-text-main">
-                                      {excessInfo.postEventBilling?.actual_headcount_served || totalPax} served vs{" "}
-                                      {excessInfo.postEventBilling?.guaranteed_headcount || totalPax} guaranteed (+
-                                      {excessInfo.postEventBilling?.excess_guests || 0} pax)
-                                    </dd>
-                                  </div>
-                                  <div className="flex justify-between items-center gap-2">
-                                    <dt className="text-natural-text-light">Payment Method:</dt>
-                                    <dd className="font-semibold text-natural-text-main">
-                                      {excessInfo.postEventBilling?.payment_method || "Pending submission"}
-                                    </dd>
-                                  </div>
-                                  <div className="flex justify-between items-center gap-2">
-                                    <dt className="text-natural-text-light">
-                                      Reference Number:
-                                    </dt>
-                                    <dd className="font-mono font-semibold text-natural-text-main">
-                                      {excessInfo.postEventBilling?.reference_number || "N/A"}
+                                      {excessInfo.postEventBilling?.payment_method || "Pending"} ·{" "}
+                                      <span className="font-mono">
+                                        {excessInfo.postEventBilling?.reference_number || "N/A"}
+                                      </span>
                                     </dd>
                                   </div>
                                 </dl>
@@ -6154,19 +7060,14 @@ export function BookingPage() {
                                     </button>
                                   </div>
                                 ) : (
-                                  <div className="p-2.5 bg-natural-bg/60 dark:bg-natural-sidebar/30 rounded-lg border border-natural-border text-center">
+                                  <div className="p-2 bg-natural-bg/60 dark:bg-natural-sidebar/30 rounded-lg border border-natural-border text-center">
                                     <p className="text-xs text-natural-text-light italic">
                                       No excess surcharge slip uploaded yet.
                                     </p>
                                   </div>
                                 )}
 
-                                {excessInfo.isSettled ? (
-                                  <div className="w-full py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5">
-                                    <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" />
-                                    Excess Surcharge Confirmed
-                                  </div>
-                                ) : (
+                                {!excessInfo.isSettled && (
                                   <button
                                     type="button"
                                     disabled={!Boolean(excessInfo.postEventBilling?.receipt_url)}
@@ -6204,12 +7105,184 @@ export function BookingPage() {
                                   </button>
                                 )}
                               </>
-                            ) : (
-                              !isEditingExcessSurcharge && (
-                                <p className="text-xs text-natural-text-light">
-                                  Actual headcount served ({excessInfo.postEventBilling?.actual_headcount_served || totalPax} pax) matched the guaranteed count ({totalPax} pax). Use <strong>Edit Surcharge</strong> if post-event headcount needs adjustment.
+                            )}
+                          </div>
+                        )}
+
+                        {/* Separate Post-Event Equipment Damage & Loss Invoice Card */}
+                        {(isCompleted || damageInfo.damageFee > 0) && (
+                          <div
+                            className={cn(
+                              "p-3.5 bg-natural-card rounded-xl space-y-2.5 shadow-2xs border",
+                              damageInfo.damageFee > 0
+                                ? "border-orange-500/30"
+                                : "border-natural-border"
+                            )}
+                          >
+                            <div
+                              className={cn(
+                                "flex items-center justify-between gap-2 flex-wrap",
+                                damageInfo.damageFee > 0 &&
+                                  "border-b border-natural-border/60 pb-2"
+                              )}
+                            >
+                              <div className="min-w-0">
+                                <h4 className="text-xs font-bold text-natural-text-main uppercase tracking-wider flex items-center gap-1.5">
+                                  <AlertTriangle
+                                    aria-hidden="true"
+                                    className="w-3.5 h-3.5 text-orange-500 shrink-0"
+                                  />
+                                  <span>Equipment Damage Appraisal</span>
+                                </h4>
+                                <p className="text-[11px] text-natural-text-light mt-0.5">
+                                  {damageInfo.damageFee > 0 && damageInfo.damageAppraisal
+                                    ? `${damageInfo.damageAppraisal.items?.length || 0} item(s) billed · Due ${damageInfo.damageAppraisal.due_date || "Post-Event"}`
+                                    : "Warehouse return clear · 0 damaged items"}
                                 </p>
-                              )
+                              </div>
+
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {damageInfo.damageFee <= 0 ? (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-natural-bg text-natural-text-light border border-natural-border">
+                                    No Damage Billed
+                                  </span>
+                                ) : damageInfo.isSettled ? (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                                    <CheckCircle2 aria-hidden="true" className="w-3 h-3" />{" "}
+                                    Settled
+                                  </span>
+                                ) : damageInfo.isUnderReview ? (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                                    <Clock aria-hidden="true" className="w-3 h-3" />{" "}
+                                    Review
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-orange-500/10 text-orange-700 dark:text-orange-400 border border-orange-500/30 flex items-center gap-1">
+                                    <AlertCircle aria-hidden="true" className="w-3 h-3" />{" "}
+                                    Unpaid
+                                  </span>
+                                )}
+
+                                {isCompleted && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setOverviewTab("equipment")}
+                                    className="min-h-6 px-2 py-1 rounded bg-natural-bg hover:bg-natural-accent/10 border border-natural-border hover:border-natural-accent/40 text-natural-text-main text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Sliders aria-hidden="true" className="w-3 h-3 text-natural-accent" />
+                                    Appraise →
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {damageInfo.damageFee > 0 && damageInfo.damageAppraisal && (
+                              <>
+                                <dl className="space-y-1.5 text-xs">
+                                  <div className="flex justify-between items-center gap-2">
+                                    <dt className="text-natural-text-light">
+                                      Damage Appraisal Due:
+                                    </dt>
+                                    <dd className="font-bold text-orange-600 dark:text-orange-400 font-serif text-sm">
+                                      ₱{damageInfo.damageFee.toLocaleString()}
+                                    </dd>
+                                  </div>
+                                  <div className="flex justify-between items-center gap-2">
+                                    <dt className="text-natural-text-light">Method &amp; Ref:</dt>
+                                    <dd className="font-semibold text-natural-text-main">
+                                      {damageInfo.damageAppraisal.payment_method || "Pending"} ·{" "}
+                                      <span className="font-mono">
+                                        {damageInfo.damageAppraisal.reference_number || "N/A"}
+                                      </span>
+                                    </dd>
+                                  </div>
+                                </dl>
+
+                                {damageInfo.damageAppraisal.receipt_url ? (
+                                  <div className="flex items-center justify-between gap-2.5 bg-natural-bg/70 dark:bg-natural-sidebar/50 p-2.5 rounded-lg border border-natural-border">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <img
+                                        src={damageInfo.damageAppraisal.receipt_url}
+                                        alt="Damage invoice receipt slip thumbnail"
+                                        className="w-10 h-10 object-cover rounded-md border border-natural-border cursor-pointer hover:opacity-80 transition-opacity shrink-0"
+                                        onClick={() =>
+                                          setViewingReceipt({
+                                            url: damageInfo.damageAppraisal!.receipt_url!,
+                                            bookingName: clientName,
+                                            ref: damageInfo.damageAppraisal?.reference_number,
+                                            method: damageInfo.damageAppraisal?.payment_method,
+                                            amount: damageInfo.damageFee,
+                                            title: "Post-Event Equipment Damage Invoice Slip",
+                                          })
+                                        }
+                                      />
+                                      <div className="min-w-0">
+                                        <p className="text-xs font-bold text-natural-text-main truncate">
+                                          Damage Invoice Slip
+                                        </p>
+                                        <p className="text-[11px] font-serif font-bold text-orange-600 dark:text-orange-400">
+                                          ₱{damageInfo.damageFee.toLocaleString()}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setViewingReceipt({
+                                          url: damageInfo.damageAppraisal!.receipt_url!,
+                                          bookingName: clientName,
+                                          ref: damageInfo.damageAppraisal?.reference_number,
+                                          method: damageInfo.damageAppraisal?.payment_method,
+                                          amount: damageInfo.damageFee,
+                                          title: "Post-Event Equipment Damage Invoice Slip",
+                                        })
+                                      }
+                                      className="min-h-7 px-2.5 py-1.5 bg-natural-accent hover:bg-natural-accent/90 text-white text-[11px] font-bold uppercase tracking-wider rounded-md transition-all flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
+                                    >
+                                      <Eye aria-hidden="true" className="w-3 h-3" /> Inspect
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="p-2 bg-natural-bg/60 dark:bg-natural-sidebar/30 rounded-lg border border-natural-border text-center">
+                                    <p className="text-xs text-natural-text-light italic">
+                                      No damage invoice slip uploaded yet.
+                                    </p>
+                                  </div>
+                                )}
+
+                                {!damageInfo.isSettled && (
+                                  <button
+                                    type="button"
+                                    disabled={!Boolean(damageInfo.damageAppraisal.receipt_url)}
+                                    onClick={() => {
+                                      if (!damageInfo.damageAppraisal?.receipt_url) return;
+                                      setConfirmAction({
+                                        type: "verify_damage_payment",
+                                        bookingId: selectedBooking.id,
+                                        bookingName: clientName,
+                                      });
+                                    }}
+                                    className={cn(
+                                      "w-full py-2 px-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shadow-xs select-none",
+                                      damageInfo.damageAppraisal.receipt_url
+                                        ? "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+                                        : "bg-natural-bg/70 dark:bg-natural-sidebar/40 border border-natural-border text-natural-text-light/60 cursor-not-allowed opacity-75"
+                                    )}
+                                  >
+                                    {damageInfo.damageAppraisal.receipt_url ? (
+                                      <>
+                                        <CheckCheck aria-hidden="true" className="w-3.5 h-3.5" />
+                                        <span>Confirm Damage Payment</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Lock aria-hidden="true" className="w-3 h-3" />
+                                        <span>Confirm (Slip Required)</span>
+                                      </>
+                                    )}
+                                  </button>
+                                )}
+                              </>
                             )}
                           </div>
                         )}
@@ -7585,7 +8658,7 @@ export function BookingPage() {
                       tabIndex={0}
                       role="region"
                       aria-labelledby="equipment-allocation-heading"
-                      className="overflow-x-auto rounded-xl border border-natural-border bg-natural-bg/30 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-natural-accent"
+                      className="max-h-64 overflow-x-auto overflow-y-auto rounded-xl border border-natural-border bg-natural-bg/30 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-natural-accent"
                     >
                       <table className="w-full text-xs border-collapse">
                         <caption className="sr-only">
@@ -7680,8 +8753,884 @@ export function BookingPage() {
                         </tbody>
                       </table>
                     </div>
+
+                    {/* POST-EVENT EQUIPMENT DAMAGE & LOSS APPRAISAL TOOL (STRICTLY POST-EVENT — CLAUSE 13) */}
+                    <div className="pt-3 border-t border-natural-border space-y-2.5">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <h5 className="text-xs font-bold text-natural-text-main uppercase tracking-wider flex items-center gap-1.5">
+                            <AlertTriangle
+                              aria-hidden="true"
+                              className="w-3.5 h-3.5 text-orange-500"
+                            />
+                            Equipment Damage &amp; Loss Appraisal
+                          </h5>
+                          <p className="text-[11px] text-natural-text-light mt-0.5">
+                            {!isCompleted
+                              ? "Available after event completion when supplies return to warehouse."
+                              : damageRows.length === 0 && damageInfo.damageFee <= 0
+                                ? "No broken or missing items logged for this completed event."
+                                : "Itemized post-event damage appraisal (billed separately under Clause 13)."}
+                          </p>
+                        </div>
+
+                        {!isCompleted ? (
+                          <span className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-natural-bg text-natural-text-light border border-natural-border inline-flex items-center gap-1 self-start sm:self-auto shrink-0">
+                            <Lock aria-hidden="true" className="w-3 h-3" />
+                            Locked Prior to Completion
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const defaultEq = sortedEquipBreakdown[0];
+                              const matchedInv = items.find(
+                                (it) =>
+                                  it.status !== "Archived" &&
+                                  defaultEq &&
+                                  it.name.toLowerCase() === defaultEq.itemName.toLowerCase()
+                              );
+                              setDamageRows((prev) => [
+                                ...prev,
+                                {
+                                  id: `drow-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                                  item_id: matchedInv?.id,
+                                  item_name: defaultEq?.itemName || "Plates",
+                                  incident_type: "Broken / Damaged",
+                                  quantity_damaged: 1,
+                                  unit: defaultEq?.unit || matchedInv?.unit || "pcs",
+                                  unit_cost: 150,
+                                  subtotal: 150,
+                                  photo_url: "",
+                                  notes: "",
+                                },
+                              ]);
+                              setDamageFormError("");
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-natural-accent hover:bg-natural-accent/90 text-white text-[11px] font-bold uppercase tracking-wider transition-colors inline-flex items-center gap-1.5 cursor-pointer self-start sm:self-auto shrink-0"
+                          >
+                            <Plus aria-hidden="true" className="w-3.5 h-3.5" />
+                            Add Damaged / Lost Item
+                          </button>
+                        )}
+                      </div>
+
+                      {isCompleted && damageFormError && (
+                        <div
+                          role="alert"
+                          className="p-2.5 px-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-700 dark:text-red-300 text-xs font-semibold flex items-center gap-2"
+                        >
+                          <AlertCircle aria-hidden="true" className="w-4 h-4 shrink-0" />
+                          <span>{damageFormError}</span>
+                        </div>
+                      )}
+
+                      {isCompleted && damageSaveMessage && (
+                        <div
+                          role="status"
+                          aria-live="polite"
+                          className="p-2.5 px-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-semibold flex items-center gap-2"
+                        >
+                          <CheckCircle2 aria-hidden="true" className="w-4 h-4 shrink-0" />
+                          <span>{damageSaveMessage}</span>
+                        </div>
+                      )}
+
+                      {isCompleted &&
+                        (damageRows.length > 0 || damageInfo.damageFee > 0) && (
+                          <form
+                            onSubmit={(e) =>
+                              handleSaveDamageAppraisal(e, selectedBooking.id, false)
+                            }
+                            noValidate
+                            className="p-3.5 rounded-xl bg-natural-bg/50 dark:bg-natural-sidebar/30 border border-natural-border space-y-3"
+                          >
+                            {damageRows.length > 0 && (
+                              <div className="space-y-2.5">
+                                {damageRows.map((dRow, rIdx) => {
+                                  const rowSubtotal =
+                                    (Math.max(1, Number(dRow.quantity_damaged) || 1)) *
+                                    (Math.max(0, Number(dRow.unit_cost) || 0));
+                                  const allSelectableNames = Array.from(
+                                    new Set([
+                                      ...sortedEquipBreakdown.map((eq) => eq.itemName),
+                                      ...items
+                                        .filter((it) => it.status !== "Archived")
+                                        .map((it) => it.name),
+                                    ])
+                                  );
+                                  const isKnownOption = allSelectableNames.includes(dRow.item_name);
+
+                                  return (
+                                    <div
+                                      key={dRow.id}
+                                      className="p-3 rounded-xl bg-natural-card border border-natural-border space-y-2.5 shadow-2xs"
+                                    >
+                                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
+                                        <div className="sm:col-span-4 space-y-1">
+                                          <label
+                                            htmlFor={`dmg-item-${dRow.id}`}
+                                            className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block"
+                                          >
+                                            Equipment Item #{rIdx + 1}
+                                          </label>
+                                          <select
+                                            id={`dmg-item-${dRow.id}`}
+                                            value={isKnownOption ? dRow.item_name : "__CUSTOM__"}
+                                            onChange={(e) => {
+                                              const val = e.target.value;
+                                              if (val === "__CUSTOM__") {
+                                                setDamageRows((prev) =>
+                                                  prev.map((r) =>
+                                                    r.id === dRow.id
+                                                      ? { ...r, item_id: undefined, item_name: "" }
+                                                      : r
+                                                  )
+                                                );
+                                                return;
+                                              }
+                                              const matchedInv = items.find(
+                                                (it) =>
+                                                  it.status !== "Archived" &&
+                                                  it.name.toLowerCase() === val.toLowerCase()
+                                              );
+                                              setDamageRows((prev) =>
+                                                prev.map((r) =>
+                                                  r.id === dRow.id
+                                                    ? {
+                                                        ...r,
+                                                        item_id: matchedInv?.id,
+                                                        item_name: val,
+                                                        unit: matchedInv?.unit || r.unit || "pcs",
+                                                      }
+                                                    : r
+                                                )
+                                              );
+                                              setDamageFormError("");
+                                            }}
+                                            className="w-full px-2.5 py-1.5 text-xs font-semibold bg-natural-bg border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                                          >
+                                            {allSelectableNames.map((nm) => (
+                                              <option key={nm} value={nm}>
+                                                {nm}
+                                              </option>
+                                            ))}
+                                            <option value="__CUSTOM__">+ Custom Item Name...</option>
+                                          </select>
+                                          {!isKnownOption && (
+                                            <input
+                                              type="text"
+                                              placeholder="Enter custom item (e.g., Glass Pitcher)"
+                                              value={dRow.item_name}
+                                              onChange={(e) => {
+                                                const val = e.target.value;
+                                                setDamageRows((prev) =>
+                                                  prev.map((r) =>
+                                                    r.id === dRow.id ? { ...r, item_name: val } : r
+                                                  )
+                                                );
+                                                setDamageFormError("");
+                                              }}
+                                              className="w-full mt-1.5 px-2.5 py-1.5 text-xs bg-natural-bg border border-natural-accent/50 rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                                            />
+                                          )}
+                                        </div>
+
+                                        <div className="sm:col-span-3 space-y-1">
+                                          <label
+                                            htmlFor={`dmg-type-${dRow.id}`}
+                                            className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block"
+                                          >
+                                            Incident Type
+                                          </label>
+                                          <select
+                                            id={`dmg-type-${dRow.id}`}
+                                            value={dRow.incident_type}
+                                            onChange={(e) =>
+                                              setDamageRows((prev) =>
+                                                prev.map((r) =>
+                                                  r.id === dRow.id
+                                                    ? {
+                                                        ...r,
+                                                        incident_type: e.target
+                                                          .value as DamageAppraisalItem["incident_type"],
+                                                      }
+                                                    : r
+                                                )
+                                              )
+                                            }
+                                            className="w-full px-2.5 py-1.5 text-xs font-semibold bg-natural-bg border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                                          >
+                                            <option value="Broken / Damaged">Broken / Damaged</option>
+                                            <option value="Lost / Missing">Lost / Missing</option>
+                                          </select>
+                                        </div>
+
+                                        <div className="sm:col-span-2 space-y-1">
+                                          <label
+                                            htmlFor={`dmg-qty-${dRow.id}`}
+                                            className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block"
+                                          >
+                                            Qty ({dRow.unit || "pcs"})
+                                          </label>
+                                          <input
+                                            id={`dmg-qty-${dRow.id}`}
+                                            type="number"
+                                            min="1"
+                                            value={dRow.quantity_damaged}
+                                            onChange={(e) => {
+                                              const q = Math.max(1, parseInt(e.target.value, 10) || 1);
+                                              setDamageRows((prev) =>
+                                                prev.map((r) =>
+                                                  r.id === dRow.id
+                                                    ? {
+                                                        ...r,
+                                                        quantity_damaged: q,
+                                                        subtotal: q * (Number(r.unit_cost) || 0),
+                                                      }
+                                                    : r
+                                                )
+                                              );
+                                              setDamageFormError("");
+                                            }}
+                                            className="w-full px-2.5 py-1.5 text-xs font-mono font-semibold bg-natural-bg border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                                          />
+                                        </div>
+
+                                        <div className="sm:col-span-2 space-y-1">
+                                          <label
+                                            htmlFor={`dmg-cost-${dRow.id}`}
+                                            className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block"
+                                          >
+                                            Unit Cost (₱)
+                                          </label>
+                                          <input
+                                            id={`dmg-cost-${dRow.id}`}
+                                            type="number"
+                                            min="0"
+                                            step="50"
+                                            value={dRow.unit_cost}
+                                            onChange={(e) => {
+                                              const c = Math.max(0, Number(e.target.value) || 0);
+                                              setDamageRows((prev) =>
+                                                prev.map((r) =>
+                                                  r.id === dRow.id
+                                                    ? {
+                                                        ...r,
+                                                        unit_cost: c,
+                                                        subtotal:
+                                                          (Number(r.quantity_damaged) || 1) * c,
+                                                      }
+                                                    : r
+                                                )
+                                              );
+                                              setDamageFormError("");
+                                            }}
+                                            className="w-full px-2.5 py-1.5 text-xs font-mono font-semibold bg-natural-bg border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                                          />
+                                        </div>
+
+                                        <div className="sm:col-span-1 flex items-center justify-between sm:justify-end gap-2">
+                                          <button
+                                            type="button"
+                                            aria-label={`Remove ${dRow.item_name || "item"}`}
+                                            onClick={() =>
+                                              setDamageRows((prev) =>
+                                                prev.filter((r) => r.id !== dRow.id)
+                                              )
+                                            }
+                                            className="p-1.5 rounded-lg border border-red-200 dark:border-red-800/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer"
+                                          >
+                                            <Trash2 aria-hidden="true" className="w-3.5 h-3.5" />
+                                          </button>
+                                        </div>
+                                      </div>
+
+                                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center pt-1.5 border-t border-natural-border/50">
+                                        <div className="sm:col-span-6">
+                                          <label
+                                            htmlFor={`dmg-note-${dRow.id}`}
+                                            className="sr-only"
+                                          >
+                                            Item condition note
+                                          </label>
+                                          <input
+                                            id={`dmg-note-${dRow.id}`}
+                                            type="text"
+                                            placeholder="Condition note (e.g., Cracked porcelain rim, missing lid)"
+                                            value={dRow.notes || ""}
+                                            onChange={(e) =>
+                                              setDamageRows((prev) =>
+                                                prev.map((r) =>
+                                                  r.id === dRow.id
+                                                    ? { ...r, notes: e.target.value }
+                                                    : r
+                                                )
+                                              )
+                                            }
+                                            className="w-full px-2.5 py-1.5 text-xs bg-natural-bg border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                                          />
+                                        </div>
+
+                                        <div className="sm:col-span-4 flex items-center gap-2">
+                                          {dRow.photo_url ? (
+                                            <div className="flex items-center gap-2">
+                                              <img
+                                                src={dRow.photo_url}
+                                                alt={`Evidence for ${dRow.item_name}`}
+                                                className="w-8 h-8 object-cover rounded border border-natural-border cursor-pointer"
+                                                onClick={() =>
+                                                  setViewingReceipt({
+                                                    url: dRow.photo_url!,
+                                                    bookingName: clientName,
+                                                    amount: rowSubtotal,
+                                                    title: `Damage Evidence · ${dRow.item_name}`,
+                                                  })
+                                                }
+                                              />
+                                              <button
+                                                type="button"
+                                                onClick={() =>
+                                                  setDamageRows((prev) =>
+                                                    prev.map((r) =>
+                                                      r.id === dRow.id ? { ...r, photo_url: "" } : r
+                                                    )
+                                                  )
+                                                }
+                                                className="text-[10px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400 hover:underline cursor-pointer"
+                                              >
+                                                Replace Photo
+                                              </button>
+                                            </div>
+                                          ) : (
+                                            <label
+                                              htmlFor={`dmg-photo-${dRow.id}`}
+                                              className="px-2.5 py-1.5 rounded-lg border border-dashed border-natural-border hover:border-natural-accent text-[11px] font-semibold text-natural-text-main inline-flex items-center gap-1.5 cursor-pointer bg-natural-bg/60"
+                                            >
+                                              <Camera
+                                                aria-hidden="true"
+                                                className="w-3.5 h-3.5 text-natural-accent"
+                                              />
+                                              <span>Attach Photo Evidence</span>
+                                              <input
+                                                id={`dmg-photo-${dRow.id}`}
+                                                type="file"
+                                                accept="image/*"
+                                                onChange={async (ev) => {
+                                                  const f = ev.target.files?.[0];
+                                                  if (!f) return;
+                                                  try {
+                                                    const url = await compressAndUploadDamagePhoto(
+                                                      f,
+                                                      selectedBooking.id
+                                                    );
+                                                    setDamageRows((prev) =>
+                                                      prev.map((r) =>
+                                                        r.id === dRow.id ? { ...r, photo_url: url } : r
+                                                      )
+                                                    );
+                                                  } catch {
+                                                    setDamageFormError("Could not attach photo.");
+                                                  }
+                                                }}
+                                                className="hidden"
+                                              />
+                                            </label>
+                                          )}
+                                        </div>
+
+                                        <div className="sm:col-span-2 text-right font-serif font-bold text-orange-600 dark:text-orange-400 text-sm">
+                                          ₱{rowSubtotal.toLocaleString()}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-natural-border/60">
+                              <div className="space-y-1">
+                                <label
+                                  htmlFor="damage-due-date-input"
+                                  className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block"
+                                >
+                                  Invoice Due Date
+                                </label>
+                                <input
+                                  id="damage-due-date-input"
+                                  type="text"
+                                  value={damageDueDateInput}
+                                  onChange={(e) => setDamageDueDateInput(e.target.value)}
+                                  placeholder="e.g., Nov 12, 2026"
+                                  className="w-full px-2.5 py-1.5 text-xs bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                                />
+                              </div>
+
+                              <div className="sm:col-span-2 space-y-1">
+                                <label
+                                  htmlFor="damage-general-notes"
+                                  className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block"
+                                >
+                                  Warehouse Reconciliation Notes (Shown on Client Invoice)
+                                </label>
+                                <input
+                                  id="damage-general-notes"
+                                  type="text"
+                                  value={damageGeneralNotes}
+                                  onChange={(e) => setDamageGeneralNotes(e.target.value)}
+                                  placeholder="Optional summary note from warehouse return inspection..."
+                                  className="w-full px-2.5 py-1.5 text-xs bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-natural-border">
+                              <div className="text-xs">
+                                <span className="text-natural-text-light font-semibold">
+                                  Total Appraised Damage Invoice:{" "}
+                                </span>
+                                <strong className="font-serif text-base text-orange-600 dark:text-orange-400">
+                                  ₱
+                                  {damageRows
+                                    .reduce(
+                                      (acc, r) =>
+                                        acc +
+                                        Math.max(1, Number(r.quantity_damaged) || 1) *
+                                          Math.max(0, Number(r.unit_cost) || 0),
+                                      0
+                                    )
+                                    .toLocaleString()}
+                                </strong>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                {damageInfo.damageFee > 0 && (
+                                  <button
+                                    type="button"
+                                    disabled={isSavingDamage}
+                                    onClick={(ev) =>
+                                      handleSaveDamageAppraisal(
+                                        ev as unknown as React.FormEvent,
+                                        selectedBooking.id,
+                                        true
+                                      )
+                                    }
+                                    className="px-3 py-1.5 rounded-lg border border-red-300 dark:border-red-800/60 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50"
+                                  >
+                                    Clear Appraisal
+                                  </button>
+                                )}
+
+                                <button
+                                  type="submit"
+                                  disabled={isSavingDamage}
+                                  className="px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50 shadow-2xs"
+                                >
+                                  {isSavingDamage
+                                    ? "Saving Invoice..."
+                                    : "Save & Send Damage Invoice"}
+                                </button>
+                              </div>
+                            </div>
+                          </form>
+                        )}
+                    </div>
                   </div>
                 )}
+
+                {/* TAB 5: POST-EVENT COMPLAINT MANAGEMENT BOX & SIGNED CONTRACT PDF */}
+                {overviewTab === "complaints" && (() => {
+                  const sig = logistics.contract_signature || null;
+                  const recordedSignerName = String(
+                    sig?.signer_name || clientName || "Contract Signer"
+                  ).trim();
+                  const recordedSignerId = String(
+                    sig?.signer_user_id || selectedBooking.user_id || ""
+                  );
+                  const completedIso = String(
+                    logistics.completed_at ||
+                      logistics.post_event_billing?.billed_at ||
+                      selectedBooking.updated_at ||
+                      ""
+                  );
+                  const completedTimeMs = completedIso
+                    ? new Date(completedIso).getTime()
+                    : NaN;
+                  const windowMs = 24 * 60 * 60 * 1000;
+                  const remMs =
+                    isCompleted && !isNaN(completedTimeMs)
+                      ? Math.max(0, windowMs - (Date.now() - completedTimeMs))
+                      : 0;
+                  const is24hActive = isCompleted && remMs > 0;
+                  const remHrs = Math.floor(remMs / (1000 * 60 * 60));
+                  const remMins = Math.floor((remMs % (1000 * 60 * 60)) / (1000 * 60));
+
+                  return (
+                    <div
+                      role="tabpanel"
+                      id="overview-panel-complaints"
+                      aria-labelledby="overview-tab-complaints"
+                      className="space-y-3.5"
+                    >
+                      {/* 1. Signed Catering Contract Card */}
+                      <div className="p-3.5 bg-natural-card border border-natural-border rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                        <div className="space-y-0.5 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h4 className="text-xs font-bold text-natural-text-main uppercase tracking-wider flex items-center gap-1.5">
+                              <FileText
+                                aria-hidden="true"
+                                className="w-4 h-4 text-natural-accent shrink-0"
+                              />
+                              Catering Service Agreement (20 Clauses)
+                            </h4>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
+                              ✓ Executed by {recordedSignerName}
+                            </span>
+                          </div>
+                          {sig?.signed_at && (
+                            <p className="text-[11px] text-natural-text-light">
+                              Signed{" "}
+                              <strong className="text-natural-text-main">
+                                {new Date(sig.signed_at).toLocaleString()}
+                              </strong>{" "}
+                              ({sig.signature_mode === "typed" ? "Typed E-Signature" : "Drawn E-Signature"})
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2.5 shrink-0">
+                          {sig?.signature_data_url && (
+                            <img
+                              src={sig.signature_data_url}
+                              alt={`Signature of ${recordedSignerName}`}
+                              className="h-9 w-24 object-contain bg-white rounded border border-natural-border px-2 py-0.5"
+                            />
+                          )}
+                          <button
+                            type="button"
+                            disabled={isGeneratingContractPdf}
+                            onClick={() => handleDownloadContractPdf(selectedBooking)}
+                            className="px-3.5 py-2 rounded-lg bg-natural-accent hover:bg-natural-accent/90 text-white text-xs font-bold uppercase tracking-wider transition-colors inline-flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                          >
+                            <Download aria-hidden="true" className="w-3.5 h-3.5" />
+                            <span>
+                              {isGeneratingContractPdf
+                                ? "Generating..."
+                                : "Download PDF"}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 2. Post-Event Complaint Management Box (Clause 19) */}
+                      <div className="p-3.5 bg-natural-card border border-natural-border rounded-xl space-y-3 shadow-2xs">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <h4 className="text-xs font-bold text-natural-text-main uppercase tracking-wider flex items-center gap-1.5">
+                              <Scale
+                                aria-hidden="true"
+                                className="w-4 h-4 text-natural-accent"
+                              />
+                              Post-Event Client Complaints
+                            </h4>
+                            <p className="text-[11px] text-natural-text-light mt-0.5">
+                              Authorized Signer:{" "}
+                              <strong className="text-natural-text-main">
+                                {recordedSignerName}
+                              </strong>{" "}
+                              · 24-hour post-event dispute window (Clause 19)
+                            </p>
+                          </div>
+
+                          <span
+                            className={cn(
+                              "text-[10px] font-bold px-2.5 py-0.5 rounded-full border uppercase tracking-wider",
+                              is24hActive
+                                ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
+                                : isCompleted
+                                  ? "bg-natural-bg text-natural-text-light border-natural-border"
+                                  : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30"
+                            )}
+                          >
+                            {is24hActive
+                              ? `24h Window Open (${remHrs}h ${String(remMins).padStart(2, "0")}m left)`
+                              : isCompleted
+                                ? "24h Window Closed"
+                                : "Awaiting Event Completion"}
+                          </span>
+                        </div>
+
+                        {complaintSaveMessage && (
+                          <div
+                            role="status"
+                            aria-live="polite"
+                            className="p-2.5 px-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-semibold flex items-center gap-2"
+                          >
+                            <CheckCircle2 aria-hidden="true" className="w-4 h-4 shrink-0" />
+                            <span>{complaintSaveMessage}</span>
+                          </div>
+                        )}
+
+                        {complaintsList.length === 0 ? (
+                          <div className="py-2.5 px-3.5 rounded-lg bg-natural-bg/50 dark:bg-natural-sidebar/30 border border-natural-border flex flex-wrap items-center justify-between gap-2 text-xs">
+                            <span className="font-semibold text-natural-text-main flex items-center gap-1.5">
+                              <CheckCircle2
+                                aria-hidden="true"
+                                className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0"
+                              />
+                              No post-event complaints submitted.
+                            </span>
+                            <span className="text-[11px] text-natural-text-light">
+                              {isCompleted && !is24hActive
+                                ? "24h window elapsed — service deemed satisfactory"
+                                : "Verified signer submissions within 24h appear here"}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            {complaintsList.map((cmp) => {
+                              const signerVerified = Boolean(
+                                cmp.is_verified_signer ||
+                                  (cmp.submitter_user_id &&
+                                    recordedSignerId &&
+                                    String(cmp.submitter_user_id) === recordedSignerId)
+                              );
+                              const withinWindow =
+                                cmp.within_24h_window !== false &&
+                                (cmp.hours_after_completion === undefined ||
+                                  Number(cmp.hours_after_completion) <= 24);
+                              const cDraft = complaintDrafts[cmp.id] || {
+                                status:
+                                  cmp.status === "Pending Review"
+                                    ? "Resolved"
+                                    : cmp.status,
+                                resolution_notes: cmp.resolution_notes || "",
+                              };
+
+                              return (
+                                <div
+                                  key={cmp.id}
+                                  className="p-4 rounded-xl bg-natural-bg/50 dark:bg-natural-sidebar/40 border border-natural-border space-y-3"
+                                >
+                                  <div className="flex flex-wrap items-start justify-between gap-2">
+                                    <div className="space-y-1">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className="px-2 py-0.5 rounded bg-natural-accent/15 text-natural-accent text-[10px] font-bold uppercase tracking-wider">
+                                          {cmp.category}
+                                        </span>
+                                        <h5 className="text-sm font-bold text-natural-text-main">
+                                          {cmp.subject}
+                                        </h5>
+                                      </div>
+
+                                      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                                        {signerVerified ? (
+                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 text-[10px] font-bold">
+                                            <ShieldCheck
+                                              aria-hidden="true"
+                                              className="w-3 h-3"
+                                            />
+                                            Verified Contract Signer ({cmp.submitter_name || recordedSignerName})
+                                          </span>
+                                        ) : (
+                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/30 text-[10px] font-bold">
+                                            <AlertCircle
+                                              aria-hidden="true"
+                                              className="w-3 h-3"
+                                            />
+                                            Unverified Submitter ({cmp.submitter_name || "Unknown"})
+                                          </span>
+                                        )}
+
+                                        <span
+                                          className={cn(
+                                            "px-2 py-0.5 rounded-full text-[10px] font-bold border",
+                                            withinWindow
+                                              ? "bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/30"
+                                              : "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30"
+                                          )}
+                                        >
+                                          {withinWindow
+                                            ? `✓ Within 24h Window (${cmp.hours_after_completion ?? 0}h post-event)`
+                                            : "Outside 24h Window"}
+                                        </span>
+
+                                        <span className="text-natural-text-light">
+                                          Logged{" "}
+                                          {cmp.submitted_at
+                                            ? new Date(cmp.submitted_at).toLocaleString()
+                                            : "Recently"}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    <span
+                                      className={cn(
+                                        "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border",
+                                        cmp.status === "Resolved"
+                                          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
+                                          : cmp.status === "Under Investigation"
+                                            ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30"
+                                            : cmp.status === "Dismissed"
+                                              ? "bg-natural-bg text-natural-text-light border-natural-border"
+                                              : "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/30"
+                                      )}
+                                    >
+                                      {cmp.status}
+                                    </span>
+                                  </div>
+
+                                  <p className="text-xs text-natural-text-main leading-relaxed whitespace-pre-line bg-natural-card p-3 rounded-lg border border-natural-border/70">
+                                    {cmp.details}
+                                  </p>
+
+                                  {cmp.photo_url && (
+                                    <div>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setViewingReceipt({
+                                            url: cmp.photo_url!,
+                                            bookingName: clientName,
+                                            title: `Client Complaint Attachment · ${cmp.subject}`,
+                                          })
+                                        }
+                                        className="px-3 py-1.5 rounded-lg bg-natural-card border border-natural-border hover:border-natural-accent text-xs font-bold text-natural-text-main inline-flex items-center gap-1.5 cursor-pointer"
+                                      >
+                                        <Camera
+                                          aria-hidden="true"
+                                          className="w-3.5 h-3.5 text-natural-accent"
+                                        />
+                                        Inspect Client Photo Evidence
+                                      </button>
+                                    </div>
+                                  )}
+
+                                  {/* Official Resolution Form */}
+                                  <form
+                                    onSubmit={(ev) =>
+                                      handleSaveComplaintResolution(
+                                        ev,
+                                        selectedBooking.id,
+                                        cmp
+                                      )
+                                    }
+                                    noValidate
+                                    className="pt-3 border-t border-natural-border/70 space-y-2.5"
+                                  >
+                                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-start">
+                                      <div className="sm:col-span-4 space-y-1">
+                                        <label
+                                          htmlFor={`res-status-${cmp.id}`}
+                                          className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block"
+                                        >
+                                          Resolution Status
+                                        </label>
+                                        <select
+                                          id={`res-status-${cmp.id}`}
+                                          value={cDraft.status}
+                                          onChange={(ev) =>
+                                            setComplaintDrafts((prev) => ({
+                                              ...prev,
+                                              [cmp.id]: {
+                                                ...cDraft,
+                                                status: ev.target
+                                                  .value as PostEventComplaintItem["status"],
+                                              },
+                                            }))
+                                          }
+                                          className="w-full px-2.5 py-2 text-xs font-semibold bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                                        >
+                                          <option value="Under Investigation">
+                                            Under Investigation
+                                          </option>
+                                          <option value="Resolved">
+                                            Resolved (Official Action Recorded)
+                                          </option>
+                                          <option value="Dismissed">
+                                            Dismissed (Per Contract Terms)
+                                          </option>
+                                        </select>
+                                      </div>
+
+                                      <div className="sm:col-span-8 space-y-1">
+                                        <label
+                                          htmlFor={`res-notes-${cmp.id}`}
+                                          className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block"
+                                        >
+                                          Official Management Resolution Notes <span className="text-red-500">*</span>
+                                        </label>
+                                        <textarea
+                                          id={`res-notes-${cmp.id}`}
+                                          rows={2}
+                                          required
+                                          aria-invalid={Boolean(cDraft.error)}
+                                          aria-describedby={`res-notes-err-${cmp.id}`}
+                                          placeholder="Record findings, agreement reached with the Contract Signer, or action taken (synced to client)..."
+                                          value={cDraft.resolution_notes}
+                                          onChange={(ev) =>
+                                            setComplaintDrafts((prev) => ({
+                                              ...prev,
+                                              [cmp.id]: {
+                                                ...cDraft,
+                                                resolution_notes: ev.target.value,
+                                                error: undefined,
+                                              },
+                                            }))
+                                          }
+                                          onBlur={(ev) => {
+                                            if (ev.target.value.trim().length < 5) {
+                                              setComplaintDrafts((prev) => ({
+                                                ...prev,
+                                                [cmp.id]: {
+                                                  ...cDraft,
+                                                  error:
+                                                    "Please enter at least 5 characters for the resolution record.",
+                                                },
+                                              }));
+                                            }
+                                          }}
+                                          className="w-full px-3 py-1.5 text-xs bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                                        />
+                                        <p
+                                          id={`res-notes-err-${cmp.id}`}
+                                          aria-live="polite"
+                                          className="text-[11px] text-red-600 dark:text-red-400 font-medium min-h-[1rem]"
+                                        >
+                                          {cDraft.error || ""}
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="text-[11px] text-natural-text-light">
+                                        {cmp.resolved_at
+                                          ? `Last updated by ${cmp.resolved_by || "Admin"} on ${new Date(
+                                              cmp.resolved_at
+                                            ).toLocaleString()}`
+                                          : "Saving notifies the Contract Signer in My Inquiries."}
+                                      </span>
+                                      <button
+                                        type="submit"
+                                        disabled={savingComplaintId === cmp.id}
+                                        className="px-4 py-1.5 rounded-lg bg-natural-accent hover:bg-natural-accent/90 text-white text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50"
+                                      >
+                                        {savingComplaintId === cmp.id
+                                          ? "Saving..."
+                                          : "Record Resolution"}
+                                      </button>
+                                    </div>
+                                  </form>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Balanced Sticky Footer */}
@@ -7856,7 +9805,8 @@ export function BookingPage() {
                     ? "max-w-xl"
                     : confirmAction.type === "confirm" ||
                         confirmAction.type === "verify_final_payment" ||
-                        confirmAction.type === "verify_excess_payment"
+                        confirmAction.type === "verify_excess_payment" ||
+                        confirmAction.type === "verify_damage_payment"
                       ? "max-w-md"
                       : "max-w-sm",
               )}
@@ -7907,7 +9857,8 @@ export function BookingPage() {
                     <Plus className="w-7 h-7 text-blue-600 dark:text-blue-400" />
                   )}
                   {(confirmAction.type === "verify_final_payment" ||
-                    confirmAction.type === "verify_excess_payment") && (
+                    confirmAction.type === "verify_excess_payment" ||
+                    confirmAction.type === "verify_damage_payment") && (
                     <CheckCheck className="w-7 h-7 text-blue-600 dark:text-blue-400" />
                   )}
                 </div>
@@ -7918,9 +9869,11 @@ export function BookingPage() {
                       ? "Confirm Final Payment?"
                       : confirmAction.type === "verify_excess_payment"
                         ? "Confirm Excess Surcharge Payment?"
-                        : confirmAction.type === "unarchive"
-                          ? "Restore Booking?"
-                          : `${confirmAction.type} Booking?`}
+                        : confirmAction.type === "verify_damage_payment"
+                          ? "Confirm Damage Invoice Payment?"
+                          : confirmAction.type === "unarchive"
+                            ? "Restore Booking?"
+                            : `${confirmAction.type} Booking?`}
                 </h3>
                 <p className={cn("text-sm text-natural-text-light", hasShortage ? "mb-3" : "mb-4")}>
                   {confirmAction.type === "create"
@@ -7931,10 +9884,80 @@ export function BookingPage() {
                         ? `Confirming the final payment will record the client's balance settlement and unlock the Mark Event Complete action for ${confirmAction.bookingName}.`
                         : confirmAction.type === "verify_excess_payment"
                           ? `Confirming this receipt will mark the post-event excess headcount surcharge as Settled & Verified for ${confirmAction.bookingName}.`
-                          : confirmAction.type === "unarchive"
-                            ? `Are you sure you want to restore the booking for ${confirmAction.bookingName} from the archives back to active status?`
-                            : `Are you sure you want to ${confirmAction.type} the booking for ${confirmAction.bookingName}?`}
+                          : confirmAction.type === "verify_damage_payment"
+                            ? `Confirming this receipt will mark the post-event equipment damage invoice as Settled & Verified for ${confirmAction.bookingName}.`
+                            : confirmAction.type === "unarchive"
+                              ? `Are you sure you want to restore the booking for ${confirmAction.bookingName} from the archives back to active status?`
+                              : `Are you sure you want to ${confirmAction.type} the booking for ${confirmAction.bookingName}?`}
                 </p>
+
+                {confirmAction.type === "verify_damage_payment" && (() => {
+                  const targetBooking = bookings.find((b) => b.id === confirmAction.bookingId);
+                  const dmg = targetBooking ? getDamageAppraisalSummary(targetBooking) : null;
+
+                  return (
+                    <div className="space-y-3 mb-5">
+                      <div className="p-3.5 bg-blue-50/90 dark:bg-blue-950/30 border border-blue-200/90 dark:border-blue-800/40 rounded-xl text-left space-y-2">
+                        <div className="flex items-center justify-between text-blue-900 dark:text-blue-300 font-bold text-xs">
+                          <div className="flex items-center gap-1.5">
+                            <CheckCheck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                            <span>Equipment Damage Invoice (Clause 13)</span>
+                          </div>
+                          <span className="font-mono text-blue-800 dark:text-blue-300 font-bold text-sm">
+                            ₱{(dmg?.damageFee || 0).toLocaleString()}
+                          </span>
+                        </div>
+
+                        <div className="text-xs text-blue-950/80 dark:text-blue-200/90 space-y-1.5">
+                          <div className="flex justify-between">
+                            <span className="text-natural-text-light">Appraised Items:</span>
+                            <span className="font-semibold text-natural-text-main">
+                              {dmg?.damageAppraisal?.items?.length || 0} item(s)
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-natural-text-light">Payment Method:</span>
+                            <span className="font-semibold text-natural-text-main">
+                              {dmg?.damageAppraisal?.payment_method || "Manual / In-Person"}
+                            </span>
+                          </div>
+                          {dmg?.damageAppraisal?.reference_number && (
+                            <div className="flex justify-between">
+                              <span className="text-natural-text-light">Reference:</span>
+                              <span className="font-mono font-bold text-natural-accent">
+                                {dmg.damageAppraisal.reference_number}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {dmg?.damageAppraisal?.receipt_url && (
+                          <div className="pt-2 border-t border-blue-200/70 dark:border-blue-800/40 flex items-center justify-between">
+                            <span className="text-xs text-natural-text-light">
+                              Receipt attached by client
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setViewingReceipt({
+                                  url: dmg.damageAppraisal!.receipt_url!,
+                                  bookingName: confirmAction.bookingName,
+                                  ref: dmg.damageAppraisal?.reference_number,
+                                  method: dmg.damageAppraisal?.payment_method,
+                                  amount: dmg.damageFee,
+                                  title: "Post-Event Equipment Damage Invoice Receipt",
+                                })
+                              }
+                              className="px-2.5 py-1 bg-blue-600 text-white text-xs font-bold uppercase tracking-wider rounded hover:bg-blue-700 transition-all flex items-center gap-1 cursor-pointer"
+                            >
+                              <Eye className="w-3.5 h-3.5" /> Inspect Slip
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {confirmAction.type === "verify_excess_payment" && (() => {
                   const targetBooking = bookings.find((b) => b.id === confirmAction.bookingId);
@@ -8604,7 +10627,9 @@ export function BookingPage() {
                           ? "Confirm Final Payment"
                           : confirmAction.type === "verify_excess_payment"
                             ? "Confirm Excess Payment"
-                            : confirmAction.type === "unarchive"
+                            : confirmAction.type === "verify_damage_payment"
+                              ? "Confirm Damage Payment"
+                              : confirmAction.type === "unarchive"
                             ? "Restore Booking"
                             : confirmAction.type}
                   </button>

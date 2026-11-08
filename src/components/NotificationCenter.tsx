@@ -1,18 +1,27 @@
 import React from 'react';
-import { Bell, X, AlertTriangle, CheckCircle, Sliders, CreditCard } from 'lucide-react';
+import { Bell, X, AlertTriangle, CheckCircle, Sliders, CreditCard, MessageSquare, ShieldCheck } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { useBooking, Booking } from '../context/BookingContext';
 
 export interface AdminNotificationItem {
   notifKey: string;
-  notifType: 'booking_status' | 'client_modification' | 'payment_uploaded';
+  notifType:
+    | 'booking_status'
+    | 'client_modification'
+    | 'payment_uploaded'
+    | 'excess_payment_uploaded'
+    | 'damage_payment_uploaded'
+    | 'client_complaint';
   booking: Booking;
   timestamp: string;
   isActionable: boolean;
   modRequest?: any;
   addedDishes?: string[];
   removedDishes?: string[];
+  complaint?: any;
+  paymentAmount?: number;
+  paymentReference?: string;
 }
 
 export function buildAdminNotifications(bookings: Booking[]): AdminNotificationItem[] {
@@ -79,6 +88,62 @@ export function buildAdminNotifications(bookings: Booking[]): AdminNotificationI
           booking: b,
           timestamp: b.logistics_info?.client_modified_at || b.created_at || '',
           isActionable: true,
+        });
+      }
+
+      // Emit notification when client uploads Excess Headcount Surcharge receipt for verification
+      const postEventBilling = b.logistics_info?.post_event_billing;
+      if (
+        postEventBilling &&
+        postEventBilling.payment_status === 'Pending Verification' &&
+        postEventBilling.receipt_url
+      ) {
+        items.push({
+          notifKey: `${b.id}-excess-upload-${postEventBilling.reference_number || postEventBilling.submitted_at || 'slip'}`,
+          notifType: 'excess_payment_uploaded',
+          booking: b,
+          timestamp: postEventBilling.submitted_at || b.updated_at || b.created_at || '',
+          isActionable: true,
+          paymentAmount: Number(postEventBilling.excess_headcount_fee) || 0,
+          paymentReference: postEventBilling.reference_number || '',
+        });
+      }
+
+      // Emit notification when client uploads Equipment Damage Invoice receipt for verification
+      const damageAppraisal = b.logistics_info?.damage_appraisal;
+      if (
+        damageAppraisal &&
+        damageAppraisal.payment_status === 'Pending Verification' &&
+        damageAppraisal.receipt_url
+      ) {
+        items.push({
+          notifKey: `${b.id}-damage-upload-${damageAppraisal.reference_number || damageAppraisal.submitted_at || 'slip'}`,
+          notifType: 'damage_payment_uploaded',
+          booking: b,
+          timestamp: damageAppraisal.submitted_at || b.updated_at || b.created_at || '',
+          isActionable: true,
+          paymentAmount: Number(damageAppraisal.total_damage_fee) || 0,
+          paymentReference: damageAppraisal.reference_number || '',
+        });
+      }
+
+      // Emit notification when contract signer submits a post-event complaint within the 24-hour window
+      const complaints = b.logistics_info?.post_event_complaints;
+      if (Array.isArray(complaints)) {
+        complaints.forEach((comp: any) => {
+          if (
+            comp &&
+            (comp.status === 'Pending Review' || comp.status === 'Under Investigation')
+          ) {
+            items.push({
+              notifKey: `${b.id}-complaint-${comp.id}-${comp.status}`,
+              notifType: 'client_complaint',
+              booking: b,
+              timestamp: comp.submitted_at || b.updated_at || b.created_at || '',
+              isActionable: true,
+              complaint: comp,
+            });
+          }
         });
       }
     });
@@ -196,12 +261,26 @@ export function NotificationCenter({
                 </div>
               ) : (
                 displayItems.map((item) => {
-                  const { notifKey, notifType, booking, modRequest, addedDishes = [], removedDishes = [] } = item;
+                  const {
+                    notifKey,
+                    notifType,
+                    booking,
+                    modRequest,
+                    addedDishes = [],
+                    removedDishes = [],
+                    complaint,
+                    paymentAmount,
+                    paymentReference,
+                  } = item;
                   const isUnreadNotif = item.isActionable && !dismissedIds.includes(notifKey);
                   const isExpanded = expandedKey === notifKey;
                   const isCancelled = notifType === 'booking_status' && booking.status === 'Cancelled';
                   const isMod = notifType === 'client_modification';
                   const isPayment = notifType === 'payment_uploaded';
+                  const isExcessPayment = notifType === 'excess_payment_uploaded';
+                  const isDamagePayment = notifType === 'damage_payment_uploaded';
+                  const isAnyPayment = isPayment || isExcessPayment || isDamagePayment;
+                  const isComplaint = notifType === 'client_complaint';
 
                   const paxChanged =
                     isMod &&
@@ -215,7 +294,7 @@ export function NotificationCenter({
                       className={cn(
                         "p-4 hover:bg-natural-bg/30 transition-all cursor-pointer group",
                         isUnreadNotif &&
-                          (isCancelled
+                          (isCancelled || isComplaint
                             ? "bg-red-50/50 dark:bg-red-950/30"
                             : isMod
                             ? "bg-amber-50/40 dark:bg-amber-950/20"
@@ -234,7 +313,7 @@ export function NotificationCenter({
                           <p
                             className={cn(
                               "text-xs font-bold flex items-center gap-2",
-                              isCancelled
+                              isCancelled || isComplaint
                                 ? "text-red-600 dark:text-red-400"
                                 : isMod
                                 ? "text-natural-accent"
@@ -242,13 +321,20 @@ export function NotificationCenter({
                             )}
                           >
                             {isCancelled && <AlertTriangle className="w-3.5 h-3.5 shrink-0" />}
+                            {isComplaint && <MessageSquare className="w-3.5 h-3.5 shrink-0" />}
                             {isMod && <Sliders className="w-3.5 h-3.5 shrink-0" />}
-                            {isPayment && <CreditCard className="w-3.5 h-3.5 shrink-0" />}
+                            {isAnyPayment && <CreditCard className="w-3.5 h-3.5 shrink-0" />}
                             <span>
-                              {isMod
+                              {isComplaint
+                                ? `Post-Event Complaint (${complaint?.status || "Pending Review"})`
+                                : isMod
                                 ? modRequest?.status === "Applied"
                                   ? "Client Updated Menu / Event Details"
                                   : "Client Modification Request"
+                                : isDamagePayment
+                                ? "Damage Invoice Receipt Uploaded"
+                                : isExcessPayment
+                                ? "Excess Headcount Receipt Uploaded"
                                 : isPayment
                                 ? "Final Balance Receipt Uploaded"
                                 : isCancelled
@@ -259,7 +345,7 @@ export function NotificationCenter({
                               <span
                                 className={cn(
                                   "w-2 h-2 rounded-full animate-pulse shrink-0",
-                                  isCancelled ? "bg-red-500" : "bg-natural-accent"
+                                  isCancelled || isComplaint ? "bg-red-500" : "bg-natural-accent"
                                 )}
                               />
                             )}
@@ -277,6 +363,28 @@ export function NotificationCenter({
                                 })
                               : "Recently"}
                           </p>
+
+                          {/* Compact summary preview for post-event complaints */}
+                          {isComplaint && complaint && !isExpanded && (
+                            <div className="mt-1.5 space-y-0.5 text-[10px] text-natural-text-main">
+                              <p className="font-semibold truncate">
+                                [{complaint.category || "Incident"}] {complaint.subject}
+                              </p>
+                              <p className="text-[9px] text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
+                                <ShieldCheck className="w-3 h-3 shrink-0" />
+                                {complaint.within_24h_window !== false ? "24h Window Valid" : "Outside 24h"} •{" "}
+                                {complaint.is_verified_signer !== false ? "Verified Signer" : "Check Signer"}
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Compact summary preview for post-event payments */}
+                          {(isExcessPayment || isDamagePayment) && !isExpanded && (
+                            <p className="mt-1 text-[10px] text-natural-text-main">
+                              Amount: <strong className="text-natural-accent">₱{(paymentAmount || 0).toLocaleString()}</strong>
+                              {paymentReference ? ` • Ref: ${paymentReference}` : ""}
+                            </p>
+                          )}
 
                           {/* Compact summary preview for modifications */}
                           {isMod && !isExpanded && (
@@ -347,6 +455,52 @@ export function NotificationCenter({
                                   ? booking.cancellation_reason
                                   : "No reason provided"}"
                               </p>
+                            </div>
+                          )}
+
+                          {isComplaint && complaint && (
+                            <div className="p-2.5 bg-red-50/70 border border-red-200/80 dark:bg-red-950/30 dark:border-red-900/50 rounded-lg space-y-1.5 text-[11px]">
+                              <div className="flex flex-wrap items-center justify-between gap-1">
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-red-700 dark:text-red-300">
+                                  {complaint.category || "Service Feedback"}
+                                </span>
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+                                  {complaint.within_24h_window !== false ? "Within 24h Window" : "Check Timestamp"} •{" "}
+                                  {complaint.is_verified_signer !== false ? "Verified Signer" : "Unverified Signer"}
+                                </span>
+                              </div>
+                              <p className="font-bold text-natural-text-main">{complaint.subject}</p>
+                              {complaint.details && (
+                                <p className="italic text-natural-text-light line-clamp-3">
+                                  "{complaint.details}"
+                                </p>
+                              )}
+                              {complaint.recorded_contract_signer && (
+                                <p className="text-[10px] text-natural-text-light pt-1 border-t border-red-200/50 dark:border-red-900/40">
+                                  Contract Signer: <strong className="text-natural-text-main">{complaint.recorded_contract_signer}</strong>
+                                </p>
+                              )}
+                            </div>
+                          )}
+
+                          {(isExcessPayment || isDamagePayment) && (
+                            <div className="p-2.5 bg-natural-bg/80 border border-natural-border rounded-lg space-y-1 text-[11px]">
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-natural-accent">
+                                {isDamagePayment
+                                  ? "Equipment Damage Settlement Slip"
+                                  : "Excess Headcount Surcharge Slip"}
+                              </p>
+                              <p className="text-natural-text-main">
+                                Amount Submitted:{" "}
+                                <strong className="text-natural-accent">
+                                  ₱{(paymentAmount || 0).toLocaleString()}
+                                </strong>
+                              </p>
+                              {paymentReference && (
+                                <p className="text-natural-text-light text-[10px]">
+                                  Reference: <strong className="text-natural-text-main">{paymentReference}</strong>
+                                </p>
+                              )}
                             </div>
                           )}
 
@@ -428,7 +582,14 @@ export function NotificationCenter({
                               setTimeout(() => {
                                 window.dispatchEvent(
                                   new CustomEvent("openAdminBookingOverview", {
-                                    detail: { bookingId: booking.id },
+                                    detail: {
+                                      bookingId: booking.id,
+                                      tab: isComplaint
+                                        ? "complaints"
+                                        : isAnyPayment
+                                        ? "payments"
+                                        : undefined,
+                                    },
                                   })
                                 );
                               }, 80);
@@ -436,7 +597,11 @@ export function NotificationCenter({
                             }}
                             className="text-[10px] font-bold bg-natural-accent text-white px-3 py-1.5 rounded w-full hover:bg-natural-accent/90 transition-colors shadow-sm cursor-pointer"
                           >
-                            View &amp; Manage Booking
+                            {isComplaint
+                              ? "Review Complaint & Contract"
+                              : isAnyPayment
+                              ? "Verify Payment Slip"
+                              : "View & Manage Booking"}
                           </button>
                         </div>
                       )}
