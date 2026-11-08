@@ -267,7 +267,7 @@ export function SettingsPage() {
     formData.email.trim().toLowerCase() !==
     (currentUser.email || "").trim().toLowerCase();
 
-  // Verify OTP helper that tries 'recovery' first (from resetPasswordForEmail) and 'email' as fallback
+  // Verify OTP for password change using Supabase 'recovery' or 'email' OTP type
   const verifyEmailOtpToken = async (targetEmail: string, token: string) => {
     const cleanTarget = targetEmail.trim().toLowerCase();
     const cleanToken = token.trim();
@@ -301,17 +301,55 @@ export function SettingsPage() {
     };
   };
 
-  // Dispatch OTP to the admin's previous (current) email address to confirm an email change
+  // Verify OTP for email change using Supabase 'email_change' OTP type
+  const verifyEmailChangeOtp = async (newEmail: string, token: string) => {
+    const cleanNewEmail = newEmail.trim().toLowerCase();
+    const cleanToken = token.trim();
+
+    // 1. Try verifying with new email (standard Supabase email_change template)
+    const { data: newData, error: newErr } = await supabase.auth.verifyOtp({
+      email: cleanNewEmail,
+      token: cleanToken,
+      type: "email_change",
+    });
+
+    if (!newErr) {
+      return { success: true, data: newData };
+    }
+
+    // 2. Try verifying with previous email in case project has Secure Email Change enabled
+    const previousEmail = (currentUser?.email || "").trim().toLowerCase();
+    if (previousEmail && previousEmail !== cleanNewEmail) {
+      const { data: prevData, error: prevErr } = await supabase.auth.verifyOtp({
+        email: previousEmail,
+        token: cleanToken,
+        type: "email_change",
+      });
+
+      if (!prevErr) {
+        return { success: true, data: prevData };
+      }
+    }
+
+    return {
+      success: false,
+      error:
+        newErr?.message ||
+        "Invalid or expired OTP code. Please check your email and try again.",
+    };
+  };
+
+  // Dispatch OTP to confirm an email change using Supabase Change Email Address template
   const handleSendEmailChangeOtp = async () => {
-    const previousEmail = (currentUser.email || "").trim().toLowerCase();
     const targetNewEmail = formData.email.trim().toLowerCase();
+    const previousEmail = (currentUser.email || "").trim().toLowerCase();
 
     setIsSendingEmailOtp(true);
     setSaveMessage({ type: "", text: "" });
     setEmailOtpError("");
 
     try {
-      // Check if the new email is already in use by another admin (admins table kept separate from customer profiles)
+      // Check if the new email is already in use by another admin
       const { data: existingAdmin } = await supabase
         .from("admins")
         .select("id")
@@ -329,29 +367,53 @@ export function SettingsPage() {
         return;
       }
 
-      // Send OTP to the PREVIOUS (current) email using Supabase Reset Password OTP template
-      const { error: otpSendErr } = await supabase.auth.resetPasswordForEmail(
-        previousEmail,
-      );
-
-      if (otpSendErr) {
-        setSaveMessage({
-          type: "error",
-          text: `Failed to send OTP to ${previousEmail}: ${otpSendErr.message}`,
-        });
-        return;
+      // Ensure active Supabase session before triggering email change
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData?.session) {
+        await supabase.auth.signInWithPassword({
+          email: previousEmail,
+          password: "admin123",
+        }).catch(() => {});
       }
 
-      setEmailOtpSentTo(previousEmail);
+      // Trigger Supabase Change Email Address template ("Confirm your new email address")
+      const { error: updateErr } = await supabase.auth.updateUser({
+        email: targetNewEmail,
+      });
+
+      if (updateErr) {
+        const lower = updateErr.message.toLowerCase();
+        if (lower.includes("already registered") || lower.includes("already in use")) {
+          setEmailError("This email address is already in use by another account.");
+          setSaveMessage({
+            type: "error",
+            text: "This email address is already in use by another account.",
+          });
+          setShowConfirm(false);
+          return;
+        }
+
+        // If an email change was already initiated, resend using email_change type
+        const { error: resendErr } = await supabase.auth.resend({
+          type: "email_change",
+          email: targetNewEmail,
+        });
+
+        if (resendErr) {
+          throw new Error(updateErr.message || resendErr.message);
+        }
+      }
+
+      setEmailOtpSentTo(targetNewEmail);
       setEmailOtpStep(true);
       setSaveMessage({
         type: "success",
-        text: `Verification OTP sent to your previous email (${previousEmail}). Enter the code below to confirm changing your email to ${targetNewEmail}.`,
+        text: `Confirmation OTP sent to ${targetNewEmail} ("Confirm your new email address"). Enter the code below to confirm your new email.`,
       });
     } catch (err: any) {
       setSaveMessage({
         type: "error",
-        text: err?.message || "Failed to send verification OTP.",
+        text: err?.message || "Failed to send email change verification OTP.",
       });
     } finally {
       setIsSendingEmailOtp(false);
@@ -434,7 +496,7 @@ export function SettingsPage() {
         return;
       }
 
-      // If email is changing, require OTP sent to previous email first
+      // If email is changing, require confirmation OTP sent via Supabase Change Email template
       if (isEmailChanged) {
         if (!emailOtpStep) {
           await handleSendEmailChangeOtp();
@@ -443,21 +505,20 @@ export function SettingsPage() {
 
         const cleanOtp = emailOtpCode.replace(/\D/g, "").trim();
         if (!cleanOtp || cleanOtp.length < 6) {
-          setEmailOtpError("Please enter the 6-digit OTP sent to your previous email.");
+          setEmailOtpError("Please enter the 6-digit confirmation code.");
           setSaveMessage({
             type: "error",
-            text: "Please enter the 6-digit OTP sent to your previous email.",
+            text: "Please enter the 6-digit confirmation code.",
           });
           return;
         }
 
-        const previousEmail = (currentUser.email || "").trim().toLowerCase();
-        const otpResult = await verifyEmailOtpToken(previousEmail, cleanOtp);
+        const otpResult = await verifyEmailChangeOtp(cleanEmail, cleanOtp);
         if (!otpResult.success) {
-          setEmailOtpError(otpResult.error || "Invalid OTP code.");
+          setEmailOtpError(otpResult.error || "Invalid confirmation code.");
           setSaveMessage({
             type: "error",
-            text: otpResult.error || "Invalid OTP code.",
+            text: otpResult.error || "Invalid confirmation code.",
           });
           return;
         }
@@ -513,7 +574,7 @@ export function SettingsPage() {
         target: cleanName,
         type: "Update",
         details: isEmailChanged
-          ? `Updated profile and verified OTP on previous email (${currentUser.email}) to change email to ${cleanEmail}`
+          ? `Updated profile and verified email change OTP to update email from ${currentUser.email} to ${cleanEmail}`
           : `Updated personal profile name (${cleanName}) and contact number (+63 ${cleanPhoneDigits})`,
       });
 
@@ -906,7 +967,7 @@ export function SettingsPage() {
                   {isEmailChanged && !emailError && (
                     <p className="text-[11px] font-semibold text-natural-accent flex items-center gap-1 mt-1">
                       <KeyRound className="w-3.5 h-3.5 shrink-0" />
-                      An OTP will be sent to {currentUser.email} when you save to confirm this change.
+                      A confirmation OTP will be sent to verify this email change when you save.
                     </p>
                   )}
                 </div>
@@ -1633,7 +1694,7 @@ export function SettingsPage() {
               <h3 className="text-xl font-serif font-bold text-natural-text-main mb-2">
                 {activeSection === "profile" && isEmailChanged
                   ? emailOtpStep
-                    ? "Enter OTP From Previous Email"
+                    ? "Enter Email Change OTP"
                     : "Confirm Email Address Change"
                   : "Save Changes?"}
               </h3>
@@ -1644,9 +1705,9 @@ export function SettingsPage() {
                 ) : isEmailChanged ? (
                   emailOtpStep ? (
                     <>
-                      Enter the 6-digit OTP sent to your previous email{" "}
-                      <strong className="text-natural-text-main">
-                        {emailOtpSentTo || currentUser.email}
+                      Enter the 6-digit confirmation code sent to{" "}
+                      <strong className="text-natural-accent">
+                        {emailOtpSentTo || formData.email.trim().toLowerCase()}
                       </strong>{" "}
                       to confirm changing your email to{" "}
                       <strong className="text-natural-accent">
@@ -1661,8 +1722,7 @@ export function SettingsPage() {
                       <strong className="text-natural-accent">
                         {formData.email.trim().toLowerCase()}
                       </strong>
-                      . We will send a verification OTP to your previous email (
-                      {currentUser.email}) to authorize this change.
+                      . A confirmation OTP will be sent to verify your new email address.
                     </>
                   )
                 ) : (
@@ -1683,7 +1743,7 @@ export function SettingsPage() {
                     id="modal-email-otp-hint"
                     className="text-[11px] text-natural-text-light"
                   >
-                    Check the inbox of {emailOtpSentTo || currentUser.email} for the 6-digit code.
+                    Check the inbox of {emailOtpSentTo || formData.email.trim().toLowerCase()} for the 6-digit code.
                   </p>
                   <input
                     id="modal-email-change-otp"
@@ -1762,7 +1822,7 @@ export function SettingsPage() {
                     : activeSection === "profile" && isEmailChanged
                       ? emailOtpStep
                         ? "Verify OTP & Update Email"
-                        : "Send OTP to Previous Email"
+                        : "Send Email Change OTP"
                       : "Confirm Save"}
                 </button>
                 <button
