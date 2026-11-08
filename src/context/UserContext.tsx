@@ -102,7 +102,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
           const user = toUser(adminProfile);
           if (user.status === 'Pending Invite' && session.user.email_confirmed_at) {
             await supabase.from('admins').update({ status: 'Active' }).eq('id', session.user.id);
-            await supabase.from('profiles').update({ status: 'Active' }).eq('id', session.user.id);
             user.status = 'Active';
           }
 
@@ -186,12 +185,12 @@ export function UserProvider({ children }: { children: ReactNode }) {
   };
 
   const archiveUser = (id: string | number) => {
-    if (id === 0) return; // Protect admin
+    if (id === 0 || String(id) === '7dddf9d1-4b55-49df-8c77-61192afb2fd9') return; // Protect primary admin
     setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, status: 'Archived' } : u)));
   };
 
   const removeUser = (id: string | number) => {
-    if (id === 0) return; // Protect admin
+    if (id === 0 || String(id) === '7dddf9d1-4b55-49df-8c77-61192afb2fd9') return; // Protect primary admin
     setUsers((prev) => prev.filter((u) => u.id !== id));
   };
 
@@ -199,23 +198,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     const cleanEmail = (email || '').trim().toLowerCase();
     const cleanPassword = (password || '').trim();
 
-    // 1. Primary Hardcoded Admin Access (works anywhere: localhost and production on Vercel)
-    if (cleanEmail === 'erica@gmail.com' && cleanPassword === 'admin123') {
-      const adminUser: User = {
-        id: 0,
-        name: 'Kyle Erica Santos',
-        email: 'erica@gmail.com',
-        role: 'Admin',
-        status: 'Active',
-        phone: '09467158519',
-        joined: 'Apr 24, 2026',
-      };
-      setCurrentUser(adminUser);
-      sessionStorage.setItem('rp_admin_current_user', JSON.stringify(adminUser));
-      return true;
-    }
-
-    // 2. Supabase Auth authentication for database-registered admin users
+    // 1. Supabase Auth authentication for database-registered admin users (checks latest email, password & profile)
     try {
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: cleanEmail,
@@ -244,6 +227,26 @@ export function UserProvider({ children }: { children: ReactNode }) {
       console.error('Supabase login failed:', err);
     }
 
+    // 2. Fallback Hardcoded Admin Access (if offline or logging in via alias)
+    if (
+      (cleanEmail === 'roxanpolicarpio.events@gmail.com' && (cleanPassword === 'admin123-' || cleanPassword === 'admin123')) ||
+      (cleanEmail === 'admin@roxanpolicarpio.com' && (cleanPassword === 'admin123-' || cleanPassword === 'admin123'))
+    ) {
+      const adminUser: User = {
+        id: '7dddf9d1-4b55-49df-8c77-61192afb2fd9',
+        name: 'Roxan Policarpio',
+        email: 'roxanpolicarpio.events@gmail.com',
+        role: 'Admin',
+        status: 'Active',
+        phone: '09214697142',
+        joined: 'Sep 16, 2026',
+      };
+      setCurrentUser(adminUser);
+      sessionStorage.setItem('rp_admin_current_user', JSON.stringify(adminUser));
+      supabase.auth.signInWithPassword({ email: cleanEmail, password: cleanPassword }).catch(() => {});
+      return true;
+    }
+
     return false;
   };
 
@@ -254,7 +257,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase.functions.invoke('create-admin', {
         body: adminData,
         headers: {
-          'x-admin-email': currentUser?.email || 'erica@gmail.com',
+          'x-admin-email': currentUser?.email || 'roxanpolicarpio.events@gmail.com',
         },
       });
 
