@@ -324,7 +324,7 @@ export function UserPage() {
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-4 py-2 border border-natural-border rounded-lg text-xs font-bold text-natural-text-main bg-white outline-none cursor-pointer uppercase tracking-wider shadow-xs"
+              className="w-full md:w-auto px-4 py-2 border border-natural-border rounded-lg text-xs font-bold text-natural-text-main bg-white outline-none cursor-pointer uppercase tracking-wider shadow-xs"
             >
               <option>All Status</option>
               <option>Active</option>
@@ -334,8 +334,136 @@ export function UserPage() {
           </div>
         </div>
 
+        {/* Mobile User Cards */}
+        <div className="md:hidden divide-y divide-natural-border">
+          {sortedUsers.map((user) => {
+            const displayName =
+              user.name ||
+              (user as any).full_name ||
+              (user as any).fullName ||
+              (user as any).fullname ||
+              "Unnamed User";
+            const initials = user.name
+              ? user.name
+                  .split(" ")
+                  .map((n) => n[0])
+                  .join("")
+                  .substring(0, 2)
+              : "U";
+
+            return (
+              <div
+                key={user.id}
+                className={cn(
+                  "p-4 space-y-3 transition-colors",
+                  user.status === "Archived" &&
+                    "bg-natural-bg/40 opacity-60 grayscale-[0.5]"
+                )}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-full bg-natural-accent/10 border border-natural-accent/20 flex items-center justify-center text-natural-accent font-bold text-sm uppercase shadow-sm shrink-0">
+                      {initials}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-natural-text-main leading-snug truncate">
+                        {displayName}
+                      </p>
+                      <p className="text-xs text-natural-text-light font-medium flex items-center gap-1.5 mt-0.5 truncate">
+                        <Mail className="w-3.5 h-3.5 text-natural-accent/70 shrink-0" />
+                        <span className="truncate">
+                          {censorEmail(user.email, !!visibleEmails[user.id])}
+                        </span>
+                      </p>
+                    </div>
+                  </div>
+                  <span
+                    className={cn(
+                      "text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-md border shadow-2xs shrink-0",
+                      user.status === "Active"
+                        ? "bg-green-50 text-green-700 border-green-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60"
+                        : user.status === "Archived"
+                          ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-800/60"
+                          : "bg-natural-text-light/5 text-natural-text-light border-natural-border dark:bg-natural-bg/40 dark:border-natural-border/60"
+                    )}
+                  >
+                    {user.status || "Unknown"}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 p-2.5 rounded-lg bg-natural-bg/40 border border-natural-border/50 text-xs text-natural-text-light">
+                  <p className="flex items-center gap-1.5 truncate">
+                    <Phone className="w-3.5 h-3.5 text-natural-accent/70 shrink-0" />
+                    <span className="truncate">
+                      {user.phone_number || user.phone || "No phone"}
+                    </span>
+                  </p>
+                  <p className="flex items-center gap-1.5 justify-end truncate">
+                    <Calendar className="w-3.5 h-3.5 text-natural-accent/70 shrink-0" />
+                    <span>
+                      {user.created_at
+                        ? new Date(user.created_at).toLocaleDateString()
+                        : "Unknown"}
+                    </span>
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  <button
+                    onClick={() => toggleEmailVisibility(user.id)}
+                    className="p-2 text-natural-text-light hover:text-natural-text-main bg-natural-bg/40 border border-natural-border/60 rounded-lg transition-all cursor-pointer"
+                    title={visibleEmails[user.id] ? "Hide Email" : "Show Email"}
+                    aria-label={visibleEmails[user.id] ? "Hide Email" : "Show Email"}
+                  >
+                    {visibleEmails[user.id] ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
+                  {user.status !== "Archived" ? (
+                    <>
+                      <button
+                        onClick={() => handleEditClick(user)}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-natural-text-main bg-natural-bg/40 border border-natural-border/60 rounded-lg transition-all cursor-pointer"
+                        title="Edit User"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                        Edit
+                      </button>
+                      {user.id !== currentUser?.id && (
+                        <button
+                          onClick={() =>
+                            handleArchiveClick(user.id, user.name || "User")
+                          }
+                          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-red-600 bg-red-50/70 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 rounded-lg transition-all cursor-pointer"
+                          title="Archive User"
+                        >
+                          <Archive className="w-3.5 h-3.5" />
+                          Archive
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <button
+                      onClick={() =>
+                        handleUnarchiveClick(user.id, user.name || "User")
+                      }
+                      className="flex items-center gap-1 px-3 py-2 text-natural-accent hover:text-white hover:bg-natural-accent border border-natural-accent/30 rounded-lg transition-all text-xs font-bold uppercase tracking-wider shadow-xs cursor-pointer"
+                      title="Unarchive User"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      Restore
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="hidden md:table w-full text-left border-collapse">
             <thead>
               <tr className="bg-natural-bg/30">
                 <th
@@ -507,7 +635,7 @@ export function UserPage() {
 
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 border border-natural-border">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[92dvh] overflow-y-auto animate-in zoom-in-95 duration-200 border border-natural-border">
             <div className="p-6 border-b border-natural-border flex items-center justify-between bg-natural-bg/10">
               <h3 className="text-xl font-serif font-bold text-natural-text-main">
                 Edit User Profile

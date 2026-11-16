@@ -4286,7 +4286,7 @@ export function BookingPage() {
         */}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {[
           {
             label: "Total Bookings",
@@ -4323,15 +4323,15 @@ export function BookingPage() {
             sub: "Projected",
           },
         ].map((s, i) => (
-          <div key={i} className="glass-card p-4 bg-white">
-            <p className="text-xs font-bold text-natural-text-light uppercase tracking-wider mb-1">
+          <div key={i} className="glass-card p-3.5 sm:p-4 bg-white">
+            <p className="text-[11px] sm:text-xs font-bold text-natural-text-light uppercase tracking-wider mb-1">
               {s.label}
             </p>
-            <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-bold text-natural-text-main font-serif tracking-normal">
+            <div className="flex items-baseline gap-2 flex-wrap">
+              <span className="text-xl sm:text-2xl font-bold text-natural-text-main font-serif tracking-normal">
                 {s.value}
               </span>
-              <span className="text-xs text-natural-text-light font-medium">
+              <span className="text-[11px] sm:text-xs text-natural-text-light font-medium">
                 {s.sub}
               </span>
             </div>
@@ -4340,7 +4340,7 @@ export function BookingPage() {
       </div>
 
       <div className="glass-card bg-white overflow-hidden">
-        <div className="p-4 border-b border-natural-border flex flex-col md:flex-row gap-4 items-center justify-between">
+        <div className="p-4 border-b border-natural-border flex flex-col md:flex-row gap-3 sm:gap-4 items-center justify-between">
           <div className="relative w-full md:w-80">
             <input
               type="text"
@@ -4352,11 +4352,11 @@ export function BookingPage() {
             <Search className="absolute left-3 top-2.5 w-4 h-4 text-natural-text-light" />
           </div>
 
-          <div className="flex items-center gap-3 w-full md:w-auto">
+          <div className="flex flex-wrap sm:flex-nowrap items-center justify-between sm:justify-end gap-2.5 w-full md:w-auto">
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-4 py-2 border border-natural-border rounded-lg text-xs font-bold text-natural-text-main bg-white outline-none cursor-pointer uppercase tracking-wider"
+              className="flex-1 sm:flex-initial min-w-[140px] px-3 sm:px-4 py-2 border border-natural-border rounded-lg text-xs font-bold text-natural-text-main bg-white outline-none cursor-pointer uppercase tracking-wider"
             >
               <option>All Status</option>
               <option>Confirmed</option>
@@ -4366,8 +4366,8 @@ export function BookingPage() {
               <option>Cancelled</option>
               <option>Archived</option>
             </select>
-            <div className="h-6 w-px bg-natural-border mx-1" />
-            <div className="flex gap-1 bg-natural-bg/50 p-1 rounded-lg">
+            <div className="hidden sm:block h-6 w-px bg-natural-border mx-1" />
+            <div className="flex gap-1 bg-natural-bg/50 p-1 rounded-lg shrink-0">
               <button
                 onClick={() => setViewMode("list")}
                 className={cn(
@@ -4396,7 +4396,417 @@ export function BookingPage() {
 
         <div className="overflow-x-auto">
           {viewMode === "list" ? (
-            <table className="w-full text-left border-collapse">
+            <>
+            {/* Mobile Booking Cards */}
+            <div className="md:hidden divide-y divide-natural-border">
+              {sortedBookings.map((booking) => {
+                const clientName =
+                  booking.profiles?.name ||
+                  booking.profiles?.full_name ||
+                  "Unknown User";
+                const payment = getBookingPayment(booking);
+                const estBudget = calculateBudget(booking);
+                const is50Percent = payment.payment_scheme === "Standard 50%";
+                const downpaymentDue = getInitialDownpaymentDue(booking, payment, estBudget);
+                const effectiveBalance = Math.max(0, estBudget - downpaymentDue);
+                const isVerified =
+                  payment.payment_status === "Verified" ||
+                  (booking.status || "Pending") === "Confirmed" ||
+                  (booking.status || "Pending") === "Completed";
+                const ex = getExcessHeadcountBilling(booking);
+                const bookingStatus = booking.status || "Pending";
+
+                return (
+                  <div
+                    key={booking.id}
+                    className={cn(
+                      "p-4 space-y-3 transition-colors",
+                      booking.status === "Archived" &&
+                        "bg-natural-bg/40 opacity-60 grayscale-[0.5]"
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-base font-bold text-natural-text-main leading-snug">
+                          {clientName}
+                        </p>
+                        <div className="flex flex-col gap-0.5 mt-1">
+                          <p className="text-xs text-natural-text-light flex items-center gap-1.5 truncate">
+                            <Mail className="w-3.5 h-3.5 text-natural-accent/70 shrink-0" />
+                            <span className="truncate">{booking.profiles?.email || "N/A"}</span>
+                          </p>
+                          <p className="text-xs text-natural-text-light flex items-center gap-1.5">
+                            <Phone className="w-3.5 h-3.5 text-natural-accent/70 shrink-0" />
+                            <span>
+                              {booking.profiles?.phone_number ||
+                                booking.profiles?.phone ||
+                                "N/A"}
+                            </span>
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <span
+                          className={cn(
+                            "text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md border shadow-2xs",
+                            bookingStatus === "Confirmed"
+                              ? "bg-green-50 text-green-700 border-green-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60"
+                              : bookingStatus === "Completed"
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60"
+                                : bookingStatus === "Pending"
+                                  ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60"
+                                  : bookingStatus === "Cancelled"
+                                    ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-800/60"
+                                    : bookingStatus === "Archived"
+                                      ? "bg-gray-100 text-gray-600 border-gray-300 dark:bg-natural-bg/40 dark:text-natural-text-light dark:border-natural-border/60"
+                                      : "bg-gray-50 text-gray-700 border-gray-200 dark:bg-natural-bg/30 dark:text-natural-text-light dark:border-natural-border/50"
+                          )}
+                        >
+                          {bookingStatus}
+                        </span>
+                        {hasLateModification(booking) && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800/60">
+                            Late Mod (&lt;14d)
+                          </span>
+                        )}
+                        {hasPendingModification(booking) && !hasAppliedModification(booking) && !hasLateModification(booking) && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800/60">
+                            Mod Requested
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2.5 p-3 rounded-xl bg-natural-bg/40 border border-natural-border/60 text-xs">
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block">
+                          Event &amp; Package
+                        </span>
+                        <p className="font-bold text-natural-text-main truncate">
+                          {booking.event_type || "Event"}
+                        </p>
+                        <p className="text-[11px] font-semibold text-natural-accent truncate">
+                          {booking.packages?.name
+                            ? booking.packages.name.toLowerCase().includes("package")
+                              ? booking.packages.name
+                              : `${booking.packages.name} Package`
+                            : "Custom Package"}
+                        </p>
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block">
+                          Budget &amp; Pax
+                        </span>
+                        <p className="font-bold font-serif text-natural-text-main">
+                          ₱{estBudget.toLocaleString()}
+                        </p>
+                        <p className="text-[11px] font-semibold text-natural-text-light">
+                          {booking.guest_count} Pax
+                          {booking.additional_pax > 0 && ` (+${booking.additional_pax})`}
+                        </p>
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block">
+                          Event Schedule
+                        </span>
+                        <p className="font-semibold text-natural-text-main">
+                          {formatEventDate(booking.event_date)}
+                        </p>
+                        <p className="text-[11px] text-natural-text-light">
+                          {formatEventTime(booking.event_time)}
+                        </p>
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block">
+                          Applied On
+                        </span>
+                        <p className="font-semibold text-natural-text-main">
+                          {booking.created_at
+                            ? new Date(booking.created_at).toLocaleDateString(undefined, {
+                                year: "numeric",
+                                month: "short",
+                                day: "numeric",
+                              })
+                            : "N/A"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Payment & Billing Summary */}
+                    <div className="p-3 rounded-xl border border-natural-border/60 bg-natural-bg/20 space-y-2 text-xs">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block">
+                            Downpayment
+                          </span>
+                          <span className="font-bold font-serif text-natural-text-main text-sm">
+                            ₱{downpaymentDue.toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span
+                            className={cn(
+                              "text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border",
+                              isVerified
+                                ? "bg-green-50 text-green-700 border-green-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60"
+                                : payment.receipt_url
+                                  ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60"
+                                  : "bg-gray-50 text-gray-500 border-gray-200 dark:bg-natural-bg/40 dark:text-natural-text-light dark:border-natural-border/60"
+                            )}
+                          >
+                            {isVerified
+                              ? "Deposit Paid"
+                              : payment.receipt_url
+                                ? "Review Deposit"
+                                : "Unpaid"}
+                          </span>
+                          {payment.receipt_url && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setViewingReceipt({
+                                  url: payment.receipt_url,
+                                  bookingName: clientName,
+                                  ref: payment.reference_number,
+                                  method: payment.payment_method,
+                                  amount: downpaymentDue,
+                                  title: "Initial Security Deposit",
+                                })
+                              }
+                              className="inline-flex items-center gap-1 text-xs font-semibold text-natural-accent hover:underline cursor-pointer"
+                            >
+                              <Receipt className="w-3.5 h-3.5" />
+                              View Slip
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {is50Percent && effectiveBalance > 0 && (
+                        <div className="pt-2 border-t border-natural-border/50 flex items-center justify-between gap-2 flex-wrap">
+                          <div>
+                            <span className="text-[10px] text-natural-text-light font-medium block">
+                              15-Day Balance
+                            </span>
+                            <span className="font-bold font-serif text-natural-text-main">
+                              ₱{effectiveBalance.toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span
+                              className={cn(
+                                "text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border",
+                                payment.final_balance_status === "Verified"
+                                  ? "bg-green-50 text-green-700 border-green-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60"
+                                  : payment.final_balance_status === "Pending Verification"
+                                    ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60"
+                                    : "bg-gray-100 text-gray-600 border-gray-200 dark:bg-natural-bg/40 dark:text-natural-text-light dark:border-natural-border/60"
+                              )}
+                            >
+                              {payment.final_balance_status === "Verified"
+                                ? "Balance Paid"
+                                : payment.final_balance_status === "Pending Verification"
+                                  ? "Verify Balance"
+                                  : "Balance Due"}
+                            </span>
+                            {payment.final_balance_receipt && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setViewingReceipt({
+                                    url: payment.final_balance_receipt,
+                                    bookingName: clientName,
+                                    ref: payment.final_balance_reference,
+                                    method: payment.final_balance_method,
+                                    amount: effectiveBalance,
+                                    title: "Final Balance Settlement",
+                                  })
+                                }
+                                className="inline-flex items-center gap-1 text-xs font-semibold text-natural-accent hover:underline cursor-pointer"
+                              >
+                                <Receipt className="w-3.5 h-3.5" />
+                                View Slip
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {ex.excessFee > 0 && (
+                        <div className="pt-2 border-t border-natural-border/50 flex items-center justify-between gap-2 flex-wrap">
+                          <div>
+                            <span className="text-[10px] text-rose-600 dark:text-rose-400 font-medium block">
+                              Excess Surcharge
+                            </span>
+                            <span className="font-bold font-serif text-rose-700 dark:text-rose-300">
+                              ₱{ex.excessFee.toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span
+                              className={cn(
+                                "text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border",
+                                ex.isSettled
+                                  ? "bg-green-50 text-green-700 border-green-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60"
+                                  : ex.isUnderReview
+                                    ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60"
+                                    : "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/50 dark:text-rose-300 dark:border-rose-800/60"
+                              )}
+                            >
+                              {ex.isSettled
+                                ? "Excess Paid"
+                                : ex.isUnderReview
+                                  ? "Verify Excess"
+                                  : "Excess Due"}
+                            </span>
+                            {ex.postEventBilling?.receipt_url && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setViewingReceipt({
+                                    url: ex.postEventBilling!.receipt_url!,
+                                    bookingName: clientName,
+                                    ref: ex.postEventBilling?.reference_number,
+                                    method: ex.postEventBilling?.payment_method,
+                                    amount: ex.excessFee,
+                                    title: "Excess Headcount Surcharge Slip",
+                                  })
+                                }
+                                className="inline-flex items-center gap-1 text-xs font-semibold text-natural-accent hover:underline cursor-pointer"
+                              >
+                                <Receipt className="w-3.5 h-3.5" />
+                                View Slip
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Touch Action Footer */}
+                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-natural-border/50 flex-wrap">
+                      {bookingStatus !== "Archived" ? (
+                        <>
+                          <div className="flex items-center gap-1.5">
+                            {(bookingStatus === "Inquiry" || bookingStatus === "Pending") && (
+                              <>
+                                <button
+                                  onClick={() =>
+                                    setConfirmAction({
+                                      type: "confirm",
+                                      bookingId: booking.id,
+                                      bookingName: clientName,
+                                    })
+                                  }
+                                  className="p-2 text-green-600 dark:text-emerald-400 bg-green-50/70 dark:bg-emerald-950/40 border border-green-200 dark:border-emerald-800/60 rounded-lg transition-all cursor-pointer"
+                                  title="Confirm Booking"
+                                  aria-label="Confirm Booking"
+                                >
+                                  <CheckCircle2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() =>
+                                    setConfirmAction({
+                                      type: "cancel",
+                                      bookingId: booking.id,
+                                      bookingName: clientName,
+                                    })
+                                  }
+                                  className="p-2 text-orange-700 dark:text-orange-300 bg-orange-50/70 dark:bg-orange-950/40 border border-orange-200 dark:border-orange-800/60 rounded-lg transition-all cursor-pointer"
+                                  title="Cancel Booking"
+                                  aria-label="Cancel Booking"
+                                >
+                                  <XCircle className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
+                            {bookingStatus === "Confirmed" && (() => {
+                              const isFinalVerified = payment.final_balance_status === "Verified";
+                              return (
+                                <button
+                                  disabled={!isFinalVerified}
+                                  onClick={() => {
+                                    if (!isFinalVerified) return;
+                                    setConfirmAction({
+                                      type: "complete",
+                                      bookingId: booking.id,
+                                      bookingName: clientName,
+                                    });
+                                  }}
+                                  className={cn(
+                                    "p-2 rounded-lg border transition-all",
+                                    isFinalVerified
+                                      ? "text-emerald-600 dark:text-emerald-400 bg-emerald-50/70 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800/60 cursor-pointer"
+                                      : "text-natural-text-light/40 border-natural-border cursor-not-allowed opacity-50"
+                                  )}
+                                  title={
+                                    isFinalVerified
+                                      ? "Complete Event"
+                                      : "Final payment must be verified before completing event"
+                                  }
+                                  aria-label="Complete Event"
+                                >
+                                  <CheckCheck className="w-4 h-4" />
+                                </button>
+                              );
+                            })()}
+                            <button
+                              onClick={() =>
+                                setConfirmAction({
+                                  type: "archive",
+                                  bookingId: booking.id,
+                                  bookingName: clientName,
+                                })
+                              }
+                              className="p-2 text-natural-text-light hover:text-natural-text-main bg-natural-bg/50 border border-natural-border rounded-lg transition-all cursor-pointer"
+                              title="Archive Booking"
+                              aria-label="Archive Booking"
+                            >
+                              <Archive className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                          <button
+                            onClick={() => setSelectedBooking(booking)}
+                            className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-natural-accent text-white rounded-lg text-xs font-bold uppercase tracking-wider shadow-xs cursor-pointer"
+                          >
+                            <AlertCircle className="w-3.5 h-3.5" />
+                            Manage Booking
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => setSelectedBooking(booking)}
+                            className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold text-natural-text-main bg-natural-bg/60 border border-natural-border rounded-lg cursor-pointer"
+                          >
+                            <AlertCircle className="w-3.5 h-3.5" />
+                            View Details
+                          </button>
+                          <button
+                            onClick={() => {
+                              setConfirmPassword("");
+                              setPasswordError(false);
+                              setConfirmAction({
+                                type: "unarchive",
+                                bookingId: booking.id,
+                                bookingName: clientName,
+                              });
+                            }}
+                            className="inline-flex items-center gap-1 px-3 py-2 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-all shadow-xs cursor-pointer"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Restore</span>
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <table className="hidden md:table w-full text-left border-collapse">
               <thead>
                 <tr className="bg-natural-bg/30">
                   <th
@@ -4939,8 +5349,9 @@ export function BookingPage() {
                 ))}
               </tbody>
             </table>
+            </>
           ) : (
-            <div className="p-6">
+            <div className="p-3 sm:p-6">
               <EventCalendar
                 bookings={filteredBookings.map((b) => ({
                   id: b.id,
@@ -4969,9 +5380,9 @@ export function BookingPage() {
       </div>
 
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
-            <div className="p-6 border-b border-natural-border flex items-center justify-between bg-natural-bg/20 shrink-0">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-2.5 sm:p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92dvh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="p-4 sm:p-6 border-b border-natural-border flex items-center justify-between bg-natural-bg/20 shrink-0">
               <div>
                 <h3 className="text-xl font-serif font-bold text-natural-text-main">
                   Create New Booking
@@ -4988,7 +5399,7 @@ export function BookingPage() {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-8 space-y-8">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-8 space-y-6 sm:space-y-8">
               <section className="space-y-4">
                 <h4 className="text-xs font-bold text-natural-accent uppercase tracking-wider border-b border-natural-accent/20 pb-2">
                   Registered Customer Link
@@ -5586,15 +5997,15 @@ export function BookingPage() {
         };
 
         return (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4">
             <div
               role="dialog"
               aria-modal="true"
               aria-labelledby="booking-overview-title"
-              className="bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl w-full max-w-5xl lg:max-w-6xl xl:max-w-[1220px] max-h-[92vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200"
+              className="bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl w-full max-w-5xl lg:max-w-6xl xl:max-w-[1220px] max-h-[94dvh] sm:max-h-[92vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200"
             >
               {/* Merged Compact Sticky Header & Summary Strip */}
-              <div className="px-5 py-3.5 bg-natural-card/80 border-b border-natural-border space-y-3 shrink-0">
+              <div className="px-3.5 sm:px-5 py-3 sm:py-3.5 bg-natural-card/80 border-b border-natural-border space-y-3 shrink-0">
                 <div className="flex items-start sm:items-center justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2.5 flex-wrap">
@@ -5673,7 +6084,7 @@ export function BookingPage() {
                 </div>
 
                 {/* 4-Column Essential Logistics & Unified Financial Strip */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 pt-2.5 border-t border-natural-border/60 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-2.5 pt-2.5 border-t border-natural-border/60 text-xs">
                   <div className="flex items-start gap-2 min-w-0">
                     <Calendar
                       aria-hidden="true"
@@ -5821,7 +6232,7 @@ export function BookingPage() {
                 <div
                   role="tablist"
                   aria-label="Booking coordinator sections"
-                  className="flex items-center gap-1 overflow-x-auto pt-1 -mb-3.5 border-t border-natural-border/50 no-scrollbar [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                  className="flex items-center gap-1 overflow-x-auto snap-x snap-proximity pt-1 -mb-3 sm:-mb-3.5 border-t border-natural-border/50 no-scrollbar"
                 >
                   {[
                     {
@@ -5903,7 +6314,7 @@ export function BookingPage() {
                         onClick={() => setOverviewTab(tab.key)}
                         onKeyDown={(e) => handleTabKeyDown(e, tab.key)}
                         className={cn(
-                          "min-h-10 px-3 py-2 text-xs font-bold uppercase tracking-wider border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-natural-accent",
+                          "min-h-10 px-3 py-2 text-xs font-bold uppercase tracking-wider border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 snap-start cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-natural-accent",
                           isActive
                             ? "border-natural-accent text-natural-accent bg-natural-accent/5"
                             : "border-transparent text-natural-text-light hover:text-natural-text-main hover:bg-natural-bg/50"
@@ -9795,10 +10206,10 @@ export function BookingPage() {
         const hasShortage = confirmCheck ? !confirmCheck.isAvailable : false;
 
         return (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-60 p-4 overflow-y-auto">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-60 p-3 sm:p-4 overflow-y-auto">
             <div
               className={cn(
-                "bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl w-full max-h-[92vh] overflow-y-auto animate-in zoom-in-95 duration-200 my-auto relative",
+                "bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl w-full max-h-[92dvh] overflow-y-auto animate-in zoom-in-95 duration-200 my-auto relative",
                 hasShortage
                   ? "max-w-2xl"
                   : confirmAction.type === "complete"
@@ -10648,8 +11059,8 @@ export function BookingPage() {
 
       {/* Product Unavailability & Substitution Tool Modal */}
       {isSubModalOpen && selectedBooking && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-natural-card border border-natural-border rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4">
+          <div className="bg-white dark:bg-natural-card border border-natural-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[92dvh] overflow-y-auto animate-in zoom-in-95 duration-200">
             {/* Header */}
             <div className="p-4 border-b border-natural-border flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -10908,7 +11319,7 @@ export function BookingPage() {
             </div>
 
             {/* Footer */}
-            <div className="p-4 border-t border-natural-border bg-natural-bg/50 flex items-center justify-between gap-3">
+            <div className="p-4 border-t border-natural-border bg-natural-bg/50 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2.5 sm:gap-3">
               <button
                 type="button"
                 onClick={() => setIsSubModalOpen(false)}
@@ -10932,8 +11343,8 @@ export function BookingPage() {
 
       {/* Proof of Payment Full Inspection Modal */}
       {viewingReceipt && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-70 p-4 animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden flex flex-col max-h-[92vh]">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-70 p-3 sm:p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden flex flex-col max-h-[92dvh]">
             <div className="p-4 border-b border-natural-border flex items-center justify-between bg-natural-bg/30">
               <div className="flex items-center gap-2">
                 <Receipt className="w-5 h-5 text-natural-accent" />

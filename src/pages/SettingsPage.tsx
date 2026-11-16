@@ -778,7 +778,7 @@ export function SettingsPage() {
           <button
             type="button"
             onClick={() => handleInitiateSaveClick()}
-            className="flex items-center gap-2 bg-natural-accent text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-natural-accent/90 transition-all shadow-sm cursor-pointer active:scale-95"
+            className="w-full md:w-auto flex items-center justify-center gap-2 bg-natural-accent text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-natural-accent/90 transition-all shadow-sm cursor-pointer active:scale-95"
           >
             <Save className="w-4 h-4" />
             Save All Changes
@@ -786,10 +786,10 @@ export function SettingsPage() {
         )}
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-8">
+      <div className="flex flex-col lg:flex-row gap-6 lg:gap-8">
         {/* Navigation Sidebar */}
         <aside className="w-full lg:w-64 shrink-0">
-          <nav className="glass-card overflow-hidden" aria-label="Settings sections">
+          <nav className="glass-card overflow-x-auto flex lg:flex-col no-scrollbar" aria-label="Settings sections">
             {navigation.map((item) => (
               <button
                 key={item.id}
@@ -800,13 +800,13 @@ export function SettingsPage() {
                   setSecurityMessage({ type: "", text: "" });
                 }}
                 className={cn(
-                  "w-full flex items-center gap-3 px-6 py-4 text-xs font-bold uppercase tracking-widest transition-all border-l-4 cursor-pointer text-left",
+                  "flex-1 lg:flex-initial lg:w-full flex items-center justify-center lg:justify-start gap-2.5 lg:gap-3 px-4 py-3.5 lg:px-6 lg:py-4 text-xs font-bold uppercase tracking-widest transition-all border-b-3 lg:border-b-0 lg:border-l-4 cursor-pointer text-left whitespace-nowrap shrink-0",
                   activeSection === item.id
                     ? "bg-natural-bg/50 border-natural-accent text-natural-accent"
                     : "border-transparent text-natural-text-light hover:bg-natural-bg/30",
                 )}
               >
-                <item.icon className="w-4 h-4" />
+                <item.icon className="w-4 h-4 shrink-0" />
                 {item.label}
               </button>
             ))}
@@ -814,15 +814,15 @@ export function SettingsPage() {
         </aside>
 
         {/* Content Area */}
-        <div className="flex-1 space-y-6">
+        <div className="flex-1 min-w-0 space-y-6">
           {/* Profile Section */}
           {activeSection === "profile" && (
             <form
               onSubmit={handleInitiateSaveClick}
               noValidate
-              className="glass-card p-8 space-y-8 animate-in slide-in-from-bottom-2 duration-300"
+              className="glass-card p-5 sm:p-8 space-y-6 sm:space-y-8 animate-in slide-in-from-bottom-2 duration-300"
             >
-              <div className="flex items-center gap-6">
+              <div className="flex flex-col sm:flex-row items-center sm:items-start text-center sm:text-left gap-4 sm:gap-6">
                 <div className="relative group cursor-pointer">
                   <div className="w-24 h-24 rounded-full bg-natural-accent/10 border-2 border-natural-border flex items-center justify-center overflow-hidden">
                     <span className="text-2xl font-serif font-bold text-natural-accent">
@@ -1041,7 +1041,7 @@ export function SettingsPage() {
               <div className="pt-4 border-t border-natural-border flex justify-end">
                 <button
                   type="submit"
-                  className="flex items-center gap-2 bg-natural-accent text-white px-6 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm cursor-pointer active:scale-95"
+                  className="w-full sm:w-auto flex items-center justify-center gap-2 bg-natural-accent text-white px-6 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm cursor-pointer active:scale-95"
                 >
                   <Save className="w-4 h-4" />
                   {isEmailChanged
@@ -1054,7 +1054,7 @@ export function SettingsPage() {
 
           {/* Appearance Section */}
           {activeSection === "appearance" && (
-            <div className="glass-card p-8 space-y-10 animate-in slide-in-from-bottom-2 duration-300">
+            <div className="glass-card p-5 sm:p-8 space-y-8 sm:space-y-10 animate-in slide-in-from-bottom-2 duration-300">
               {/* Header */}
               <div>
                 <div className="flex items-center gap-2 mb-1">
@@ -1334,7 +1334,7 @@ export function SettingsPage() {
             <form
               onSubmit={handleConfirmPasswordChange}
               noValidate
-              className="glass-card p-8 space-y-8 animate-in slide-in-from-bottom-2 duration-300"
+              className="glass-card p-5 sm:p-8 space-y-6 sm:space-y-8 animate-in slide-in-from-bottom-2 duration-300"
             >
               <div>
                 <div className="flex items-center gap-2 mb-1">
@@ -1663,7 +1663,7 @@ export function SettingsPage() {
                       ? "Enter and confirm your new password first"
                       : undefined
                   }
-                  className="flex items-center gap-2 bg-natural-accent text-white px-6 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm cursor-pointer active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-natural-accent"
+                  className="w-full sm:w-auto flex items-center justify-center gap-2 bg-natural-accent text-white px-6 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm cursor-pointer active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-natural-accent"
                 >
                   <Lock className="w-4 h-4" />
                   {isUpdatingPassword
@@ -1680,9 +1680,9 @@ export function SettingsPage() {
 
       {/* Save Confirmation & Email Change OTP Modal */}
       {showConfirm && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4 animate-in fade-in duration-200">
-          <div className="bg-natural-card rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 border border-natural-border">
-            <div className="p-8 text-center">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-3 sm:p-4 animate-in fade-in duration-200">
+          <div className="bg-natural-card rounded-2xl shadow-2xl w-full max-w-md max-h-[92dvh] overflow-y-auto animate-in zoom-in-95 duration-200 border border-natural-border">
+            <div className="p-6 sm:p-8 text-center">
               <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 rotate-3 shadow-lg transition-transform hover:rotate-0 bg-natural-accent shadow-natural-accent/20">
                 {activeSection === "profile" && isEmailChanged ? (
                   <KeyRound className="w-8 h-8 text-white" />

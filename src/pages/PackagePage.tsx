@@ -618,7 +618,7 @@ export function PackagePage() {
 
         <button
           onClick={handleCreateNew}
-          className="flex items-center gap-2 bg-natural-accent text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-natural-accent/90 transition-all shadow-sm"
+          className="w-full md:w-auto flex items-center justify-center gap-2 bg-natural-accent text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-natural-accent/90 transition-all shadow-sm"
         >
           <Plus className="w-4 h-4" />
           Add Package
@@ -715,10 +715,10 @@ export function PackagePage() {
                 </div>
                 <div
                   className={cn(
-                    "flex items-center gap-1 transition-opacity",
+                    "flex items-center gap-1 transition-opacity shrink-0",
                     pkg.status === "Archived"
                       ? "opacity-100"
-                      : "opacity-0 group-hover:opacity-100",
+                      : "opacity-100 lg:opacity-0 lg:group-hover:opacity-100",
                   )}
                 >
                   {pkg.status !== "Archived" ? (
@@ -861,9 +861,9 @@ export function PackagePage() {
 
       {/* Package Modal */}
       {isModalOpen && editingPackage && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6">
-          <div className="bg-white dark:bg-natural-card rounded-2xl shadow-xl w-full max-w-6xl xl:max-w-7xl max-h-[92vh] overflow-hidden flex flex-col animate-in zoom-in duration-200 border border-natural-border">
-            <div className="p-6 border-b border-natural-border flex items-center justify-between shrink-0">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-2.5 sm:p-6">
+          <div className="bg-white dark:bg-natural-card rounded-2xl shadow-xl w-full max-w-6xl xl:max-w-7xl max-h-[94dvh] overflow-hidden flex flex-col animate-in zoom-in duration-200 border border-natural-border">
+            <div className="p-4 sm:p-6 border-b border-natural-border flex items-center justify-between shrink-0">
               <h3 className="text-lg font-serif font-bold text-natural-text-main">
                 {editingPackage.id ? "Edit Package" : "Create New Package"}
               </h3>
@@ -875,13 +875,13 @@ export function PackagePage() {
               </button>
             </div>
 
-            <div className="p-6 space-y-4 overflow-y-auto flex-1">
+            <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
               {formError && (
                 <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 rounded-xl">
                   <p className="text-xs font-bold text-red-600 dark:text-red-400">{formError}</p>
                 </div>
               )}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start">
                 {/* LEFT: input layout */}
                 <div className="lg:col-span-7 space-y-4">
                   <div className="border border-natural-border/50 rounded-xl overflow-hidden">
@@ -892,8 +892,8 @@ export function PackagePage() {
                     </div>
 
                     <div className="p-4 space-y-3">
-                      <div className="grid grid-cols-3 gap-3 items-center">
-                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider col-span-1">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 sm:gap-3 items-start sm:items-center">
+                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider sm:col-span-1">
                           Package Name
                         </label>
                         <input
@@ -906,13 +906,13 @@ export function PackagePage() {
                             });
                             setFormError(null);
                           }}
-                          className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 col-span-2"
+                          className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 sm:col-span-2"
                         />
                       </div>
 
                       {/* Guest range (separate row) */}
-                      <div className="grid grid-cols-3 gap-3 items-center">
-                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider col-span-1">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 sm:gap-3 items-start sm:items-center">
+                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider sm:col-span-1">
                           Guest range
                         </label>
                         <input
@@ -925,16 +925,16 @@ export function PackagePage() {
                             })
                           }
                           placeholder="e.g. 80 - 100 pax"
-                          className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 col-span-2"
+                          className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 sm:col-span-2"
                         />
                       </div>
 
                       {/* Price with ₱ prefix */}
-                      <div className="grid grid-cols-3 gap-3 items-center">
-                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider col-span-1">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 sm:gap-3 items-start sm:items-center">
+                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider sm:col-span-1">
                           Price
                         </label>
-                        <div className="col-span-2 w-full relative">
+                        <div className="sm:col-span-2 w-full relative">
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-natural-text-light">
                             ₱
                           </span>
@@ -954,11 +954,11 @@ export function PackagePage() {
                       </div>
 
                       {/* Additional Pax Price with ₱ prefix */}
-                      <div className="grid grid-cols-3 gap-3 items-center">
-                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider col-span-1">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 sm:gap-3 items-start sm:items-center">
+                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider sm:col-span-1">
                           Add. Pax Price
                         </label>
-                        <div className="col-span-2 w-full relative">
+                        <div className="sm:col-span-2 w-full relative">
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-natural-text-light">
                             ₱
                           </span>
@@ -980,8 +980,8 @@ export function PackagePage() {
                       </div>
 
                       {/* Status Tag dropdown */}
-                      <div className="grid grid-cols-3 gap-3 items-center">
-                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider col-span-1">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 sm:gap-3 items-start sm:items-center">
+                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider sm:col-span-1">
                           Status Tag
                         </label>
                         <select
@@ -992,7 +992,7 @@ export function PackagePage() {
                               tag: e.target.value,
                             })
                           }
-                          className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 col-span-2"
+                          className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 sm:col-span-2"
                         >
                           <option value="" disabled>
                             Select status
@@ -1006,8 +1006,8 @@ export function PackagePage() {
                         </select>
                       </div>
 
-                      <div className="grid grid-cols-3 gap-3 items-center">
-                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider col-span-1">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 sm:gap-3 items-start sm:items-center">
+                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider sm:col-span-1">
                           Status
                         </label>
                         <select
@@ -1018,7 +1018,7 @@ export function PackagePage() {
                               status: e.target.value,
                             })
                           }
-                          className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 col-span-2 cursor-pointer"
+                          className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 sm:col-span-2 cursor-pointer"
                         >
                           <option value="Available">Available</option>
                           <option value="Not Available">Not Available</option>
@@ -1125,7 +1125,7 @@ export function PackagePage() {
                                 onClick={(e) =>
                                   confirmDeleteCategory(e, category)
                                 }
-                                className="p-1 text-natural-text-light hover:text-red-500 hover:bg-red-50 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                                className="p-1 text-natural-text-light hover:text-red-500 hover:bg-red-50 rounded opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity"
                                 title="Delete Category"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -1162,7 +1162,7 @@ export function PackagePage() {
                                         onClick={() =>
                                           confirmDeleteItem(category, item)
                                         }
-                                        className="p-1 text-natural-text-light hover:text-red-500 hover:bg-red-50 rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                                        className="p-1 text-natural-text-light hover:text-red-500 hover:bg-red-50 rounded opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity shrink-0"
                                         title="Delete Item"
                                       >
                                         <Trash2 className="w-3 h-3" />
@@ -1440,7 +1440,7 @@ export function PackagePage() {
               </div>
             </div>
 
-            <div className="p-6 bg-natural-bg/30 border-t border-natural-border flex items-center justify-end gap-3 shrink-0">
+            <div className="p-4 sm:p-6 bg-natural-bg/30 border-t border-natural-border flex items-center justify-end gap-3 shrink-0">
               <button
                 onClick={() => setIsModalOpen(false)}
                 className="px-4 py-2 text-xs font-bold text-natural-text-light uppercase tracking-widest hover:text-natural-text-main transition-colors"

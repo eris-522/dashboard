@@ -72,24 +72,26 @@ export function EventCalendar({ bookings = [], detailedView = false }: EventCale
   const monthEvents = detailedEvents.filter(e => isSameMonth(e.date, currentMonth));
 
   return (
-    <div className="glass-card p-6 h-full flex flex-col min-h-[500px]">
-      <div className="flex items-center justify-between mb-6">
+    <div className="glass-card p-4 sm:p-6 h-full flex flex-col min-h-[420px] sm:min-h-[500px]">
+      <div className="flex items-center justify-between gap-2 mb-4 sm:mb-6">
         <div>
           <h3 className="text-lg font-bold text-natural-text-main font-serif">Event Schedule</h3>
           {!detailedView && (
             <p className="text-[10px] text-green-600 font-bold uppercase tracking-wider">Confirmed & Completed Bookings</p>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 shrink-0">
           <button 
             onClick={prevMonth}
-            className="p-1.5 hover:bg-natural-bg rounded-lg transition-colors border border-natural-border shadow-xs"
+            aria-label="Previous month"
+            className="p-1.5 hover:bg-natural-bg rounded-lg transition-colors border border-natural-border shadow-xs cursor-pointer"
           >
             <ChevronLeft className="w-4 h-4 text-natural-text-main" />
           </button>
           <button 
             onClick={nextMonth}
-            className="p-1.5 hover:bg-natural-bg rounded-lg transition-colors border border-natural-border shadow-xs"
+            aria-label="Next month"
+            className="p-1.5 hover:bg-natural-bg rounded-lg transition-colors border border-natural-border shadow-xs cursor-pointer"
           >
             <ChevronRight className="w-4 h-4 text-natural-text-main" />
           </button>
@@ -110,7 +112,7 @@ export function EventCalendar({ bookings = [], detailedView = false }: EventCale
 
       <div className={cn(
         "grid grid-cols-7 gap-1 flex-1",
-        detailedView ? "auto-rows-[120px]" : "auto-rows-fr"
+        detailedView ? "auto-rows-[52px] md:auto-rows-[120px]" : "auto-rows-fr"
       )}>
         {days.map((day, dayIdx) => {
           const isSelectedMonth = isSameMonth(day, currentMonth);
@@ -121,7 +123,7 @@ export function EventCalendar({ bookings = [], detailedView = false }: EventCale
             <div
               key={day.toString()}
               className={cn(
-                "p-1.5 text-xs rounded-xl flex flex-col items-center justify-start relative transition-all min-h-[40px]",
+                "p-1 sm:p-1.5 text-xs rounded-xl flex flex-col items-center justify-start relative transition-all min-h-[40px]",
                 !isSelectedMonth && "opacity-20 pointer-events-none",
                 isToday(day) && "bg-natural-accent/10 border border-natural-accent/30 font-bold",
                 hasEvent && !isToday(day) && "bg-natural-bg/50 border border-natural-border/50",
@@ -129,7 +131,7 @@ export function EventCalendar({ bookings = [], detailedView = false }: EventCale
               )}
             >
               <span className={cn(
-                "text-[0.7rem] font-medium w-5 h-5 flex items-center justify-center rounded-full mb-1",
+                "text-[0.7rem] font-medium w-5 h-5 flex items-center justify-center rounded-full mb-0.5 sm:mb-1",
                 isToday(day) && "bg-natural-accent text-white",
                 !isToday(day) && hasEvent && "text-natural-accent font-bold"
               )}>
@@ -137,47 +139,68 @@ export function EventCalendar({ bookings = [], detailedView = false }: EventCale
               </span>
               
               {detailedView && dayEvents.length > 0 && (
-                <div className="flex flex-col gap-1 w-full overflow-y-auto flex-1 scrollbar-none mt-1">
-                  {dayEvents.map((e, i) => (
-                    <div key={i} className={cn(
-                      "text-[0.55rem] px-1.5 py-1.5 rounded-md border flex flex-col gap-0.5",
-                      e.status === 'Confirmed' ? 'bg-green-50 text-green-700 border-green-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60' :
-                      e.status === 'Completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60' :
-                      e.status === 'Pending' || e.status === 'Inquiry' ? 'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60' :
-                      'bg-gray-50 text-gray-700 border-gray-200 dark:bg-natural-bg/40 dark:text-natural-text-light dark:border-natural-border/60'
-                    )} title={`${e.time} - ${e.title}`}>
-                      <div className="font-bold flex justify-between items-start gap-1">
-                        <span className="truncate">{e.title.split(' - ')[0]}</span>
-                        <span className="shrink-0">{e.time}</span>
-                      </div>
-                      <div className="opacity-90 font-medium truncate mt-0.5">{e.title.split(' - ')[1] || "Unknown Client"}</div>
-                      <div className="opacity-90 italic truncate text-[0.5rem] mt-0.5">{e.venue}</div>
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1 pt-1 border-t border-current/20 opacity-90 text-[0.5rem]">
-                        {e.package && <span><span className="font-medium opacity-80">Pkg:</span> {e.package}</span>}
-                        {e.guestCount ? <span><span className="font-medium opacity-80">Pax:</span> {e.guestCount}</span> : null}
-                        {e.status && (
-                          <span className={cn(
-                            "font-bold uppercase tracking-widest px-1 py-0.5 rounded border w-full text-center mt-0.5",
-                            e.status === 'Confirmed' ? 'bg-green-100 text-green-800 border-green-300 dark:bg-emerald-950/70 dark:text-emerald-200 dark:border-emerald-700/60' :
-                            e.status === 'Completed' ? 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-200 dark:border-emerald-700/60' :
-                            e.status === 'Pending' || e.status === 'Inquiry' ? 'bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-950/70 dark:text-orange-200 dark:border-orange-700/60' :
-                            'bg-gray-200 text-gray-800 border-gray-300 dark:bg-natural-bg/60 dark:text-natural-text-light dark:border-natural-border/60'
-                          )}>
-                            {e.status}
-                          </span>
+                <>
+                  <div className="md:hidden flex flex-wrap items-center justify-center gap-0.5 mt-0.5">
+                    {dayEvents.slice(0, 3).map((e, i) => (
+                      <span
+                        key={i}
+                        className={cn(
+                          "w-1.5 h-1.5 rounded-full",
+                          e.status === 'Confirmed' ? 'bg-green-500' :
+                          e.status === 'Completed' ? 'bg-emerald-500' :
+                          e.status === 'Pending' || e.status === 'Inquiry' ? 'bg-orange-400' :
+                          'bg-gray-400'
                         )}
+                      />
+                    ))}
+                    {dayEvents.length > 3 && (
+                      <span className="text-[8px] font-bold text-natural-accent leading-none">
+                        +{dayEvents.length - 3}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="hidden md:flex flex-col gap-1 w-full overflow-y-auto flex-1 scrollbar-none mt-1">
+                    {dayEvents.map((e, i) => (
+                      <div key={i} className={cn(
+                        "text-[0.55rem] px-1.5 py-1.5 rounded-md border flex flex-col gap-0.5",
+                        e.status === 'Confirmed' ? 'bg-green-50 text-green-700 border-green-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60' :
+                        e.status === 'Completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60' :
+                        e.status === 'Pending' || e.status === 'Inquiry' ? 'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60' :
+                        'bg-gray-50 text-gray-700 border-gray-200 dark:bg-natural-bg/40 dark:text-natural-text-light dark:border-natural-border/60'
+                      )} title={`${e.time} - ${e.title}`}>
+                        <div className="font-bold flex justify-between items-start gap-1">
+                          <span className="truncate">{e.title.split(' - ')[0]}</span>
+                          <span className="shrink-0">{e.time}</span>
+                        </div>
+                        <div className="opacity-90 font-medium truncate mt-0.5">{e.title.split(' - ')[1] || "Unknown Client"}</div>
+                        <div className="opacity-90 italic truncate text-[0.5rem] mt-0.5">{e.venue}</div>
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1 pt-1 border-t border-current/20 opacity-90 text-[0.5rem]">
+                          {e.package && <span><span className="font-medium opacity-80">Pkg:</span> {e.package}</span>}
+                          {e.guestCount ? <span><span className="font-medium opacity-80">Pax:</span> {e.guestCount}</span> : null}
+                          {e.status && (
+                            <span className={cn(
+                              "font-bold uppercase tracking-widest px-1 py-0.5 rounded border w-full text-center mt-0.5",
+                              e.status === 'Confirmed' ? 'bg-green-100 text-green-800 border-green-300 dark:bg-emerald-950/70 dark:text-emerald-200 dark:border-emerald-700/60' :
+                              e.status === 'Completed' ? 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-200 dark:border-emerald-700/60' :
+                              e.status === 'Pending' || e.status === 'Inquiry' ? 'bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-950/70 dark:text-orange-200 dark:border-orange-700/60' :
+                              'bg-gray-200 text-gray-800 border-gray-300 dark:bg-natural-bg/60 dark:text-natural-text-light dark:border-natural-border/60'
+                            )}>
+                              {e.status}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
           )
         })}
       </div>
 
-      {!detailedView && (
-        <div className="mt-8 space-y-3">
+      <div className={cn("mt-6 sm:mt-8 space-y-3", detailedView && "md:hidden")}>
           {monthEvents.length === 0 ? (
             <p className="text-center text-xs text-natural-text-light font-medium py-4 italic">No events scheduled for this month</p>
           ) : (
@@ -228,8 +251,7 @@ export function EventCalendar({ bookings = [], detailedView = false }: EventCale
               </div>
             ))
           )}
-        </div>
-      )}
+      </div>
     </div>
   );
 }

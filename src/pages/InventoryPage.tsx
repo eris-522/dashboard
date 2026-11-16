@@ -828,58 +828,58 @@ export function InventoryPage() {
       </div>
 
       {/* KPI Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <div className="glass-card p-5 bg-white dark:bg-natural-card flex items-center gap-4">
-          <div className="p-3 bg-natural-bg dark:bg-natural-bg/40 rounded-xl border border-natural-border">
-            <Warehouse className="w-5 h-5 text-natural-accent" />
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
+        <div className="glass-card p-3.5 sm:p-5 bg-white dark:bg-natural-card flex flex-col sm:flex-row items-start sm:items-center gap-2.5 sm:gap-4">
+          <div className="p-2.5 sm:p-3 bg-natural-bg dark:bg-natural-bg/40 rounded-xl border border-natural-border">
+            <Warehouse className="w-4 h-4 sm:w-5 sm:h-5 text-natural-accent" />
           </div>
-          <div>
-            <p className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
+          <div className="min-w-0">
+            <p className="text-[11px] sm:text-xs font-bold text-natural-text-light uppercase tracking-wider">
               Total Item Types
             </p>
-            <h4 className="text-2xl font-bold font-serif text-natural-text-main">
+            <h4 className="text-xl sm:text-2xl font-bold font-serif text-natural-text-main">
               {stats.totalTypes}
             </h4>
           </div>
         </div>
 
-        <div className="glass-card p-5 bg-white dark:bg-natural-card flex items-center gap-4">
-          <div className="p-3 bg-blue-50 dark:bg-blue-950/40 rounded-xl border border-blue-200 dark:border-blue-800/60">
-            <Boxes className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+        <div className="glass-card p-3.5 sm:p-5 bg-white dark:bg-natural-card flex flex-col sm:flex-row items-start sm:items-center gap-2.5 sm:gap-4">
+          <div className="p-2.5 sm:p-3 bg-blue-50 dark:bg-blue-950/40 rounded-xl border border-blue-200 dark:border-blue-800/60">
+            <Boxes className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 dark:text-blue-400" />
           </div>
-          <div>
-            <p className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
+          <div className="min-w-0">
+            <p className="text-[11px] sm:text-xs font-bold text-natural-text-light uppercase tracking-wider">
               Total Units In Stock
             </p>
-            <h4 className="text-2xl font-bold font-serif text-natural-text-main">
+            <h4 className="text-xl sm:text-2xl font-bold font-serif text-natural-text-main">
               {stats.totalUnits.toLocaleString()}
             </h4>
           </div>
         </div>
 
-        <div className="glass-card p-5 bg-white dark:bg-natural-card flex items-center gap-4">
-          <div className="p-3 bg-green-50 dark:bg-emerald-950/50 rounded-xl border border-green-200 dark:border-emerald-800/60">
-            <CheckCircle2 className="w-5 h-5 text-green-600 dark:text-emerald-400" />
+        <div className="glass-card p-3.5 sm:p-5 bg-white dark:bg-natural-card flex flex-col sm:flex-row items-start sm:items-center gap-2.5 sm:gap-4">
+          <div className="p-2.5 sm:p-3 bg-green-50 dark:bg-emerald-950/50 rounded-xl border border-green-200 dark:border-emerald-800/60">
+            <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-green-600 dark:text-emerald-400" />
           </div>
-          <div>
-            <p className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
+          <div className="min-w-0">
+            <p className="text-[11px] sm:text-xs font-bold text-natural-text-light uppercase tracking-wider">
               In-Use (Events)
             </p>
-            <h4 className="text-2xl font-bold font-serif text-green-700 dark:text-emerald-400">
+            <h4 className="text-xl sm:text-2xl font-bold font-serif text-green-700 dark:text-emerald-400">
               {stats.totalAllocated.toLocaleString()} Units
             </h4>
           </div>
         </div>
 
-        <div className="glass-card p-5 bg-white dark:bg-natural-card flex items-center gap-4">
-          <div className="p-3 bg-orange-50 dark:bg-orange-950/40 rounded-xl border border-orange-200 dark:border-orange-800/60">
-            <ArrowUpRight className="w-5 h-5 text-orange-600 dark:text-orange-400" />
+        <div className="glass-card p-3.5 sm:p-5 bg-white dark:bg-natural-card flex flex-col sm:flex-row items-start sm:items-center gap-2.5 sm:gap-4">
+          <div className="p-2.5 sm:p-3 bg-orange-50 dark:bg-orange-950/40 rounded-xl border border-orange-200 dark:border-orange-800/60">
+            <ArrowUpRight className="w-4 h-4 sm:w-5 sm:h-5 text-orange-600 dark:text-orange-400" />
           </div>
-          <div>
-            <p className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
+          <div className="min-w-0">
+            <p className="text-[11px] sm:text-xs font-bold text-natural-text-light uppercase tracking-wider">
               Outsourced (Rent)
             </p>
-            <h4 className="text-2xl font-bold font-serif text-orange-700 dark:text-orange-400">
+            <h4 className="text-xl sm:text-2xl font-bold font-serif text-orange-700 dark:text-orange-400">
               {stats.totalOutsourced.toLocaleString()} Units
             </h4>
           </div>
@@ -902,12 +902,12 @@ export function InventoryPage() {
               <Search className="absolute left-3 top-2.5 w-4 h-4 text-natural-text-light" />
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-              <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 w-full md:w-auto">
+              <div className="flex items-center gap-2 w-full sm:w-auto">
                 <button
                   onClick={() => setShowArchived(false)}
                   className={cn(
-                    "px-3.5 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all",
+                    "flex-1 sm:flex-initial px-3.5 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all text-center",
                     !showArchived
                       ? "bg-natural-accent text-white shadow-sm"
                       : "bg-natural-bg text-natural-text-light hover:text-natural-text-main"
@@ -918,7 +918,7 @@ export function InventoryPage() {
                 <button
                   onClick={() => setShowArchived(true)}
                   className={cn(
-                    "px-3.5 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all flex items-center gap-1.5",
+                    "flex-1 sm:flex-initial px-3.5 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-1.5",
                     showArchived
                       ? "bg-natural-text-main text-white shadow-sm"
                       : "bg-natural-bg text-natural-text-light hover:text-natural-text-main"
@@ -929,12 +929,12 @@ export function InventoryPage() {
                 </button>
               </div>
 
-              <div className="flex items-center gap-2 px-3 py-1.5 border border-natural-border rounded-lg bg-white">
-                <Filter className="w-3.5 h-3.5 text-natural-text-main" />
+              <div className="flex items-center gap-2 px-3 py-1.5 border border-natural-border rounded-lg bg-white flex-1 sm:flex-initial min-w-[140px]">
+                <Filter className="w-3.5 h-3.5 text-natural-text-main shrink-0" />
                 <select
                   value={filterCategory}
                   onChange={(e) => setFilterCategory(e.target.value)}
-                  className="text-xs font-bold text-natural-text-main bg-transparent outline-none cursor-pointer uppercase tracking-wider"
+                  className="w-full text-xs font-bold text-natural-text-main bg-transparent outline-none cursor-pointer uppercase tracking-wider"
                 >
                   <option value="All">All Categories</option>
                   {categories.map((c) => (
@@ -948,7 +948,7 @@ export function InventoryPage() {
               <select
                 value={filterStatus}
                 onChange={(e) => setFilterStatus(e.target.value)}
-                className="px-3 py-2 border border-natural-border rounded-lg text-xs font-bold text-natural-text-main bg-white outline-none cursor-pointer uppercase tracking-wider"
+                className="flex-1 sm:flex-initial min-w-[125px] px-3 py-2 border border-natural-border rounded-lg text-xs font-bold text-natural-text-main bg-white outline-none cursor-pointer uppercase tracking-wider"
               >
                 <option value="All">All Statuses</option>
                 <option value="High">High</option>
@@ -959,7 +959,7 @@ export function InventoryPage() {
               <button
                 type="button"
                 onClick={resetColumns}
-                className="flex items-center gap-1.5 px-3 py-2 border border-natural-border rounded-lg text-xs font-bold text-natural-text-light hover:text-natural-accent hover:bg-natural-bg transition-all cursor-pointer"
+                className="hidden md:flex items-center gap-1.5 px-3 py-2 border border-natural-border rounded-lg text-xs font-bold text-natural-text-light hover:text-natural-accent hover:bg-natural-bg transition-all cursor-pointer"
                 title="Reset column positions and widths to default"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
@@ -975,7 +975,7 @@ export function InventoryPage() {
                 <p className="font-serif italic">Loading equipment monitoring data...</p>
               </div>
             ) : sortedItems.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 text-natural-text-light">
+              <div className="flex flex-col items-center justify-center py-20 text-natural-text-light px-4 text-center">
                 <PackageSearch className="w-12 h-12 mb-4 opacity-20" />
                 <p className="font-serif italic">No equipment items found</p>
                 <p className="text-xs uppercase tracking-wider mt-1">
@@ -983,7 +983,194 @@ export function InventoryPage() {
                 </p>
               </div>
             ) : (
-              <table className="w-full min-w-[1000px] table-fixed text-left border-collapse">
+              <>
+              {/* Mobile Equipment Cards */}
+              <div className="md:hidden divide-y divide-natural-border">
+                {sortedItems.map((item) => {
+                  const allocated = getAllocatedStock(item.id);
+                  const outsourced = getOutsourcedStock(item.id);
+                  const totalStock = item.stock + allocated;
+                  const remainingPercent =
+                    item.status === "Archived" || totalStock === 0
+                      ? 0
+                      : Math.min(Math.round((item.stock / totalStock) * 100), 100);
+                  const s =
+                    item.status === "Archived"
+                      ? "Archived"
+                      : computeItemStatus(item.stock, item.minStock, item.status);
+
+                  return (
+                    <div
+                      key={item.id}
+                      className={cn(
+                        "p-4 space-y-3 transition-colors",
+                        item.status === "Archived" &&
+                          "bg-natural-bg/40 opacity-60 grayscale-[0.5]"
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-base font-bold text-natural-text-main leading-snug">
+                            {item.name}
+                          </p>
+                          <span className="inline-block text-[11px] text-natural-text-light font-bold uppercase tracking-wider mt-1 px-2 py-0.5 bg-natural-bg rounded border border-natural-border/50">
+                            {item.category}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0 px-2.5 py-1 rounded-full bg-natural-bg/50 border border-natural-border/60">
+                          <div
+                            className={cn(
+                              "w-2 h-2 rounded-full",
+                              s === "High"
+                                ? "bg-[#6b8e23]"
+                                : s === "Normal"
+                                  ? "bg-amber-400"
+                                  : s === "Archived"
+                                    ? "bg-gray-400"
+                                    : "bg-red-500"
+                            )}
+                          />
+                          <span
+                            className={cn(
+                              "text-[11px] font-bold uppercase tracking-wider",
+                              s === "High"
+                                ? "text-[#6b8e23]"
+                                : s === "Normal"
+                                  ? "text-amber-600"
+                                  : s === "Archived"
+                                    ? "text-gray-500"
+                                    : "text-red-500"
+                            )}
+                          >
+                            {s}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between text-xs font-bold text-natural-text-main">
+                          <span>
+                            {item.stock.toLocaleString()} {item.unit} Available
+                          </span>
+                          <span className="text-[11px] font-medium text-natural-text-light">
+                            {remainingPercent}% on-hand • Total {totalStock.toLocaleString()} {item.unit}
+                          </span>
+                        </div>
+                        <div className="h-[7px] w-full bg-natural-bg border border-natural-border rounded-full overflow-hidden">
+                          <div
+                            className={cn(
+                              "h-full transition-all duration-700",
+                              item.status === "Archived"
+                                ? "bg-gray-400"
+                                : item.stock === 0
+                                  ? "bg-gray-300 dark:bg-gray-700"
+                                  : s === "Low"
+                                    ? "bg-red-500"
+                                    : s === "Normal"
+                                      ? "bg-amber-400"
+                                      : remainingPercent > 50
+                                        ? "bg-[#6b8e23]"
+                                        : remainingPercent > 20
+                                          ? "bg-amber-400"
+                                          : "bg-red-500"
+                            )}
+                            style={{ width: `${remainingPercent}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 p-2.5 rounded-lg bg-natural-bg/40 border border-natural-border/50 text-xs">
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block">
+                            In-Use (Events)
+                          </span>
+                          {allocated > 0 ? (
+                            <span className="inline-flex items-center gap-1 font-bold text-blue-700 dark:text-blue-300">
+                              <Boxes className="w-3.5 h-3.5 shrink-0" />
+                              {allocated.toLocaleString()} {item.unit}
+                            </span>
+                          ) : (
+                            <span className="text-natural-text-light/70 font-medium">
+                              0 {item.unit}
+                            </span>
+                          )}
+                          {outsourced > 0 && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-orange-50 text-orange-700 border border-orange-200 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-800/60">
+                              <ArrowUpRight className="w-3 h-3" />+{outsourced.toLocaleString()} to outsource
+                            </span>
+                          )}
+                        </div>
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block">
+                            Min. Required
+                          </span>
+                          <span className="font-semibold text-natural-text-main">
+                            {item.minStock} {item.unit}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-1">
+                        {item.status !== "Archived" ? (
+                          <>
+                            <button
+                              onClick={() => {
+                                setSelectedItem(item);
+                                setRestockAmount(0);
+                                setAdjustMode("add");
+                                setAdjustmentType("Restock");
+                                setRestockReason(REASON_PRESETS.add[0]);
+                                setFormError(null);
+                                setIsRestockModalOpen(true);
+                              }}
+                              className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-natural-accent/10 hover:bg-natural-accent text-natural-accent hover:text-white rounded-lg text-xs font-bold transition-all cursor-pointer"
+                            >
+                              <Sliders className="w-3.5 h-3.5 shrink-0" />
+                              <span>Stock Adjustment</span>
+                            </button>
+                            <button
+                              onClick={() => {
+                                setSelectedItem(item);
+                                setEditFormData({
+                                  name: item.name,
+                                  category: item.category,
+                                  minStock: item.minStock,
+                                  unit: item.unit,
+                                });
+                                setFormError(null);
+                                setIsEditModalOpen(true);
+                              }}
+                              className="p-2.5 text-natural-text-light hover:text-natural-accent bg-natural-bg/50 border border-natural-border rounded-lg transition-all"
+                              title="Edit Item Details"
+                              aria-label="Edit Item Details"
+                            >
+                              <Settings2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => setItemToArchive(item.id)}
+                              className="p-2.5 text-natural-text-light hover:text-red-500 bg-natural-bg/50 border border-natural-border rounded-lg transition-all"
+                              title="Archive Item"
+                              aria-label="Archive Item"
+                            >
+                              <Archive className="w-4 h-4" />
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => setItemToUnarchive(item.id)}
+                            className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-all shadow-xs"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Restore Equipment</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <table className="hidden md:table w-full min-w-[1000px] table-fixed text-left border-collapse">
                 {/* Item (left) and Actions (right) have fixed shares and never move.
                     Middle columns split the remaining space by their adjustable percentages,
                     so the table always fits the container and no column can be hidden. */}
@@ -1094,14 +1281,15 @@ export function InventoryPage() {
                   })}
                 </tbody>
               </table>
+              </>
             )}
           </div>
         </div>
 
       {/* MODAL: ADD ITEM */}
       {isAddModalOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4">
+          <div className="bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl w-full max-w-md max-h-[92dvh] overflow-y-auto animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-natural-border flex items-center justify-between">
               <h3 className="text-xl font-serif font-bold text-natural-text-main">
                 Add New Equipment Item
@@ -1256,10 +1444,10 @@ export function InventoryPage() {
 
       {/* MODAL: RESTOCK / ADJUST STOCK */}
       {isRestockModalOpen && selectedItem && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4">
+          <div className="bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl w-full max-w-md max-h-[92dvh] overflow-y-auto animate-in zoom-in-95 duration-200">
             {/* Modal Header */}
-            <div className="p-5 border-b border-natural-border flex items-center justify-between">
+            <div className="p-4 sm:p-5 border-b border-natural-border flex items-start sm:items-center justify-between gap-2 flex-wrap">
               <div>
                 <h3 className="text-lg font-serif font-bold text-natural-text-main flex items-center gap-2">
                   <Sliders className="w-4 h-4 text-natural-accent" />
@@ -1572,8 +1760,8 @@ export function InventoryPage() {
 
       {/* MODAL: EDIT ITEM DETAILS */}
       {isEditModalOpen && selectedItem && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4">
+          <div className="bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl w-full max-w-md max-h-[92dvh] overflow-y-auto animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-natural-border flex items-center justify-between">
               <h3 className="text-xl font-serif font-bold text-natural-text-main">
                 Edit Item Details

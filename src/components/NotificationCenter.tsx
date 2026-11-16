@@ -211,14 +211,19 @@ export function NotificationCenter({
     <AnimatePresence>
       {isOpen && (
         <>
+          <div
+            className="fixed inset-0 bg-black/25 z-40 sm:hidden"
+            onClick={onClose}
+            aria-hidden="true"
+          />
           <motion.div
             initial={{ opacity: 0, y: 10, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.95 }}
             transition={{ duration: 0.2 }}
-            className="absolute right-0 top-12 w-[30rem] bg-white border border-natural-border rounded-xl shadow-2xl z-50 overflow-hidden glass-card"
+            className="fixed inset-x-3 top-16 sm:inset-x-auto sm:absolute sm:right-0 sm:top-12 w-auto sm:w-[26rem] md:w-[30rem] max-w-[calc(100vw-1.5rem)] max-h-[80dvh] flex flex-col bg-white border border-natural-border rounded-xl shadow-2xl z-50 overflow-hidden glass-card"
           >
-            <div className="p-4 border-b border-natural-border flex items-center justify-between bg-natural-bg/30">
+            <div className="p-4 border-b border-natural-border flex items-center justify-between bg-natural-bg/30 shrink-0">
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-bold text-natural-text-main uppercase tracking-widest">
                   {showAll ? "All Notifications" : "Recent Notifications"}
@@ -251,7 +256,7 @@ export function NotificationCenter({
               </div>
             </div>
 
-            <div className="max-h-96 overflow-y-auto divide-y divide-natural-border scrollbar-none">
+            <div className="flex-1 max-h-[60dvh] sm:max-h-96 overflow-y-auto divide-y divide-natural-border scrollbar-none">
               {displayItems.length === 0 ? (
                 <div className="p-10 text-center">
                   <Bell className="w-8 h-8 text-natural-text-light opacity-20 mx-auto mb-3" />
@@ -431,7 +436,7 @@ export function NotificationCenter({
                                   onDismiss(notifKey);
                                 }
                               }}
-                              className="opacity-0 group-hover:opacity-100 p-1 text-natural-text-light hover:text-green-600 hover:bg-green-50 dark:hover:text-emerald-400 dark:hover:bg-emerald-950/40 rounded transition-all cursor-pointer"
+                              className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 p-1 text-natural-text-light hover:text-green-600 hover:bg-green-50 dark:hover:text-emerald-400 dark:hover:bg-emerald-950/40 rounded transition-all cursor-pointer"
                               title="Mark as read"
                             >
                               <CheckCircle className="w-3.5 h-3.5" />

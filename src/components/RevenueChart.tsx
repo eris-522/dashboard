@@ -80,8 +80,8 @@ export function RevenueChart() {
   const tickColor = resolvedTheme === "dark" ? "#9e9f96" : "#8a8b82";
 
   return (
-    <div className="glass-card p-6 h-full flex flex-col">
-      <div className="flex items-center justify-between mb-6 shrink-0">
+    <div className="glass-card p-4 sm:p-6 h-full flex flex-col">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-4 sm:mb-6 shrink-0">
         <div>
           <h3 className="text-lg font-bold text-natural-text-main font-serif">
             Monthly Revenue Overview
@@ -103,10 +103,10 @@ export function RevenueChart() {
         </select>
       </div>
 
-      <div className="w-full flex-1 min-h-[300px]">
+      <div className="w-full flex-1 min-h-[240px] sm:min-h-[300px]">
         {hasData ? (
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data}>
+            <AreaChart data={data} margin={{ top: 5, right: 5, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor={accentColorHex} stopOpacity={0.35} />
@@ -126,6 +126,7 @@ export function RevenueChart() {
                 dy={10}
               />
               <YAxis
+                width={46}
                 axisLine={false}
                 tickLine={false}
                 tick={{ fill: tickColor, fontSize: 10, fontWeight: 600 }}

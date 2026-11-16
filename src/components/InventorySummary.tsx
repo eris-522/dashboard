@@ -25,15 +25,15 @@ export function InventorySummary({ onViewAll }: { onViewAll?: () => void }) {
   const totalAllocated = activeItems.reduce((acc, i) => acc + getAllocatedStock(i.id), 0);
 
   return (
-    <div className="glass-card p-6 h-full flex flex-col bg-white dark:bg-natural-card">
-      <div className="flex items-center justify-between mb-6">
-        <div>
+    <div className="glass-card p-4 sm:p-6 h-full flex flex-col bg-white dark:bg-natural-card">
+      <div className="flex items-center justify-between gap-2 mb-4 sm:mb-6">
+        <div className="min-w-0">
           <h3 className="text-lg font-bold text-natural-text-main font-serif">Equipment Monitoring Overview</h3>
           <p className="text-[0.7rem] text-natural-text-light font-medium uppercase tracking-wider">Status of catering equipment & supplies</p>
         </div>
         <button 
           onClick={onViewAll}
-          className="text-[0.7rem] font-bold text-natural-accent hover:underline flex items-center uppercase tracking-widest cursor-pointer"
+          className="text-[0.7rem] font-bold text-natural-accent hover:underline flex items-center uppercase tracking-widest cursor-pointer shrink-0"
         >
           View All <ChevronRight className="w-3 h-3 ml-0.5" />
         </button>
@@ -88,10 +88,10 @@ export function InventorySummary({ onViewAll }: { onViewAll?: () => void }) {
         )}
       </div>
 
-      <div className={`mt-6 pt-4 border-t border-natural-border/60 grid ${totalOutsourced > 0 ? 'grid-cols-3' : 'grid-cols-2'} gap-3`}>
+      <div className={`mt-6 pt-4 border-t border-natural-border/60 grid grid-cols-2 ${totalOutsourced > 0 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-2.5 sm:gap-3`}>
         <div className="flex items-center gap-2 p-2.5 rounded-xl bg-natural-bg/50 border border-natural-border">
           <AlertTriangle className="w-4 h-4 text-natural-accent shrink-0" />
-          <div>
+          <div className="min-w-0">
             <span className="text-[9px] font-bold text-natural-text-light uppercase tracking-wider block">Low Stock</span>
             <span className="text-xs font-bold text-natural-accent">{restockNeededCount} Items</span>
           </div>
@@ -99,16 +99,16 @@ export function InventorySummary({ onViewAll }: { onViewAll?: () => void }) {
 
         <div className="flex items-center gap-2 p-2.5 rounded-xl bg-natural-bg/50 border border-natural-border">
           <Boxes className="w-4 h-4 text-green-600 shrink-0" />
-          <div>
+          <div className="min-w-0">
             <span className="text-[9px] font-bold text-natural-text-light uppercase tracking-wider block">In-Use</span>
             <span className="text-xs font-bold text-green-700 dark:text-emerald-400">{totalAllocated.toLocaleString()} Units</span>
           </div>
         </div>
 
         {totalOutsourced > 0 && (
-          <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60">
+          <div className="col-span-2 sm:col-span-1 flex items-center gap-2 p-2.5 rounded-xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60">
             <ArrowUpRight className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-            <div>
+            <div className="min-w-0">
               <span className="text-[9px] font-bold text-amber-800 dark:text-amber-300 uppercase tracking-wider block">Outsourced</span>
               <span className="text-xs font-bold text-amber-700 dark:text-amber-400">{totalOutsourced.toLocaleString()} Units</span>
             </div>

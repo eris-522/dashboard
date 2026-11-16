@@ -166,7 +166,9 @@ export function CMSPage() {
 
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmActionType, setConfirmActionType] = useState<"save" | "reset">("save");
-  const [showLivePreview, setShowLivePreview] = useState(true);
+  const [showLivePreview, setShowLivePreview] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth >= 1024 : true
+  );
   const [showFullPreviewModal, setShowFullPreviewModal] = useState(false);
 
   // Form local states
@@ -850,11 +852,11 @@ export function CMSPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 flex-wrap">
+        <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap w-full sm:w-auto">
           <button
             onClick={() => setShowLivePreview(!showLivePreview)}
             className={cn(
-              "flex items-center gap-2 px-3.5 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border cursor-pointer shrink-0",
+              "flex-1 sm:flex-initial flex items-center justify-center gap-2 px-3 sm:px-3.5 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border cursor-pointer shrink-0",
               showLivePreview
                 ? "bg-amber-500/10 text-amber-600 border-amber-500/30 ring-2 ring-amber-500/20"
                 : "border-natural-border hover:bg-natural-bg/50 text-natural-text-main"
@@ -870,7 +872,7 @@ export function CMSPage() {
               setShowConfirmModal(true);
             }}
             title="Reset current tab to defaults"
-            className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs font-bold text-natural-text-light hover:text-red-500 border border-natural-border hover:bg-natural-bg/50 transition-all cursor-pointer shrink-0"
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-bold text-natural-text-light hover:text-red-500 border border-natural-border hover:bg-natural-bg/50 transition-all cursor-pointer shrink-0"
           >
             <RotateCcw className="w-4 h-4" />
             <span>Reset Defaults</span>
@@ -881,7 +883,7 @@ export function CMSPage() {
               setConfirmActionType("save");
               setShowConfirmModal(true);
             }}
-            className="flex items-center gap-2 bg-natural-accent text-white px-5 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-natural-accent/90 transition-all shadow-md cursor-pointer active:scale-95 shrink-0"
+            className="w-full sm:w-auto flex items-center justify-center gap-2 bg-natural-accent text-white px-5 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-natural-accent/90 transition-all shadow-md cursor-pointer active:scale-95 shrink-0"
           >
             <Save className="w-4 h-4" />
             Publish Changes
@@ -920,16 +922,16 @@ export function CMSPage() {
       <div className="flex flex-col lg:flex-row gap-6 items-start w-full">
         {/* Left Navigation: Exact Customer Website Order */}
         <aside className="w-full lg:w-56 xl:w-64 shrink-0">
-          <div className="glass-card overflow-hidden sticky top-6">
-            <div className="p-4 border-b border-natural-border/50 bg-natural-bg/30">
+          <div className="glass-card overflow-hidden lg:sticky lg:top-6">
+            <div className="p-3 sm:p-4 border-b border-natural-border/50 bg-natural-bg/30 flex items-center justify-between lg:block">
               <span className="text-[10px] font-bold text-natural-text-light uppercase tracking-widest block">
                 Website Pages
               </span>
-              <p className="text-[11px] text-natural-text-light mt-0.5">
+              <p className="text-[11px] text-natural-text-light mt-0.5 hidden sm:block">
                 Exact customer portal order
               </p>
             </div>
-            <nav className="p-2 space-y-1">
+            <nav className="p-2 flex lg:flex-col gap-2 lg:gap-1 overflow-x-auto no-scrollbar">
               {tabs.map((tab, idx) => {
                 const isActive = activeTab === tab.id;
                 return (
@@ -937,10 +939,10 @@ export function CMSPage() {
                     key={tab.id}
                     onClick={() => navigateToPage(tab.id)}
                     className={cn(
-                      "w-full flex items-start gap-3 p-3 rounded-xl text-left transition-all cursor-pointer group",
+                      "shrink-0 min-w-[160px] lg:min-w-0 lg:w-full flex items-start gap-2.5 sm:gap-3 p-2.5 sm:p-3 rounded-xl text-left transition-all cursor-pointer group",
                       isActive
                         ? "bg-natural-accent text-white shadow-xs font-semibold"
-                        : "text-natural-text-main hover:bg-natural-bg/60 border border-transparent"
+                        : "text-natural-text-main hover:bg-natural-bg/60 border border-natural-border/50 lg:border-transparent"
                     )}
                   >
                     <tab.icon
@@ -952,13 +954,13 @@ export function CMSPage() {
                       )}
                     />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs font-bold tracking-wide">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-bold tracking-wide whitespace-nowrap">
                           {tab.label}
                         </p>
                         <span
                           className={cn(
-                            "text-[9px] font-mono px-1.5 py-0.2 rounded",
+                            "text-[9px] font-mono px-1.5 py-0.2 rounded shrink-0",
                             isActive ? "bg-white/20 text-white" : "text-natural-text-light bg-natural-bg"
                           )}
                         >
@@ -967,7 +969,7 @@ export function CMSPage() {
                       </div>
                       <p
                         className={cn(
-                          "text-[10px] line-clamp-1 mt-0.5",
+                          "text-[10px] line-clamp-1 mt-0.5 hidden sm:block",
                           isActive ? "text-white/80" : "text-natural-text-light"
                         )}
                       >
@@ -979,7 +981,7 @@ export function CMSPage() {
               })}
             </nav>
 
-            <div className="p-4 border-t border-natural-border/50 bg-natural-bg/10 text-[10px] text-natural-text-light space-y-1">
+            <div className="hidden lg:block p-4 border-t border-natural-border/50 bg-natural-bg/10 text-[10px] text-natural-text-light space-y-1">
               <div className="flex items-center gap-1 font-semibold text-natural-accent">
                 <Info className="w-3.5 h-3.5" />
                 <span>Live Sync Active</span>
@@ -2325,7 +2327,7 @@ export function CMSPage() {
         {/* RIGHT STICKY LIVE SIMULATION: MATCHES CUSTOMER SIDE EXACTLY */}
         {/* ========================================================================= */}
         {showLivePreview && (
-          <aside className="w-full lg:w-[400px] xl:w-[480px] 2xl:w-[540px] shrink-0 sticky top-6 max-h-[calc(100vh-3rem)] overflow-y-auto custom-scrollbar p-4 rounded-2xl bg-[#080808] border border-white/20 shadow-2xl text-white space-y-4 animate-in slide-in-from-right-4 duration-300">
+          <aside className="w-full lg:w-[400px] xl:w-[480px] 2xl:w-[540px] shrink-0 lg:sticky lg:top-6 max-h-[80dvh] lg:max-h-[calc(100vh-3rem)] overflow-y-auto custom-scrollbar p-4 rounded-2xl bg-[#080808] border border-white/20 shadow-2xl text-white space-y-4 animate-in slide-in-from-right-4 duration-300">
             {/* Simulation Header Bar */}
             <div className="flex items-center justify-between border-b border-white/10 pb-3 gap-2">
               <div className="flex items-center gap-2">

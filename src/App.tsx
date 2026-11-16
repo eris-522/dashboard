@@ -6,7 +6,7 @@ import { EventCalendar } from "./components/EventCalendar";
 import { InventorySummary } from "./components/InventorySummary";
 import { RecentActivities } from "./components/RecentActivities";
 import { NotificationCenter, buildAdminNotifications } from "./components/NotificationCenter";
-import { Bell, LogOut, Sun, Moon } from "lucide-react";
+import { Bell, LogOut, Sun, Moon, Menu } from "lucide-react";
 import { cn } from "./lib/utils";
 import { InventoryProvider } from "./context/InventoryContext";
 import { BookingProvider, useBooking } from "./context/BookingContext";
@@ -74,12 +74,22 @@ function Dashboard({ onNavigate }: { onNavigate: (id: string) => void }) {
 
 function AppContent() {
   const [activeTab, setActiveTab] = React.useState("dashboard");
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
   const [isNotificationOpen, setIsNotificationOpen] = React.useState(false);
   const { currentUser, logout } = useUser();
   const { bookings } = useBooking();
   const { resolvedTheme, toggleTheme } = useTheme();
 
   const notificationRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!isMobileMenuOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [isMobileMenuOpen]);
 
   React.useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -139,65 +149,98 @@ function AppContent() {
 
   return (
     <div className="flex bg-natural-bg min-h-screen">
-      <Sidebar active={activeTab} setActive={setActiveTab} />
+      <Sidebar
+        active={activeTab}
+        setActive={setActiveTab}
+        isOpen={isMobileMenuOpen}
+        onClose={() => setIsMobileMenuOpen(false)}
+      />
 
-      <main className="flex-1 ml-56 px-6 lg:px-8 pb-6 lg:pb-8 min-w-0">
+      <main className="flex-1 ml-0 lg:ml-56 px-4 sm:px-6 lg:px-8 pb-6 lg:pb-8 min-w-0">
         {/* Top Header */}
-        <header className="sticky top-0 z-40 bg-natural-bg/95 backdrop-blur-md -mx-6 lg:-mx-8 px-6 lg:px-8 pt-6 lg:pt-8 pb-4 mb-4 flex items-center justify-between flex-wrap gap-4 transition-colors duration-250">
-          <div>
-            <h2 className="text-2xl font-serif font-bold text-natural-text-main">
-              {activeTab === "dashboard"
-                ? "Executive Dashboard"
-                : activeTab === "user"
-                  ? "Account Management"
-                  : activeTab === "booking"
-                    ? "Event Logistics"
-                    : activeTab === "menu"
-                      ? "Culinary Workspace"
-                      : activeTab === "packages"
-                        ? "Package Bundles"
-                        : activeTab === "inventory"
-                          ? "Equipment Monitoring"
-                          : activeTab === "cms"
-                            ? "Website Content Management"
-                            : activeTab === "analytics"
-                              ? "Insights & Performance"
-                              : activeTab === "audit-trail"
-                                ? "Administrative Log"
-                                : activeTab === "setting"
-                                  ? "Account Preferences"
-                                  : "Catering Workspace"}
-            </h2>
-            <p className="text-natural-text-light text-[0.8rem] font-medium uppercase tracking-wider">
-              {activeTab === "dashboard"
-                ? "Business Intelligence & Logistics"
-                : activeTab === "user"
-                  ? "User Roles & Access Control"
-                  : activeTab === "booking"
-                    ? "Scheduled Catering & Operations"
-                    : activeTab === "menu"
-                      ? "Menu Development & Equipment Link"
-                      : activeTab === "packages"
-                        ? "Tiered Event Solutions"
-                        : activeTab === "inventory"
-                          ? "Equipment Tracking, Allocation & Logistics"
-                          : activeTab === "cms"
-                            ? "Customer Portal Customization & Real-Time Sync"
-                            : activeTab === "analytics"
-                              ? "Data-Driven Growth Strategies"
-                              : activeTab === "audit-trail"
-                                ? "Chronological System Activity Trail"
-                                : activeTab === "setting"
-                                  ? "Workflow & Environment Configuration"
-                                  : "Management Console"}
-            </p>
+        <header
+          className={cn(
+            "sticky top-0 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 lg:pt-8 pb-3 sm:pb-4 mb-4 flex items-center justify-between gap-3 transition-colors duration-250",
+            isNotificationOpen ? "z-50" : "z-30"
+          )}
+        >
+          {/* Separate backdrop layer so fixed mobile NotificationCenter isn't trapped by backdrop-filter */}
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 bg-natural-bg/95 backdrop-blur-md -z-10 border-b border-natural-border/40 lg:border-b-0 pointer-events-none"
+          />
+
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              type="button"
+              onClick={() => {
+                setIsNotificationOpen(false);
+                setIsMobileMenuOpen(true);
+              }}
+              aria-label="Open navigation menu"
+              aria-expanded={isMobileMenuOpen}
+              aria-controls="admin-sidebar-drawer"
+              className="lg:hidden p-2 bg-white border border-natural-border rounded-lg text-natural-text-main hover:bg-natural-bg transition-colors shadow-xs cursor-pointer shrink-0"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+
+            <div className="min-w-0">
+              <h2 className="text-lg sm:text-2xl font-serif font-bold text-natural-text-main leading-tight truncate">
+                {activeTab === "dashboard"
+                  ? "Executive Dashboard"
+                  : activeTab === "user"
+                    ? "Account Management"
+                    : activeTab === "booking"
+                      ? "Event Logistics"
+                      : activeTab === "menu"
+                        ? "Culinary Workspace"
+                        : activeTab === "packages"
+                          ? "Package Bundles"
+                          : activeTab === "inventory"
+                            ? "Equipment Monitoring"
+                            : activeTab === "cms"
+                              ? "Website Content Management"
+                              : activeTab === "analytics"
+                                ? "Insights & Performance"
+                                : activeTab === "audit-trail"
+                                  ? "Administrative Log"
+                                  : activeTab === "setting"
+                                    ? "Account Preferences"
+                                    : "Catering Workspace"}
+              </h2>
+              <p className="text-natural-text-light text-[0.65rem] sm:text-[0.8rem] font-medium uppercase tracking-wider truncate">
+                {activeTab === "dashboard"
+                  ? "Business Intelligence & Logistics"
+                  : activeTab === "user"
+                    ? "User Roles & Access Control"
+                    : activeTab === "booking"
+                      ? "Scheduled Catering & Operations"
+                      : activeTab === "menu"
+                        ? "Menu Development & Equipment Link"
+                        : activeTab === "packages"
+                          ? "Tiered Event Solutions"
+                          : activeTab === "inventory"
+                            ? "Equipment Tracking, Allocation & Logistics"
+                            : activeTab === "cms"
+                              ? "Customer Portal Customization & Real-Time Sync"
+                              : activeTab === "analytics"
+                                ? "Data-Driven Growth Strategies"
+                                : activeTab === "audit-trail"
+                                  ? "Chronological System Activity Trail"
+                                  : activeTab === "setting"
+                                    ? "Workflow & Environment Configuration"
+                                    : "Management Console"}
+              </p>
+            </div>
           </div>
 
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-2 sm:gap-4 lg:gap-6 shrink-0">
             {/* Theme Toggle Button */}
             <button
               onClick={toggleTheme}
               title={`Switch to ${resolvedTheme === "dark" ? "Light" : "Dark"} Mode (Appearance Settings)`}
+              aria-label={`Switch to ${resolvedTheme === "dark" ? "Light" : "Dark"} Mode`}
               className="p-2 bg-white border border-natural-border rounded-lg relative hover:bg-natural-bg transition-all shadow-xs cursor-pointer text-natural-text-main hover:scale-105 active:scale-95"
             >
               {resolvedTheme === "dark" ? (
@@ -211,6 +254,8 @@ function AppContent() {
             <div className="flex items-center gap-2 relative" ref={notificationRef}>
               <button
                 onClick={() => setIsNotificationOpen(!isNotificationOpen)}
+                aria-label="Notifications"
+                aria-expanded={isNotificationOpen}
                 className={cn(
                   "p-2 bg-white border border-natural-border rounded-lg relative hover:bg-natural-bg transition-colors shadow-xs cursor-pointer",
                   isNotificationOpen && "ring-2 ring-natural-accent/20 bg-natural-bg"
@@ -234,10 +279,10 @@ function AppContent() {
               />
             </div>
 
-            <div className="h-8 w-px bg-natural-border" />
+            <div className="hidden sm:block h-8 w-px bg-natural-border" />
 
-            <div className="flex items-center gap-3">
-              <div className="text-right">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="text-right hidden md:block">
                 <p className="text-xs font-bold text-natural-text-main uppercase tracking-tight">
                   {currentUser.name}
                 </p>
@@ -248,6 +293,7 @@ function AppContent() {
               <button
                 onClick={() => setActiveTab("setting")}
                 title="Go to Settings"
+                aria-label="Go to Account Settings"
                 className="w-9 h-9 rounded-lg bg-natural-accent/10 border border-natural-accent/20 flex items-center justify-center text-natural-accent font-bold text-xs select-none uppercase hover:bg-natural-accent/20 transition-colors cursor-pointer"
               >
                 {currentUser.name
@@ -257,8 +303,9 @@ function AppContent() {
               </button>
               <button
                 onClick={() => logout()}
-                className="p-2 ml-1 text-natural-text-light hover:text-red-500 hover:bg-white rounded-lg transition-all cursor-pointer"
+                className="p-2 text-natural-text-light hover:text-red-500 hover:bg-white rounded-lg transition-all cursor-pointer"
                 title="Sign Out"
+                aria-label="Sign Out"
               >
                 <LogOut className="w-4 h-4" />
               </button>

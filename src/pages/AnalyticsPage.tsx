@@ -256,13 +256,13 @@ export function AnalyticsPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="relative inline-block">
+        <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 w-full md:w-auto">
+          <div className="relative inline-block flex-1 sm:flex-initial">
             <Filter className="w-3.5 h-3.5 absolute left-3.5 top-1/2 -translate-y-1/2 text-natural-text-main pointer-events-none" />
             <select
               value={timeRange}
               onChange={(e) => setTimeRange(e.target.value)}
-              className="appearance-none pl-9 pr-8 py-2.5 border border-natural-border rounded-xl text-xs font-bold text-natural-text-main bg-white hover:bg-natural-bg/50 transition-all uppercase tracking-widest outline-none cursor-pointer shadow-xs"
+              className="w-full sm:w-auto appearance-none pl-9 pr-8 py-2.5 border border-natural-border rounded-xl text-xs font-bold text-natural-text-main bg-white hover:bg-natural-bg/50 transition-all uppercase tracking-widest outline-none cursor-pointer shadow-xs"
             >
               <option value="all">All Time</option>
               {availableYears.map((year) => (
@@ -276,17 +276,17 @@ export function AnalyticsPage() {
 
           <button
             onClick={handleExportReport}
-            className="flex items-center gap-2 bg-natural-accent text-white px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm cursor-pointer"
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-natural-accent text-white px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm cursor-pointer whitespace-nowrap"
           >
-            <Download className="w-4 h-4" />
+            <Download className="w-4 h-4 shrink-0" />
             Export CSV Report
           </button>
         </div>
       </div>
 
       {/* KPI Insight Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-        <div className="glass-card p-5 bg-white border-l-4 border-natural-accent">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4">
+        <div className="glass-card p-4 sm:p-5 bg-white border-l-4 border-natural-accent">
           <div className="flex items-center justify-between text-natural-text-light mb-2">
             <span className="text-xs font-bold uppercase tracking-wider">Total Revenue</span>
           </div>
@@ -334,7 +334,7 @@ export function AnalyticsPage() {
           </span>
         </div>
 
-        <div className="glass-card p-5 bg-white">
+        <div className="col-span-2 sm:col-span-1 glass-card p-4 sm:p-5 bg-white">
           <div className="flex items-center justify-between text-natural-text-light mb-2">
             <span className="text-xs font-bold uppercase tracking-wider">Equipment Monitoring Status</span>
           </div>
@@ -353,7 +353,7 @@ export function AnalyticsPage() {
       </div>
 
       {/* Main Row: Monthly Revenue & Events Chart */}
-      <div className="glass-card p-6 bg-white space-y-4">
+      <div className="glass-card p-4 sm:p-6 bg-white space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-natural-border pb-4">
           <div>
             <h3 className="font-serif font-bold text-lg text-natural-text-main flex items-center gap-2">
@@ -377,7 +377,7 @@ export function AnalyticsPage() {
           </div>
         </div>
 
-        <div className="h-[320px] w-full pt-4">
+        <div className="h-[260px] sm:h-[320px] w-full pt-4">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={monthlyData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={resolvedTheme === "dark" ? "#2e3028" : "#E8E7E0"} />
@@ -441,7 +441,7 @@ export function AnalyticsPage() {
       {/* Second Row: Package Performance & Event Types */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Package Revenue Share */}
-        <div className="glass-card p-6 bg-white flex flex-col justify-between">
+        <div className="glass-card p-4 sm:p-6 bg-white flex flex-col justify-between">
           <div>
             <div className="border-b border-natural-border pb-4 mb-4">
               <h3 className="font-serif font-bold text-lg text-natural-text-main flex items-center gap-2">
@@ -518,7 +518,7 @@ export function AnalyticsPage() {
         {/* Event Type & User Accounts */}
         <div className="space-y-8">
           {/* Event Types Card */}
-          <div className="glass-card p-6 bg-white">
+          <div className="glass-card p-4 sm:p-6 bg-white">
             <div className="border-b border-natural-border pb-4 mb-4">
               <h3 className="font-serif font-bold text-lg text-natural-text-main flex items-center gap-2">
                 <Layers className="w-5 h-5 text-natural-accent" />
@@ -555,7 +555,7 @@ export function AnalyticsPage() {
           </div>
 
           {/* Equipment Monitoring Health & Stock Distribution */}
-          <div className="glass-card p-6 bg-white">
+          <div className="glass-card p-4 sm:p-6 bg-white">
             <div className="border-b border-natural-border pb-4 mb-4">
               <h3 className="font-serif font-bold text-lg text-natural-text-main flex items-center gap-2">
                 <Boxes className="w-5 h-5 text-natural-accent" />

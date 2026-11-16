@@ -75,8 +75,8 @@ export function RecentActivities({ onViewLogs }: { onViewLogs?: () => void }) {
   };
 
   return (
-    <div className="glass-card p-6 h-full flex flex-col bg-white">
-      <div className="flex items-center justify-between mb-6">
+    <div className="glass-card p-4 sm:p-6 h-full flex flex-col bg-white">
+      <div className="flex items-center justify-between gap-2 mb-4 sm:mb-6">
         <div>
           <h3 className="text-lg font-bold text-natural-text-main font-serif flex items-center gap-2">
             <History className="w-4 h-4 text-natural-accent" />
@@ -88,7 +88,7 @@ export function RecentActivities({ onViewLogs }: { onViewLogs?: () => void }) {
         </div>
         <button
           onClick={onViewLogs}
-          className="text-[0.7rem] font-bold text-natural-accent hover:underline flex items-center uppercase tracking-widest cursor-pointer"
+          className="text-[0.7rem] font-bold text-natural-accent hover:underline flex items-center uppercase tracking-widest cursor-pointer shrink-0"
         >
           View All <ChevronRight className="w-3 h-3 ml-0.5" />
         </button>

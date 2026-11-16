@@ -13,14 +13,14 @@ export function LoginPage() {
 
   if (currentUser) {
     return (
-      <div className="min-h-screen bg-natural-bg flex items-center justify-center p-6 bg-[url('https://images.unsplash.com/photo-1519222970733-f546218fa6d7?q=80&w=2670&auto=format&fit=crop')] bg-cover bg-center">
+      <div className="min-h-dvh bg-natural-bg flex items-center justify-center p-4 sm:p-6 bg-[url('https://images.unsplash.com/photo-1519222970733-f546218fa6d7?q=80&w=2670&auto=format&fit=crop')] bg-cover bg-center">
         <div className="absolute inset-0 bg-natural-sidebar/40 backdrop-blur-xs" />
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           className="w-full max-w-md relative"
         >
-          <div className="glass-card p-10 shadow-2xl border-white/20 text-center">
+          <div className="glass-card p-6 sm:p-10 shadow-2xl border-white/20 text-center">
             <div className="flex flex-col items-center mb-6">
               <div className="w-16 h-16 bg-natural-accent rounded-2xl flex items-center justify-center mb-4 shadow-lg rotate-3" />
               <h1 className="text-2xl font-serif font-bold text-natural-text-main">Already signed in</h1>
@@ -62,7 +62,7 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-natural-bg flex items-center justify-center p-6 bg-[url('https://images.unsplash.com/photo-1519222970733-f546218fa6d7?q=80&w=2670&auto=format&fit=crop')] bg-cover bg-center">
+    <div className="min-h-dvh bg-natural-bg flex items-center justify-center p-4 sm:p-6 bg-[url('https://images.unsplash.com/photo-1519222970733-f546218fa6d7?q=80&w=2670&auto=format&fit=crop')] bg-cover bg-center">
       <div className="absolute inset-0 bg-natural-sidebar/40 backdrop-blur-xs" />
       
       <motion.div 
@@ -70,12 +70,12 @@ export function LoginPage() {
         animate={{ opacity: 1, y: 0 }}
         className="w-full max-w-md relative"
       >
-        <div className="glass-card p-10 shadow-2xl border-white/20">
-          <div className="flex flex-col items-center mb-10">
-            <div className="w-16 h-16 bg-natural-accent rounded-2xl flex items-center justify-center mb-4 shadow-lg rotate-3">
-              <Utensils className="w-8 h-8 text-white" />
+        <div className="glass-card p-6 sm:p-10 shadow-2xl border-white/20">
+          <div className="flex flex-col items-center mb-8 sm:mb-10">
+            <div className="w-14 h-14 sm:w-16 sm:h-16 bg-natural-accent rounded-2xl flex items-center justify-center mb-4 shadow-lg rotate-3">
+              <Utensils className="w-7 h-7 sm:w-8 sm:h-8 text-white" />
             </div>
-            <h1 className="text-3xl font-serif font-bold text-natural-text-main text-center">Roxan Policarpio Events & Catering</h1>
+            <h1 className="text-2xl sm:text-3xl font-serif font-bold text-natural-text-main text-center">Roxan Policarpio Events & Catering</h1>
             <p className="text-natural-text-light text-[0.7rem] font-bold uppercase tracking-[0.2em] mt-2">Management Portal</p>
           </div>
 

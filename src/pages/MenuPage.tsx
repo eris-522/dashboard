@@ -395,7 +395,7 @@ export function MenuPage() {
           "absolute top-4 right-4 flex items-center gap-1 transition-opacity",
           item.status === "Archived"
             ? "opacity-100"
-            : "opacity-0 group-hover:opacity-100",
+            : "opacity-100 lg:opacity-0 lg:group-hover:opacity-100",
         )}
       >
         {item.status !== "Archived" ? (
@@ -493,14 +493,14 @@ export function MenuPage() {
 
         <button
           onClick={handleAddClick}
-          className="flex items-center gap-2 bg-natural-accent text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-natural-accent/90 transition-all shadow-sm"
+          className="w-full md:w-auto flex items-center justify-center gap-2 bg-natural-accent text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-natural-accent/90 transition-all shadow-sm"
         >
           <Plus className="w-4 h-4" />
           Add New Dish
         </button>
       </div>
 
-      <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none w-full">
+      <div className="flex items-center gap-2 overflow-x-auto pb-2 no-scrollbar w-full">
         {categories
           .filter((c) => c !== "Archived")
           .map((cat) => (
@@ -767,8 +767,8 @@ export function MenuPage() {
       </div>
 
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in duration-200 border border-natural-border">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[92dvh] overflow-hidden flex flex-col animate-in zoom-in duration-200 border border-natural-border">
             <div className="p-6 border-b border-natural-border flex items-center justify-between shrink-0">
               <h3 className="text-lg font-serif font-bold text-natural-text-main">
                 {editingItem ? "Edit Dish" : "Add New Dish"}

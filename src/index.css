@@ -83,6 +83,11 @@
     border-color: var(--color-natural-border);
   }
 
+  html,
+  body {
+    overflow-x: clip;
+  }
+
   body {
     background-color: var(--color-natural-bg);
     color: var(--color-natural-text-main);
@@ -197,4 +202,20 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-natural-text-light);
+}
+
+/* Hide scrollbars cleanly for swipeable mobile tab/filter bars */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Ensure touch screens get comfortable hit areas and never lose hover-only controls */
+@media (pointer: coarse) {
+  :where(button, select, [role="button"], [role="tab"]) {
+    min-block-size: 36px;
+  }
 }

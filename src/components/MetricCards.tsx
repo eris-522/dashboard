@@ -76,8 +76,8 @@ export function MetricCards({ onNavigate }: MetricCardsProps = {}) {
 
   return (
     <div className={cn(
-      "grid gap-6",
-      stats.length === 4 ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-4" : "grid-cols-1 md:grid-cols-3"
+      "grid gap-3 sm:gap-6",
+      stats.length === 4 ? "grid-cols-2 lg:grid-cols-4" : "grid-cols-1 sm:grid-cols-3"
     )}>
       {stats.map((stat) => (
         <div
@@ -85,21 +85,21 @@ export function MetricCards({ onNavigate }: MetricCardsProps = {}) {
           id={stat.id}
           onClick={stat.onClick}
           className={cn(
-            "glass-card p-6 transition-all duration-250",
+            "glass-card p-4 sm:p-6 transition-all duration-250",
             stat.cardBorder,
             stat.onClick && "cursor-pointer hover:shadow-md hover:scale-[1.01]"
           )}
         >
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-[0.7rem] font-medium text-natural-text-light uppercase tracking-[0.1em] mb-2">{stat.label}</p>
-              <h3 className="text-3xl font-semibold text-natural-text-main font-serif">{stat.value}</h3>
-              <p className="mt-2 text-[0.7rem] font-medium">
+          <div className="flex justify-between items-start gap-2">
+            <div className="min-w-0">
+              <p className="text-[0.65rem] sm:text-[0.7rem] font-medium text-natural-text-light uppercase tracking-[0.08em] sm:tracking-[0.1em] mb-1.5 sm:mb-2 truncate">{stat.label}</p>
+              <h3 className="text-2xl sm:text-3xl font-semibold text-natural-text-main font-serif truncate">{stat.value}</h3>
+              <p className="mt-1.5 sm:mt-2 text-[0.65rem] sm:text-[0.7rem] font-medium truncate">
                 <span className={stat.badgeColor}>{stat.change}</span>
               </p>
             </div>
-            <div className={cn("p-2 rounded-lg border", stat.iconBg)}>
-              <stat.icon className="w-5 h-5" />
+            <div className={cn("p-1.5 sm:p-2 rounded-lg border shrink-0", stat.iconBg)}>
+              <stat.icon className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
           </div>
         </div>
