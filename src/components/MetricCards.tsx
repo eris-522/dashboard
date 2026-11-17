@@ -31,6 +31,7 @@ export function MetricCards({ onNavigate }: MetricCardsProps = {}) {
   const stats = [
     {
       id: 'total-booking',
+      shortLabel: 'Confirmed',
       label: 'Confirmed Bookings',
       value: confirmedCount.toString(),
       change: 'Active',
@@ -41,6 +42,7 @@ export function MetricCards({ onNavigate }: MetricCardsProps = {}) {
     },
     {
       id: 'total-events',
+      shortLabel: 'Pending',
       label: 'Total Pendings',
       value: pendingCount.toString(),
       change: 'Awaiting Response',
@@ -51,6 +53,7 @@ export function MetricCards({ onNavigate }: MetricCardsProps = {}) {
     },
     {
       id: 'total-users',
+      shortLabel: 'Active Users',
       label: 'Total Active Users',
       value: activeUserCount.toString(),
       change: 'Currently Active',
@@ -62,6 +65,7 @@ export function MetricCards({ onNavigate }: MetricCardsProps = {}) {
     ...(totalOutsourced > 0 ? [
       {
         id: 'total-outsourced',
+        shortLabel: 'Outsourced',
         label: 'Outsourced (Rent)',
         value: `${totalOutsourced.toLocaleString()} Units`,
         change: `${outsourcedItemsCount} Item${outsourcedItemsCount === 1 ? '' : 's'} to Rent`,
@@ -85,23 +89,26 @@ export function MetricCards({ onNavigate }: MetricCardsProps = {}) {
           id={stat.id}
           onClick={stat.onClick}
           className={cn(
-            "glass-card p-4 sm:p-6 transition-all duration-250",
+            "glass-card p-3.5 sm:p-6 transition-all duration-250",
             stat.cardBorder,
             stat.onClick && "cursor-pointer hover:shadow-md hover:scale-[1.01]"
           )}
         >
-          <div className="flex justify-between items-start gap-2">
-            <div className="min-w-0">
-              <p className="text-[0.65rem] sm:text-[0.7rem] font-medium text-natural-text-light uppercase tracking-[0.08em] sm:tracking-[0.1em] mb-1.5 sm:mb-2 truncate">{stat.label}</p>
-              <h3 className="text-2xl sm:text-3xl font-semibold text-natural-text-main font-serif truncate">{stat.value}</h3>
-              <p className="mt-1.5 sm:mt-2 text-[0.65rem] sm:text-[0.7rem] font-medium truncate">
-                <span className={stat.badgeColor}>{stat.change}</span>
-              </p>
-            </div>
+          <div className="flex items-center justify-between gap-1.5 mb-1.5 sm:mb-2">
+            <p className="text-[0.65rem] sm:text-[0.7rem] font-medium text-natural-text-light uppercase tracking-[0.06em] sm:tracking-[0.1em] leading-tight">
+              <span className="sm:hidden">{stat.shortLabel}</span>
+              <span className="hidden sm:inline">{stat.label}</span>
+            </p>
             <div className={cn("p-1.5 sm:p-2 rounded-lg border shrink-0", stat.iconBg)}>
               <stat.icon className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
           </div>
+          <h3 className="text-xl sm:text-3xl font-semibold text-natural-text-main font-serif leading-tight">
+            {stat.value}
+          </h3>
+          <p className="mt-1 sm:mt-2 text-[0.65rem] sm:text-[0.7rem] font-medium leading-snug">
+            <span className={stat.badgeColor}>{stat.change}</span>
+          </p>
         </div>
       ))}
     </div>

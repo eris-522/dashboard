@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bell, X, AlertTriangle, CheckCircle, Sliders, CreditCard, MessageSquare, ShieldCheck } from 'lucide-react';
+import { Bell, X, AlertTriangle, CheckCircle, CheckCheck, Sliders, CreditCard, MessageSquare, ShieldCheck } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { useBooking, Booking } from '../context/BookingContext';
@@ -229,9 +229,10 @@ export function NotificationCenter({
                   {showAll ? "All Notifications" : "Recent Notifications"}
                 </h3>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5">
                 {hasUnread && (
                   <button
+                    type="button"
                     onClick={() => {
                       const newlyRead: string[] = [];
                       allNotifications.forEach((item) => {
@@ -242,14 +243,18 @@ export function NotificationCenter({
                       });
                       setReadDuringSession((prev) => [...prev, ...newlyRead]);
                     }}
-                    className="text-[9px] font-bold text-natural-accent hover:underline uppercase tracking-widest cursor-pointer"
+                    title="Mark all as read"
+                    aria-label="Mark all as read"
+                    className="p-1.5 text-natural-accent hover:bg-natural-bg rounded-lg transition-colors cursor-pointer flex items-center justify-center"
                   >
-                    Mark all read
+                    <CheckCheck className="w-4 h-4" />
                   </button>
                 )}
                 <button
+                  type="button"
                   onClick={onClose}
-                  className="p-1 hover:bg-natural-bg rounded-lg transition-colors cursor-pointer"
+                  aria-label="Close notifications"
+                  className="p-1.5 hover:bg-natural-bg rounded-lg transition-colors cursor-pointer flex items-center justify-center"
                 >
                   <X className="w-4 h-4 text-natural-text-light" />
                 </button>

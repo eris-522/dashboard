@@ -160,7 +160,7 @@ function AppContent() {
         {/* Top Header */}
         <header
           className={cn(
-            "sticky top-0 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 lg:pt-8 pb-3 sm:pb-4 mb-4 flex items-center justify-between gap-3 transition-colors duration-250",
+            "sticky top-0 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 lg:pt-8 pb-3 sm:pb-4 mb-4 flex items-center justify-between gap-2 sm:gap-3 transition-colors duration-250",
             isNotificationOpen ? "z-50" : "z-30"
           )}
         >
@@ -170,7 +170,7 @@ function AppContent() {
             className="absolute inset-0 bg-natural-bg/95 backdrop-blur-md -z-10 border-b border-natural-border/40 lg:border-b-0 pointer-events-none"
           />
 
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <button
               type="button"
               onClick={() => {
@@ -186,56 +186,106 @@ function AppContent() {
             </button>
 
             <div className="min-w-0">
-              <h2 className="text-lg sm:text-2xl font-serif font-bold text-natural-text-main leading-tight truncate">
-                {activeTab === "dashboard"
-                  ? "Executive Dashboard"
-                  : activeTab === "user"
-                    ? "Account Management"
-                    : activeTab === "booking"
-                      ? "Event Logistics"
-                      : activeTab === "menu"
-                        ? "Culinary Workspace"
-                        : activeTab === "packages"
-                          ? "Package Bundles"
-                          : activeTab === "inventory"
-                            ? "Equipment Monitoring"
-                            : activeTab === "cms"
-                              ? "Website Content Management"
-                              : activeTab === "analytics"
-                                ? "Insights & Performance"
-                                : activeTab === "audit-trail"
-                                  ? "Administrative Log"
-                                  : activeTab === "setting"
-                                    ? "Account Preferences"
-                                    : "Catering Workspace"}
+              <h2 className="text-sm sm:text-2xl font-serif font-bold text-natural-text-main leading-tight truncate">
+                <span className="sm:hidden">
+                  {activeTab === "dashboard"
+                    ? "Dashboard"
+                    : activeTab === "user"
+                      ? "Users"
+                      : activeTab === "booking"
+                        ? "Bookings"
+                        : activeTab === "menu"
+                          ? "Menu"
+                          : activeTab === "packages"
+                            ? "Packages"
+                            : activeTab === "inventory"
+                              ? "Equipment Monitoring"
+                              : activeTab === "cms"
+                                ? "Website CMS"
+                                : activeTab === "analytics"
+                                  ? "Analytics"
+                                  : activeTab === "audit-trail"
+                                    ? "Audit Trail"
+                                    : activeTab === "setting"
+                                      ? "Settings"
+                                      : "Workspace"}
+                </span>
+                <span className="hidden sm:inline">
+                  {activeTab === "dashboard"
+                    ? "Executive Dashboard"
+                    : activeTab === "user"
+                      ? "Account Management"
+                      : activeTab === "booking"
+                        ? "Event Logistics"
+                        : activeTab === "menu"
+                          ? "Culinary Workspace"
+                          : activeTab === "packages"
+                            ? "Package Bundles"
+                            : activeTab === "inventory"
+                              ? "Equipment Monitoring"
+                              : activeTab === "cms"
+                                ? "Website Content Management"
+                                : activeTab === "analytics"
+                                  ? "Insights & Performance"
+                                  : activeTab === "audit-trail"
+                                    ? "Administrative Log"
+                                    : activeTab === "setting"
+                                      ? "Account Preferences"
+                                      : "Catering Workspace"}
+                </span>
               </h2>
-              <p className="text-natural-text-light text-[0.65rem] sm:text-[0.8rem] font-medium uppercase tracking-wider truncate">
-                {activeTab === "dashboard"
-                  ? "Business Intelligence & Logistics"
-                  : activeTab === "user"
-                    ? "User Roles & Access Control"
-                    : activeTab === "booking"
-                      ? "Scheduled Catering & Operations"
-                      : activeTab === "menu"
-                        ? "Menu Development & Equipment Link"
-                        : activeTab === "packages"
-                          ? "Tiered Event Solutions"
-                          : activeTab === "inventory"
-                            ? "Equipment Tracking, Allocation & Logistics"
-                            : activeTab === "cms"
-                              ? "Customer Portal Customization & Real-Time Sync"
-                              : activeTab === "analytics"
-                                ? "Data-Driven Growth Strategies"
-                                : activeTab === "audit-trail"
-                                  ? "Chronological System Activity Trail"
-                                  : activeTab === "setting"
-                                    ? "Workflow & Environment Configuration"
-                                    : "Management Console"}
+              <p className="text-natural-text-light text-[0.6rem] sm:text-[0.8rem] font-medium uppercase tracking-wide sm:tracking-wider truncate">
+                <span className="sm:hidden">
+                  {activeTab === "dashboard"
+                    ? "Overview & Logistics"
+                    : activeTab === "user"
+                      ? "Roles & Access"
+                      : activeTab === "booking"
+                        ? "Catering & Schedule"
+                        : activeTab === "menu"
+                          ? "Dishes & Equipment"
+                          : activeTab === "packages"
+                            ? "Event Bundles"
+                            : activeTab === "inventory"
+                              ? "Stock & Rentals"
+                              : activeTab === "cms"
+                                ? "Live Portal Sync"
+                                : activeTab === "analytics"
+                                  ? "Revenue & Metrics"
+                                  : activeTab === "audit-trail"
+                                    ? "Activity History"
+                                    : activeTab === "setting"
+                                      ? "Profile & Theme"
+                                      : "Admin Console"}
+                </span>
+                <span className="hidden sm:inline">
+                  {activeTab === "dashboard"
+                    ? "Business Intelligence & Logistics"
+                    : activeTab === "user"
+                      ? "User Roles & Access Control"
+                      : activeTab === "booking"
+                        ? "Scheduled Catering & Operations"
+                        : activeTab === "menu"
+                          ? "Menu Development & Equipment Link"
+                          : activeTab === "packages"
+                            ? "Tiered Event Solutions"
+                            : activeTab === "inventory"
+                              ? "Equipment Tracking, Allocation & Logistics"
+                              : activeTab === "cms"
+                                ? "Customer Portal Customization & Real-Time Sync"
+                                : activeTab === "analytics"
+                                  ? "Data-Driven Growth Strategies"
+                                  : activeTab === "audit-trail"
+                                    ? "Chronological System Activity Trail"
+                                    : activeTab === "setting"
+                                      ? "Workflow & Environment Configuration"
+                                      : "Management Console"}
+                </span>
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-4 lg:gap-6 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-4 lg:gap-6 shrink-0">
             {/* Theme Toggle Button */}
             <button
               onClick={toggleTheme}
@@ -281,7 +331,7 @@ function AppContent() {
 
             <div className="hidden sm:block h-8 w-px bg-natural-border" />
 
-            <div className="flex items-center gap-2 sm:gap-3">
+            <div className="flex items-center gap-1.5 sm:gap-3">
               <div className="text-right hidden md:block">
                 <p className="text-xs font-bold text-natural-text-main uppercase tracking-tight">
                   {currentUser.name}

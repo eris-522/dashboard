@@ -91,7 +91,7 @@ export function LoginPage() {
                   className="w-full pl-10 pr-4 py-3 bg-white/50 border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white transition-all shadow-xs"
                   placeholder="admin@example.com"
                 />
-                <Mail className="absolute left-3.5 top-3.5 w-4 h-4 text-natural-text-light" />
+                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none w-4 h-4 text-natural-text-light" />
               </div>
             </div>
 
@@ -106,11 +106,11 @@ export function LoginPage() {
                   className="w-full pl-10 pr-10 py-3 bg-white/50 border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white transition-all shadow-xs"
                   placeholder="••••••••"
                 />
-                <Lock className="absolute left-3.5 top-3.5 w-4 h-4 text-natural-text-light" />
+                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none w-4 h-4 text-natural-text-light" />
                 <button
                   type="button"
                   onClick={() => setShowPassword((prev) => !prev)}
-                  className="absolute right-3.5 top-3.5 text-natural-text-light hover:text-natural-accent transition-colors cursor-pointer"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center p-1 text-natural-text-light hover:text-natural-accent transition-colors cursor-pointer"
                   aria-label={showPassword ? "Hide password" : "Show password"}
                   title={showPassword ? "Hide password" : "Show password"}
                 >

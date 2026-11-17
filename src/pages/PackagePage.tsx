@@ -606,27 +606,8 @@ export function PackagePage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-serif font-bold text-natural-text-main">
-            Offerings Management
-          </h2>
-          <p className="text-natural-text-light text-xs font-medium uppercase tracking-wider">
-            Configure event bundles
-          </p>
-        </div>
-
-        <button
-          onClick={handleCreateNew}
-          className="w-full md:w-auto flex items-center justify-center gap-2 bg-natural-accent text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-natural-accent/90 transition-all shadow-sm"
-        >
-          <Plus className="w-4 h-4" />
-          Add Package
-        </button>
-      </div>
-
-      <div className="glass-card bg-white dark:bg-natural-card p-4 flex flex-col md:flex-row gap-4 items-center justify-between border border-natural-border/50 rounded-xl">
-        <div className="relative w-full md:w-80">
+      <div className="glass-card bg-white dark:bg-natural-card p-4 flex flex-col lg:flex-row gap-4 items-center justify-between border border-natural-border/50 rounded-xl">
+        <div className="relative w-full lg:w-80">
           <input
             type="text"
             placeholder="Search packages by name, tag..."
@@ -637,11 +618,11 @@ export function PackagePage() {
           <Search className="absolute left-3 top-2.5 w-4 h-4 text-natural-text-light" />
         </div>
 
-        <div className="flex items-center gap-2 w-full md:w-auto">
+        <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full lg:w-auto">
           <button
             onClick={() => setShowArchived(false)}
             className={cn(
-              "px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all w-full md:w-auto",
+              "px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all flex-1 sm:flex-initial",
               !showArchived
                 ? "bg-natural-accent text-white shadow-sm"
                 : "bg-natural-bg text-natural-text-light hover:text-natural-text-main",
@@ -652,7 +633,7 @@ export function PackagePage() {
           <button
             onClick={() => setShowArchived(true)}
             className={cn(
-              "px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2 w-full md:w-auto",
+              "px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2 flex-1 sm:flex-initial",
               showArchived
                 ? "bg-natural-text-main text-white shadow-sm"
                 : "bg-natural-bg text-natural-text-light hover:text-natural-text-main",
@@ -660,6 +641,13 @@ export function PackagePage() {
           >
             <Archive className="w-3.5 h-3.5" />
             Archived
+          </button>
+          <button
+            onClick={handleCreateNew}
+            className="w-full sm:w-auto flex items-center justify-center gap-2 bg-natural-accent text-white px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-natural-accent/90 transition-all shadow-sm shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            Add Package
           </button>
         </div>
       </div>

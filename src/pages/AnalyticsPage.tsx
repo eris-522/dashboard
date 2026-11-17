@@ -245,52 +245,41 @@ export function AnalyticsPage() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-12">
-      {/* Top Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-serif font-bold text-natural-text-main">
-            Business Analytics & Intelligence ({timeRange === "all" ? "All Time" : `Year ${timeRange}`})
-          </h2>
-          <p className="text-natural-text-light text-xs font-medium uppercase tracking-wider">
-            Real-time catering financial performance, event metrics, and logistics utilization
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 w-full md:w-auto">
-          <div className="relative inline-block flex-1 sm:flex-initial">
-            <Filter className="w-3.5 h-3.5 absolute left-3.5 top-1/2 -translate-y-1/2 text-natural-text-main pointer-events-none" />
-            <select
-              value={timeRange}
-              onChange={(e) => setTimeRange(e.target.value)}
-              className="w-full sm:w-auto appearance-none pl-9 pr-8 py-2.5 border border-natural-border rounded-xl text-xs font-bold text-natural-text-main bg-white hover:bg-natural-bg/50 transition-all uppercase tracking-widest outline-none cursor-pointer shadow-xs"
-            >
-              <option value="all">All Time</option>
-              {availableYears.map((year) => (
-                <option key={year} value={year.toString()}>
-                  Year {year}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-natural-text-main pointer-events-none" />
-          </div>
-
-          <button
-            onClick={handleExportReport}
-            className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-natural-accent text-white px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm cursor-pointer whitespace-nowrap"
+      {/* Top Toolbar */}
+      <div className="flex flex-wrap items-center justify-end gap-2.5 sm:gap-3 w-full">
+        <div className="relative inline-block flex-1 sm:flex-initial">
+          <Filter className="w-3.5 h-3.5 absolute left-3.5 top-1/2 -translate-y-1/2 text-natural-text-main pointer-events-none" />
+          <select
+            value={timeRange}
+            onChange={(e) => setTimeRange(e.target.value)}
+            className="w-full sm:w-auto appearance-none pl-9 pr-8 py-2.5 border border-natural-border rounded-xl text-xs font-bold text-natural-text-main bg-white hover:bg-natural-bg/50 transition-all uppercase tracking-widest outline-none cursor-pointer shadow-xs"
           >
-            <Download className="w-4 h-4 shrink-0" />
-            Export CSV Report
-          </button>
+            <option value="all">All Time</option>
+            {availableYears.map((year) => (
+              <option key={year} value={year.toString()}>
+                Year {year}
+              </option>
+            ))}
+          </select>
+          <ChevronDown className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-natural-text-main pointer-events-none" />
         </div>
+
+        <button
+          onClick={handleExportReport}
+          className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-natural-accent text-white px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm cursor-pointer whitespace-nowrap"
+        >
+          <Download className="w-4 h-4 shrink-0" />
+          Export CSV Report
+        </button>
       </div>
 
       {/* KPI Insight Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4">
-        <div className="glass-card p-4 sm:p-5 bg-white border-l-4 border-natural-accent">
+        <div className="glass-card p-3.5 sm:p-5 bg-white border-l-4 border-natural-accent">
           <div className="flex items-center justify-between text-natural-text-light mb-2">
             <span className="text-xs font-bold uppercase tracking-wider">Total Revenue</span>
           </div>
-          <h4 className="text-xl font-bold font-serif text-natural-text-main">
+          <h4 className="text-lg sm:text-xl font-bold font-serif text-natural-text-main">
             ₱{totalRevenue.toLocaleString()}
           </h4>
           <span className="text-xs font-bold text-natural-accent block mt-1">
@@ -298,11 +287,11 @@ export function AnalyticsPage() {
           </span>
         </div>
 
-        <div className="glass-card p-5 bg-white">
+        <div className="glass-card p-3.5 sm:p-5 bg-white">
           <div className="flex items-center justify-between text-natural-text-light mb-2">
             <span className="text-xs font-bold uppercase tracking-wider">Avg. Event Value</span>
           </div>
-          <h4 className="text-xl font-bold font-serif text-natural-text-main">
+          <h4 className="text-lg sm:text-xl font-bold font-serif text-natural-text-main">
             ₱{Math.round(avgEventValue).toLocaleString()}
           </h4>
           <span className="text-xs font-bold text-natural-text-light block mt-1">
@@ -310,11 +299,11 @@ export function AnalyticsPage() {
           </span>
         </div>
 
-        <div className="glass-card p-5 bg-white">
+        <div className="glass-card p-3.5 sm:p-5 bg-white">
           <div className="flex items-center justify-between text-natural-text-light mb-2">
             <span className="text-xs font-bold uppercase tracking-wider">Total Guests (Pax)</span>
           </div>
-          <h4 className="text-xl font-bold font-serif text-natural-text-main">
+          <h4 className="text-lg sm:text-xl font-bold font-serif text-natural-text-main">
             {totalPaxServed.toLocaleString()}
           </h4>
           <span className="text-xs font-bold text-blue-700 block mt-1">
@@ -322,11 +311,11 @@ export function AnalyticsPage() {
           </span>
         </div>
 
-        <div className="glass-card p-5 bg-white">
+        <div className="glass-card p-3.5 sm:p-5 bg-white">
           <div className="flex items-center justify-between text-natural-text-light mb-2">
             <span className="text-xs font-bold uppercase tracking-wider">Equipment Reserved</span>
           </div>
-          <h4 className="text-xl font-bold font-serif text-natural-text-main">
+          <h4 className="text-lg sm:text-xl font-bold font-serif text-natural-text-main">
             {totalAllocatedEquipment.toLocaleString()}
           </h4>
           <span className="text-xs font-bold text-purple-700 block mt-1">
@@ -334,11 +323,11 @@ export function AnalyticsPage() {
           </span>
         </div>
 
-        <div className="col-span-2 sm:col-span-1 glass-card p-4 sm:p-5 bg-white">
+        <div className="col-span-2 sm:col-span-1 glass-card p-3.5 sm:p-5 bg-white">
           <div className="flex items-center justify-between text-natural-text-light mb-2">
             <span className="text-xs font-bold uppercase tracking-wider">Equipment Monitoring Status</span>
           </div>
-          <h4 className="text-xl font-bold font-serif text-natural-text-main">
+          <h4 className="text-lg sm:text-xl font-bold font-serif text-natural-text-main">
             {lowStockCount === 0 ? "Optimal" : `${lowStockCount} Low`}
           </h4>
           <span

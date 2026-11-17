@@ -296,17 +296,6 @@ export function UserPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-serif font-bold text-natural-text-main">
-            User Management
-          </h2>
-          <p className="text-natural-text-light text-xs font-medium uppercase tracking-wider">
-            Manage your clients
-          </p>
-        </div>
-      </div>
-
       <div className="glass-card bg-white overflow-hidden">
         <div className="p-4 border-b border-natural-border flex flex-col md:flex-row gap-4 items-center justify-between">
           <div className="relative w-full md:w-80">
@@ -710,9 +699,8 @@ export function UserPage() {
               </button>
               <button
                 onClick={handleConfirmSave}
-                className="flex-1 bg-natural-accent text-white py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm flex items-center justify-center gap-2"
+                className="flex-1 bg-natural-accent text-white px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm flex items-center justify-center"
               >
-                <Check className="w-4 h-4" />
                 Update Profile
               </button>
             </div>

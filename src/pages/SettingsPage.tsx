@@ -764,17 +764,8 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-20">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-serif font-bold text-natural-text-main">
-            System Settings
-          </h2>
-          <p className="text-natural-text-light text-[0.8rem] font-medium uppercase tracking-wider">
-            Configure your personalized workspace preferences
-          </p>
-        </div>
-
-        {activeSection !== "security" && (
+      {activeSection !== "security" && (
+        <div className="flex justify-end">
           <button
             type="button"
             onClick={() => handleInitiateSaveClick()}
@@ -783,8 +774,8 @@ export function SettingsPage() {
             <Save className="w-4 h-4" />
             Save All Changes
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       <div className="flex flex-col lg:flex-row gap-6 lg:gap-8">
         {/* Navigation Sidebar */}
@@ -1385,7 +1376,7 @@ export function SettingsPage() {
                     Must be at least 6 characters long.
                   </p>
                   <div className="relative">
-                    <Lock className="absolute left-3 top-3 w-4 h-4 text-natural-text-light opacity-40" />
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none w-4 h-4 text-natural-text-light opacity-40" />
                     <input
                       id="admin-new-password"
                       name="new_password"
@@ -1422,7 +1413,7 @@ export function SettingsPage() {
                     <button
                       type="button"
                       onClick={() => setShowNewPassword((prev) => !prev)}
-                      className="absolute right-3 top-2.5 text-natural-text-light hover:text-natural-accent transition-colors cursor-pointer p-0.5"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center p-1 text-natural-text-light hover:text-natural-accent transition-colors cursor-pointer"
                       aria-label={showNewPassword ? "Hide new password" : "Show new password"}
                       title={showNewPassword ? "Hide new password" : "Show new password"}
                     >
@@ -1459,7 +1450,7 @@ export function SettingsPage() {
                     Re-enter your new password to confirm.
                   </p>
                   <div className="relative">
-                    <Lock className="absolute left-3 top-3 w-4 h-4 text-natural-text-light opacity-40" />
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none w-4 h-4 text-natural-text-light opacity-40" />
                     <input
                       id="admin-confirm-password"
                       name="confirm_password"
@@ -1504,7 +1495,7 @@ export function SettingsPage() {
                     <button
                       type="button"
                       onClick={() => setShowConfirmPassword((prev) => !prev)}
-                      className="absolute right-3 top-2.5 text-natural-text-light hover:text-natural-accent transition-colors cursor-pointer p-0.5"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center p-1 text-natural-text-light hover:text-natural-accent transition-colors cursor-pointer"
                       aria-label={
                         showConfirmPassword ? "Hide confirm password" : "Show confirm password"
                       }

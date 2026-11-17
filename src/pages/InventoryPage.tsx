@@ -795,38 +795,6 @@ export function InventoryPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-12">
-      {/* Top Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-serif font-bold text-natural-text-main">
-            Equipment Tracking & Allocation
-          </h2>
-          <p className="text-natural-text-light text-xs font-medium uppercase tracking-wider">
-            Real-time equipment status, event allocations, and return logistics
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={() => refreshItems()}
-            title="Refresh Stock Data"
-            className="p-2.5 border border-natural-border bg-white rounded-lg text-natural-text-main hover:bg-natural-bg transition-all shadow-xs"
-          >
-            <RefreshCw className="w-4 h-4 text-natural-text-light" />
-          </button>
-          <button
-            onClick={() => {
-              setIsAddModalOpen(true);
-              setFormError(null);
-            }}
-            className="flex items-center gap-2 bg-natural-accent text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-natural-accent/90 transition-all shadow-sm"
-          >
-            <Plus className="w-4 h-4" />
-            Add New Item
-          </button>
-        </div>
-      </div>
-
       {/* KPI Stats Cards */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
         <div className="glass-card p-3.5 sm:p-5 bg-white dark:bg-natural-card flex flex-col sm:flex-row items-start sm:items-center gap-2.5 sm:gap-4">
@@ -837,7 +805,7 @@ export function InventoryPage() {
             <p className="text-[11px] sm:text-xs font-bold text-natural-text-light uppercase tracking-wider">
               Total Item Types
             </p>
-            <h4 className="text-xl sm:text-2xl font-bold font-serif text-natural-text-main">
+            <h4 className="text-lg sm:text-2xl font-bold font-serif text-natural-text-main">
               {stats.totalTypes}
             </h4>
           </div>
@@ -849,9 +817,10 @@ export function InventoryPage() {
           </div>
           <div className="min-w-0">
             <p className="text-[11px] sm:text-xs font-bold text-natural-text-light uppercase tracking-wider">
-              Total Units In Stock
+              <span className="sm:hidden">Units In Stock</span>
+              <span className="hidden sm:inline">Total Units In Stock</span>
             </p>
-            <h4 className="text-xl sm:text-2xl font-bold font-serif text-natural-text-main">
+            <h4 className="text-lg sm:text-2xl font-bold font-serif text-natural-text-main">
               {stats.totalUnits.toLocaleString()}
             </h4>
           </div>
@@ -865,7 +834,7 @@ export function InventoryPage() {
             <p className="text-[11px] sm:text-xs font-bold text-natural-text-light uppercase tracking-wider">
               In-Use (Events)
             </p>
-            <h4 className="text-xl sm:text-2xl font-bold font-serif text-green-700 dark:text-emerald-400">
+            <h4 className="text-lg sm:text-2xl font-bold font-serif text-green-700 dark:text-emerald-400">
               {stats.totalAllocated.toLocaleString()} Units
             </h4>
           </div>
@@ -879,7 +848,7 @@ export function InventoryPage() {
             <p className="text-[11px] sm:text-xs font-bold text-natural-text-light uppercase tracking-wider">
               Outsourced (Rent)
             </p>
-            <h4 className="text-xl sm:text-2xl font-bold font-serif text-orange-700 dark:text-orange-400">
+            <h4 className="text-lg sm:text-2xl font-bold font-serif text-orange-700 dark:text-orange-400">
               {stats.totalOutsourced.toLocaleString()} Units
             </h4>
           </div>
@@ -890,8 +859,8 @@ export function InventoryPage() {
       {/* Low Stock Replenishment Alert Bar (If any) */}
       {/* Equipment Stock Table */}
       <div className="glass-card bg-white overflow-hidden space-y-4">
-          <div className="p-4 border-b border-natural-border flex flex-col md:flex-row gap-4 items-center justify-between">
-            <div className="relative w-full md:w-80">
+          <div className="p-4 border-b border-natural-border flex flex-col xl:flex-row gap-4 items-center justify-between">
+            <div className="relative w-full xl:w-72">
               <input
                 type="text"
                 value={searchQuery}
@@ -902,7 +871,7 @@ export function InventoryPage() {
               <Search className="absolute left-3 top-2.5 w-4 h-4 text-natural-text-light" />
             </div>
 
-            <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 w-full md:w-auto">
+            <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 w-full xl:w-auto xl:justify-end">
               <div className="flex items-center gap-2 w-full sm:w-auto">
                 <button
                   onClick={() => setShowArchived(false)}
@@ -965,6 +934,26 @@ export function InventoryPage() {
                 <RotateCcw className="w-3.5 h-3.5" />
                 <span>Reset Columns</span>
               </button>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto sm:ml-auto xl:ml-0">
+                <button
+                  onClick={() => refreshItems()}
+                  title="Refresh Stock Data"
+                  className="p-2.5 border border-natural-border bg-white rounded-lg text-natural-text-main hover:bg-natural-bg transition-all shadow-xs shrink-0"
+                >
+                  <RefreshCw className="w-4 h-4 text-natural-text-light" />
+                </button>
+                <button
+                  onClick={() => {
+                    setIsAddModalOpen(true);
+                    setFormError(null);
+                  }}
+                  className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-natural-accent text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-natural-accent/90 transition-all shadow-sm whitespace-nowrap"
+                >
+                  <Plus className="w-4 h-4 shrink-0" />
+                  Add New Item
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1745,13 +1734,13 @@ export function InventoryPage() {
                 onClick={handleApplyRestockOrAdjustment}
                 disabled={numInput <= 0}
                 className={cn(
-                  "flex-1 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider text-white transition-all shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed",
+                  "flex-1 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider text-white transition-all shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed",
                   adjustMode === "add"
                     ? "bg-emerald-600 hover:bg-emerald-700"
                     : "bg-red-600 hover:bg-red-700"
                 )}
               >
-                {adjustMode === "add" ? `Confirm Add (+${numInput})` : `Confirm Remove (-${numInput})`}
+                Confirm
               </button>
             </div>
           </div>

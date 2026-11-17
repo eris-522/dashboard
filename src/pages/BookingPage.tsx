@@ -4262,30 +4262,6 @@ export function BookingPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-serif font-bold text-natural-text-main">
-            Booking Management
-          </h2>
-          <p className="text-natural-text-light text-xs font-medium uppercase tracking-wider">
-            Track and coordinate your catering events
-          </p>
-        </div>
-
-        {/* Hidden for now:
-          <button
-            onClick={() => {
-              resetNewBooking();
-              setIsModalOpen(true);
-            }}
-            className="flex items-center gap-2 bg-natural-accent text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-natural-accent/90 transition-all shadow-sm"
-          >
-            <Plus className="w-4 h-4" />
-            Create New Booking
-          </button>
-        */}
-      </div>
-
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {[
           {
@@ -5997,15 +5973,15 @@ export function BookingPage() {
         };
 
         return (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <div
               role="dialog"
               aria-modal="true"
               aria-labelledby="booking-overview-title"
-              className="bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl shadow-2xl w-full max-w-5xl lg:max-w-6xl xl:max-w-[1220px] max-h-[94dvh] sm:max-h-[92vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200"
+              className="bg-white dark:bg-natural-card border border-natural-border/60 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-5xl lg:max-w-6xl xl:max-w-[1220px] h-[96dvh] sm:h-auto sm:max-h-[92vh] overflow-hidden flex flex-col animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200"
             >
               {/* Merged Compact Sticky Header & Summary Strip */}
-              <div className="px-3.5 sm:px-5 py-3 sm:py-3.5 bg-natural-card/80 border-b border-natural-border space-y-3 shrink-0">
+              <div className="px-3.5 sm:px-5 pt-3 pb-3 sm:py-3.5 bg-natural-card/80 border-b border-natural-border space-y-2.5 sm:space-y-3 shrink-0">
                 <div className="flex items-start sm:items-center justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2.5 flex-wrap">
@@ -6032,15 +6008,12 @@ export function BookingPage() {
                         {bookingStatus}
                       </span>
                     </div>
-                    <p className="text-xs font-medium text-natural-text-light mt-0.5 flex items-center gap-1.5 flex-wrap">
-                      <span className="text-natural-text-main font-semibold">
+                    <p className="text-xs font-medium text-natural-text-light mt-0.5 flex items-center gap-x-1.5 gap-y-0.5 flex-wrap">
+                      <span className="text-natural-text-main font-semibold truncate max-w-full">
                         {fullPackageSubtitle}
                       </span>
                       <span aria-hidden="true">·</span>
-                      <span>
-                        {totalPax} Pax
-                        {extraGuests > 0 ? ` (${baseGuests} + ${extraGuests} extra)` : ""}
-                      </span>
+                      <span>{totalPax} Pax</span>
                       <span aria-hidden="true">·</span>
                       <span>
                         Applied{" "}
@@ -6084,7 +6057,7 @@ export function BookingPage() {
                 </div>
 
                 {/* 4-Column Essential Logistics & Unified Financial Strip */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-2.5 pt-2.5 border-t border-natural-border/60 text-xs">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-3 gap-y-2.5 sm:gap-2.5 pt-2.5 border-t border-natural-border/60 text-xs">
                   <div className="flex items-start gap-2 min-w-0">
                     <Calendar
                       aria-hidden="true"
@@ -6092,14 +6065,14 @@ export function BookingPage() {
                     />
                     <div className="min-w-0">
                       <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-wider">
-                        Date &amp; Service Window
+                        Date &amp; Time
                       </p>
                       <p className="font-semibold text-natural-text-main truncate">
                         {formatEventDate(selectedBooking.event_date)} ·{" "}
                         {formatEventTime(selectedBooking.event_time)}
                       </p>
                       <p className="text-[10px] text-natural-accent font-semibold truncate">
-                        {serviceWin.standardWindowText} ({4 + prebookedCatering}h window)
+                        {serviceWin.standardWindowText}
                       </p>
                     </div>
                   </div>
@@ -6136,14 +6109,6 @@ export function BookingPage() {
                       >
                         {(selectedBooking.event_location || "N/A").split(" - ")[0]}
                       </p>
-                      {(selectedBooking.event_location || "").split(" - ")[1] && (
-                        <p
-                          className="text-[10px] text-natural-text-light truncate"
-                          title={(selectedBooking.event_location || "").split(" - ")[1]}
-                        >
-                          {(selectedBooking.event_location || "").split(" - ")[1]}
-                        </p>
-                      )}
                     </div>
                   </div>
 
@@ -6178,7 +6143,7 @@ export function BookingPage() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
                         <p className="text-[10px] font-bold text-natural-text-light uppercase tracking-wider">
-                          Total Event Cost
+                          Total Cost
                         </p>
                       </div>
                       <p className="font-serif font-bold text-natural-accent text-sm leading-tight">
@@ -6232,7 +6197,7 @@ export function BookingPage() {
                 <div
                   role="tablist"
                   aria-label="Booking coordinator sections"
-                  className="flex items-center gap-1 overflow-x-auto snap-x snap-proximity pt-1 -mb-3 sm:-mb-3.5 border-t border-natural-border/50 no-scrollbar"
+                  className="flex items-center justify-between sm:justify-start gap-1 sm:overflow-x-auto pt-1 -mb-3 sm:-mb-3.5 border-t border-natural-border/50 no-scrollbar"
                 >
                   {[
                     {
@@ -6274,15 +6239,11 @@ export function BookingPage() {
                       badge:
                         damageInfo.damageFee > 0
                           ? `₱${damageInfo.damageFee.toLocaleString()} Dmg`
-                          : !isCompleted && totalOutsourced > 0
-                            ? `${totalOutsourced} Outsource`
-                            : String(totalEquipUnits),
+                          : String(totalEquipUnits),
                       badgeTone:
                         damageInfo.damageFee > 0 && !damageInfo.isSettled
                           ? "amber"
-                          : !isCompleted && totalOutsourced > 0
-                            ? "amber"
-                            : "neutral",
+                          : "neutral",
                     },
                     {
                       key: "complaints" as const,
@@ -6299,6 +6260,8 @@ export function BookingPage() {
                   ].map((tab) => {
                     const Icon = tab.icon;
                     const isActive = overviewTab === tab.key;
+                    const showMobileAlertDot =
+                      !isActive && (tab.badgeTone === "amber" || tab.badgeTone === "rose");
                     return (
                       <button
                         key={tab.key}
@@ -6310,22 +6273,39 @@ export function BookingPage() {
                         id={`overview-tab-${tab.key}`}
                         aria-selected={isActive}
                         aria-controls={`overview-panel-${tab.key}`}
+                        aria-label={tab.label}
+                        title={tab.label}
                         tabIndex={isActive ? 0 : -1}
                         onClick={() => setOverviewTab(tab.key)}
                         onKeyDown={(e) => handleTabKeyDown(e, tab.key)}
                         className={cn(
-                          "min-h-10 px-3 py-2 text-xs font-bold uppercase tracking-wider border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 snap-start cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-natural-accent",
+                          "min-h-10 py-2 text-xs font-bold uppercase tracking-wider border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-natural-accent",
                           isActive
-                            ? "border-natural-accent text-natural-accent bg-natural-accent/5"
-                            : "border-transparent text-natural-text-light hover:text-natural-text-main hover:bg-natural-bg/50"
+                            ? "shrink-0 px-3 border-natural-accent text-natural-accent bg-natural-accent/5"
+                            : "flex-1 sm:flex-initial justify-center px-2 sm:px-3 border-transparent text-natural-text-light hover:text-natural-text-main hover:bg-natural-bg/50"
                         )}
                       >
-                        <Icon aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />
-                        <span>{tab.label}</span>
+                        <span className="relative inline-flex shrink-0">
+                          <Icon aria-hidden="true" className="w-4 h-4 sm:w-3.5 sm:h-3.5 shrink-0" />
+                          {showMobileAlertDot && (
+                            <span
+                              aria-hidden="true"
+                              className={cn(
+                                "sm:hidden absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full",
+                                tab.badgeTone === "rose" ? "bg-rose-500" : "bg-amber-500"
+                              )}
+                            />
+                          )}
+                        </span>
+                        <span className={cn(!isActive && "hidden sm:inline")}>
+                          {tab.label.replace(/ & .*$/, "")}
+                        </span>
+                        <span className="hidden sm:inline">{tab.label.match(/ & .*$/)?.[0]}</span>
                         {tab.badge && (
                           <span
                             className={cn(
                               "text-[10px] font-bold px-1.5 py-0.2 rounded-full border",
+                              !isActive && "hidden sm:inline-flex",
                               tab.badgeTone === "amber"
                                 ? "bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-500/30"
                                 : tab.badgeTone === "rose"
@@ -6347,7 +6327,7 @@ export function BookingPage() {
               </div>
 
               {/* Single Clean Scrollable Workspace Body */}
-              <div className="p-4 sm:p-5 space-y-3.5 overflow-y-auto flex-1">
+              <div className="p-3 sm:p-5 space-y-3 sm:space-y-3.5 overflow-y-auto overscroll-contain flex-1 min-h-0">
                 {/* Exception-Only High-Priority Alerts */}
                 {openComplaintsCount > 0 && overviewTab !== "complaints" && (
                   <div className="p-2.5 px-3.5 bg-rose-500/10 border border-rose-500/30 rounded-xl flex flex-wrap items-center justify-between gap-2 text-rose-800 dark:text-rose-200 text-xs">
@@ -7781,18 +7761,18 @@ export function BookingPage() {
 
                         {/* Venue Environment & Rain/Laundry Management */}
                         <div className="p-3 bg-natural-bg/50 rounded-lg border border-natural-border space-y-2.5 text-xs">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="flex items-center gap-2">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                            <div className="flex items-center justify-between sm:justify-start gap-2.5 w-full sm:w-auto">
                               <span className="font-bold text-natural-text-main uppercase tracking-wider text-[10px]">
                                 Venue Environment
                               </span>
-                              <div className="inline-flex rounded-lg border border-natural-border p-0.5 bg-natural-card">
+                              <div className="inline-flex rounded-lg border border-natural-border p-0.5 bg-natural-card shrink-0">
                                 <button
                                   type="button"
                                   disabled={isCancelled || isCompleted}
                                   onClick={() => handleToggleVenueType(selectedBooking.id, "Indoor")}
                                   className={cn(
-                                    "px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all",
+                                    "px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all",
                                     isCancelled || isCompleted ? "cursor-not-allowed opacity-60" : "cursor-pointer",
                                     !logistics.isOutdoor
                                       ? "bg-natural-accent text-white shadow-2xs"
@@ -7806,7 +7786,7 @@ export function BookingPage() {
                                   disabled={isCancelled || isCompleted}
                                   onClick={() => handleToggleVenueType(selectedBooking.id, "Outdoor")}
                                   className={cn(
-                                    "px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all",
+                                    "px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all",
                                     isCancelled || isCompleted ? "cursor-not-allowed opacity-60" : "cursor-pointer",
                                     logistics.isOutdoor
                                       ? "bg-amber-600 text-white shadow-2xs"
@@ -7831,7 +7811,7 @@ export function BookingPage() {
                                     : undefined
                               }
                               className={cn(
-                                "px-3 py-1.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all flex items-center gap-1.5 shadow-2xs",
+                                "w-full sm:w-auto justify-center px-3.5 py-2 sm:py-1.5 text-[11px] sm:text-xs font-bold uppercase tracking-wider rounded-lg transition-all flex items-center gap-1.5 shadow-2xs whitespace-nowrap",
                                 isCancelled || isCompleted
                                   ? "bg-natural-bg/80 text-natural-text-light/60 border border-natural-border/80 cursor-not-allowed opacity-60"
                                   : logistics.rainLaundryApplied
@@ -7839,14 +7819,20 @@ export function BookingPage() {
                                     : "bg-amber-600 hover:bg-amber-700 text-white cursor-pointer"
                               )}
                             >
-                              <CloudRain className="w-3.5 h-3.5" />
-                              {isCancelled
-                                ? "Rain Laundry Locked"
-                                : isCompleted
-                                  ? "Rain Laundry Locked"
-                                  : logistics.rainLaundryApplied
-                                    ? "Remove Rain Laundry Fee (-₱2,000)"
-                                    : "Charge Rain Laundry Fee (+₱2,000)"}
+                              <CloudRain className="w-3.5 h-3.5 shrink-0" />
+                              {isCancelled || isCompleted ? (
+                                <span>Rain Laundry Locked</span>
+                              ) : logistics.rainLaundryApplied ? (
+                                <>
+                                  <span className="sm:hidden">Remove Rain Fee (-₱2,000)</span>
+                                  <span className="hidden sm:inline">Remove Rain Laundry Fee (-₱2,000)</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="sm:hidden">Rain Laundry Fee (+₱2,000)</span>
+                                  <span className="hidden sm:inline">Charge Rain Laundry Fee (+₱2,000)</span>
+                                </>
+                              )}
                             </button>
                           </div>
 
@@ -8082,37 +8068,35 @@ export function BookingPage() {
                         onToggle={(e) => setIsDayOfOtExpanded(e.currentTarget.open)}
                         className="group bg-natural-card border border-natural-border rounded-xl shadow-2xs overflow-hidden"
                       >
-                        <summary className="list-none px-4 py-3 cursor-pointer hover:bg-natural-bg/40 transition-colors flex flex-wrap items-center justify-between gap-2 select-none focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-natural-accent">
-                          <div className="flex items-center gap-2">
+                        <summary className="list-none px-3.5 sm:px-4 py-3 cursor-pointer hover:bg-natural-bg/40 transition-colors flex items-center justify-between gap-2 select-none focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-natural-accent">
+                          <div className="flex items-center gap-2 min-w-0">
                             <Clock
                               aria-hidden="true"
                               className="w-4 h-4 text-natural-accent shrink-0"
                             />
-                            <div>
-                              <span className="text-xs font-bold text-natural-text-main uppercase tracking-wider block">
-                                Day-of Event Timer &amp; Overtime Calculator
+                            <div className="min-w-0">
+                              <span className="text-xs font-bold text-natural-text-main uppercase tracking-wider block truncate">
+                                <span className="sm:hidden">Event Overtime Calculator</span>
+                                <span className="hidden sm:inline">Day-of Event Timer &amp; Overtime Calculator</span>
                               </span>
-                              <span className="text-[10px] text-natural-text-light block">
-                                {isConfirmed
-                                  ? "Contract Rule: 1 minute past scheduled end equals 1 hour OT"
-                                  : `Scheduled window: ${serviceWin.startTimeLabel} – ${scheduledEndTime} · Click to expand`}
+                              <span className="text-[10px] text-natural-text-light block truncate">
+                                {serviceWin.startTimeLabel} – {scheduledEndTime}
                               </span>
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/25">
-                              1 min = 1 hr Rule
+                          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/25 whitespace-nowrap">
+                              1 min = 1 hr<span className="hidden sm:inline"> Rule</span>
                             </span>
                             {isDayOfOtApplied && (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25">
-                                OT Applied (₱
-                                {(dayOfInfo?.total_day_of_fee || 0).toLocaleString()})
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25 whitespace-nowrap">
+                                +₱{(dayOfInfo?.total_day_of_fee || 0).toLocaleString()}
                               </span>
                             )}
                             <ChevronDown
                               aria-hidden="true"
-                              className="w-4 h-4 text-natural-text-light transition-transform duration-200 group-open:rotate-180"
+                              className="w-4 h-4 text-natural-text-light transition-transform duration-200 group-open:rotate-180 shrink-0"
                             />
                           </div>
                         </summary>
@@ -9000,7 +8984,7 @@ export function BookingPage() {
                     role="tabpanel"
                     id="overview-panel-equipment"
                     aria-labelledby="overview-tab-equipment"
-                    className="p-4 bg-natural-card border border-natural-border rounded-xl space-y-3 shadow-2xs"
+                    className="p-3 sm:p-4 bg-natural-card border border-natural-border rounded-xl space-y-3 shadow-2xs"
                   >
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -9071,25 +9055,28 @@ export function BookingPage() {
                       aria-labelledby="equipment-allocation-heading"
                       className="max-h-64 overflow-x-auto overflow-y-auto rounded-xl border border-natural-border bg-natural-bg/30 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-natural-accent"
                     >
-                      <table className="w-full text-xs border-collapse">
+                      <table className="w-full text-[11px] sm:text-xs border-collapse">
                         <caption className="sr-only">
                           Allocated event equipment breakdown for {clientName}
                         </caption>
-                        <thead className="sticky top-0 z-10 bg-natural-card border-b border-natural-border text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
+                        <thead className="sticky top-0 z-10 bg-natural-card border-b border-natural-border text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
                           <tr>
-                            <th scope="col" className="text-left py-2.5 px-3.5">
-                              Equipment Item
+                            <th scope="col" className="text-left py-2 sm:py-2.5 px-2 sm:px-3.5">
+                              <span className="sm:hidden">Item</span>
+                              <span className="hidden sm:inline">Equipment Item</span>
                             </th>
-                            <th scope="col" className="text-right py-2.5 px-3">
-                              Required
+                            <th scope="col" className="text-right py-2 sm:py-2.5 px-1.5 sm:px-3 whitespace-nowrap">
+                              <span className="sm:hidden">Req.</span>
+                              <span className="hidden sm:inline">Required</span>
                             </th>
-                            <th scope="col" className="text-right py-2.5 px-3">
+                            <th scope="col" className="text-right py-2 sm:py-2.5 px-1.5 sm:px-3 whitespace-nowrap">
                               In-House
                             </th>
-                            <th scope="col" className="text-right py-2.5 px-3">
-                              Outsource
+                            <th scope="col" className="text-right py-2 sm:py-2.5 px-2 sm:px-3 whitespace-nowrap">
+                              <span className="sm:hidden">Outsrc.</span>
+                              <span className="hidden sm:inline">Outsource</span>
                             </th>
-                            <th scope="col" className="text-right py-2.5 px-3.5">
+                            <th scope="col" className="hidden sm:table-cell text-right py-2.5 px-3.5">
                               Status
                             </th>
                           </tr>
@@ -9109,19 +9096,19 @@ export function BookingPage() {
                               >
                                 <th
                                   scope="row"
-                                  className="text-left py-2 px-3.5 font-semibold text-natural-text-main"
+                                  className="text-left py-2 px-2 sm:px-3.5 font-semibold text-natural-text-main break-words"
                                 >
                                   {eq.itemName}
                                 </th>
-                                <td className="text-right py-2 px-3 font-mono font-semibold text-natural-text-main whitespace-nowrap">
+                                <td className="text-right py-2 px-1.5 sm:px-3 font-mono font-semibold text-natural-text-main whitespace-nowrap">
                                   {eq.quantity.toLocaleString()} {eq.unit}
                                 </td>
-                                <td className="text-right py-2 px-3 font-mono text-emerald-700 dark:text-emerald-400 font-semibold whitespace-nowrap">
+                                <td className="text-right py-2 px-1.5 sm:px-3 font-mono text-emerald-700 dark:text-emerald-400 font-semibold whitespace-nowrap">
                                   {eq.inHouseQty.toLocaleString()}
                                 </td>
                                 <td
                                   className={cn(
-                                    "text-right py-2 px-3 font-mono whitespace-nowrap",
+                                    "text-right py-2 px-2 sm:px-3 font-mono whitespace-nowrap",
                                     hasShortage
                                       ? "font-bold text-amber-700 dark:text-amber-300"
                                       : "text-natural-text-light/60"
@@ -9131,7 +9118,7 @@ export function BookingPage() {
                                     ? eq.outsourcedQty.toLocaleString()
                                     : "—"}
                                 </td>
-                                <td className="text-right py-2 px-3.5 whitespace-nowrap">
+                                <td className="hidden sm:table-cell text-right py-2 px-3.5 whitespace-nowrap">
                                   {isCompleted ? (
                                     <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-400">
                                       <CheckCheck
@@ -10045,7 +10032,7 @@ export function BookingPage() {
               </div>
 
               {/* Balanced Sticky Footer */}
-              <div className="py-3 px-5 bg-natural-bg/40 border-t border-natural-border flex flex-wrap items-center justify-between gap-3 shrink-0">
+              <div className="py-2.5 sm:py-3 px-3 sm:px-5 pb-[max(0.625rem,env(safe-area-inset-bottom))] bg-natural-bg/40 border-t border-natural-border flex flex-nowrap sm:flex-wrap items-center justify-between gap-2 sm:gap-3 shrink-0">
                 {bookingStatus === "Pending" && (
                   <>
                     <button
@@ -10057,17 +10044,19 @@ export function BookingPage() {
                           bookingName: clientName,
                         })
                       }
-                      className="px-4 py-2 bg-orange-50 text-orange-700 border border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60 rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-orange-100/70 dark:hover:bg-orange-950/70 transition-all cursor-pointer flex items-center gap-1.5"
+                      aria-label="Cancel Booking"
+                      title="Cancel Booking"
+                      className="min-h-11 sm:min-h-0 px-3 sm:px-4 py-2 bg-orange-50 text-orange-700 border border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/60 rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-orange-100/70 dark:hover:bg-orange-950/70 transition-all cursor-pointer flex items-center justify-center gap-1.5 shrink-0"
                     >
                       <XCircle aria-hidden="true" className="w-4 h-4" />
-                      Cancel Booking
+                      <span className="hidden sm:inline">Cancel Booking</span>
                     </button>
 
-                    <div className="flex items-center gap-2.5 ml-auto">
+                    <div className="flex items-center gap-2.5 flex-1 sm:flex-initial sm:ml-auto min-w-0">
                       <button
                         type="button"
                         onClick={() => setSelectedBooking(null)}
-                        className="px-4 py-2 border border-natural-border text-natural-text-light hover:text-natural-text-main bg-white dark:bg-natural-card rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer"
+                        className="hidden sm:inline-flex px-4 py-2 border border-natural-border text-natural-text-light hover:text-natural-text-main bg-white dark:bg-natural-card rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer"
                       >
                         Close
                       </button>
@@ -10080,10 +10069,13 @@ export function BookingPage() {
                             bookingName: clientName,
                           })
                         }
-                        className="px-5 py-2.5 bg-green-600 text-white rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-green-700 transition-all shadow-sm flex items-center gap-2 cursor-pointer"
+                        className="flex-1 sm:flex-initial min-h-11 sm:min-h-0 px-4 sm:px-5 py-2.5 bg-green-600 text-white rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-green-700 transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
                       >
-                        <CheckCircle2 aria-hidden="true" className="w-4 h-4" />
-                        Verify Deposit &amp; Confirm (₱{downpaymentDue.toLocaleString()})
+                        <CheckCircle2 aria-hidden="true" className="w-4 h-4 shrink-0" />
+                        <span className="sm:hidden">Confirm · ₱{downpaymentDue.toLocaleString()}</span>
+                        <span className="hidden sm:inline">
+                          Verify Deposit &amp; Confirm (₱{downpaymentDue.toLocaleString()})
+                        </span>
                       </button>
                     </div>
                   </>
@@ -10096,11 +10088,11 @@ export function BookingPage() {
                         ? "Final balance verified — ready to mark event complete."
                         : "Verify final balance in Payments & Billing before completing event."}
                     </span>
-                    <div className="flex items-center gap-2.5 ml-auto">
+                    <div className="flex items-center gap-2.5 flex-1 sm:flex-initial sm:ml-auto min-w-0 [&>button:last-child]:flex-1 sm:[&>button:last-child]:flex-initial [&>button:last-child]:justify-center [&>button:last-child]:min-h-11 sm:[&>button:last-child]:min-h-0">
                       <button
                         type="button"
                         onClick={() => setSelectedBooking(null)}
-                        className="px-5 py-2 border border-natural-border text-natural-text-light hover:text-natural-text-main bg-white dark:bg-natural-card rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer"
+                        className="hidden sm:inline-flex px-5 py-2 border border-natural-border text-natural-text-light hover:text-natural-text-main bg-white dark:bg-natural-card rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer"
                       >
                         Close
                       </button>
@@ -10130,7 +10122,8 @@ export function BookingPage() {
                         {!isFinalVerified ? (
                           <>
                             <Lock aria-hidden="true" className="w-3.5 h-3.5" />
-                            <span>Complete Event (Balance Unverified)</span>
+                            <span className="sm:hidden">Balance Unverified</span>
+                            <span className="hidden sm:inline">Complete Event (Balance Unverified)</span>
                           </>
                         ) : (
                           <>

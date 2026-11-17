@@ -481,25 +481,6 @@ export function MenuPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-serif font-bold text-natural-text-main">
-            Menu Catalog
-          </h2>
-          <p className="text-natural-text-light text-xs font-medium uppercase tracking-wider">
-            Design and manage your catering selections
-          </p>
-        </div>
-
-        <button
-          onClick={handleAddClick}
-          className="w-full md:w-auto flex items-center justify-center gap-2 bg-natural-accent text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-natural-accent/90 transition-all shadow-sm"
-        >
-          <Plus className="w-4 h-4" />
-          Add New Dish
-        </button>
-      </div>
-
       <div className="flex items-center gap-2 overflow-x-auto pb-2 no-scrollbar w-full">
         {categories
           .filter((c) => c !== "Archived")
@@ -547,10 +528,17 @@ export function MenuPage() {
             <Search className="absolute left-3 top-2.5 w-4 h-4 text-natural-text-light" />
           </div>
 
-          <div className="flex items-center gap-3 w-full md:w-auto">
+          <div className="flex flex-wrap items-center justify-between md:justify-end gap-3 w-full md:w-auto">
             <span className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
               {filteredItems.length} Dishes Found
             </span>
+            <button
+              onClick={handleAddClick}
+              className="w-full sm:w-auto flex items-center justify-center gap-2 bg-natural-accent text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-natural-accent/90 transition-all shadow-sm"
+            >
+              <Plus className="w-4 h-4" />
+              Add New Dish
+            </button>
           </div>
         </div>
 

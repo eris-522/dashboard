@@ -779,37 +779,37 @@ export function CMSPage() {
   const tabs: { id: CMSTab; label: string; icon: any; desc: string }[] = [
     {
       id: "home",
-      label: "Home Page",
+      label: "Home",
       icon: Home,
       desc: "Hero, featured packages, menu teaser, how it works, reviews, & FAQs",
     },
     {
       id: "menu",
-      label: "Menu Page",
+      label: "Menu",
       icon: Utensils,
       desc: "Dish presentation photos, culinary categories, and selection header",
     },
     {
       id: "packages",
-      label: "Packages Page",
+      label: "Packages",
       icon: Package,
       desc: "Package collections, cover photography, pricing & inclusions",
     },
     {
       id: "about",
-      label: "About Page",
+      label: "About",
       icon: FileText,
       desc: "Brand heritage, legacy story, pillars of excellence & CTA",
     },
     {
       id: "faqs",
-      label: "FAQs Page",
+      label: "FAQs",
       icon: HelpCircle,
       desc: "Common inquiries, policies, and catering agreement links",
     },
     {
       id: "contact",
-      label: "Contact Page",
+      label: "Contact",
       icon: Phone,
       desc: "Office hours, address, phone numbers, map embed, and Why Us",
     },
@@ -836,59 +836,43 @@ export function CMSPage() {
 
   return (
     <div className="w-full space-y-6 animate-in fade-in duration-500 pb-20">
-      {/* Top Header Actions Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 flex-wrap">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="p-1.5 rounded-lg bg-natural-accent/10 text-natural-accent">
-              <Globe className="w-5 h-5" />
-            </span>
-            <h2 className="text-xl md:text-2xl font-serif font-bold text-natural-text-main">
-              Customer Website CMS
-            </h2>
-          </div>
-          <p className="text-natural-text-light text-[0.75rem] md:text-[0.8rem] font-medium tracking-wide mt-1">
-            Organized to match the customer portal pages exactly • Real-time live sync
-          </p>
-        </div>
+      {/* Top Toolbar Actions Bar */}
+      <div className="flex items-center justify-end gap-2 sm:gap-2.5 flex-wrap w-full">
+        <button
+          onClick={() => setShowLivePreview(!showLivePreview)}
+          className={cn(
+            "flex-1 sm:flex-initial flex items-center justify-center gap-2 px-3 sm:px-3.5 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border cursor-pointer shrink-0",
+            showLivePreview
+              ? "bg-amber-500/10 text-amber-600 border-amber-500/30 ring-2 ring-amber-500/20"
+              : "border-natural-border hover:bg-natural-bg/50 text-natural-text-main"
+          )}
+        >
+          {showLivePreview ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+          {showLivePreview ? "Hide Preview" : "Live Preview"}
+        </button>
 
-        <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap w-full sm:w-auto">
-          <button
-            onClick={() => setShowLivePreview(!showLivePreview)}
-            className={cn(
-              "flex-1 sm:flex-initial flex items-center justify-center gap-2 px-3 sm:px-3.5 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border cursor-pointer shrink-0",
-              showLivePreview
-                ? "bg-amber-500/10 text-amber-600 border-amber-500/30 ring-2 ring-amber-500/20"
-                : "border-natural-border hover:bg-natural-bg/50 text-natural-text-main"
-            )}
-          >
-            {showLivePreview ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            {showLivePreview ? "Hide Preview" : "Live Preview"}
-          </button>
+        <button
+          onClick={() => {
+            setConfirmActionType("reset");
+            setShowConfirmModal(true);
+          }}
+          title="Reset current tab to defaults"
+          className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-bold text-natural-text-light hover:text-red-500 border border-natural-border hover:bg-natural-bg/50 transition-all cursor-pointer shrink-0"
+        >
+          <RotateCcw className="w-4 h-4" />
+          <span>Reset Defaults</span>
+        </button>
 
-          <button
-            onClick={() => {
-              setConfirmActionType("reset");
-              setShowConfirmModal(true);
-            }}
-            title="Reset current tab to defaults"
-            className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-bold text-natural-text-light hover:text-red-500 border border-natural-border hover:bg-natural-bg/50 transition-all cursor-pointer shrink-0"
-          >
-            <RotateCcw className="w-4 h-4" />
-            <span>Reset Defaults</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setConfirmActionType("save");
-              setShowConfirmModal(true);
-            }}
-            className="w-full sm:w-auto flex items-center justify-center gap-2 bg-natural-accent text-white px-5 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-natural-accent/90 transition-all shadow-md cursor-pointer active:scale-95 shrink-0"
-          >
-            <Save className="w-4 h-4" />
-            Publish Changes
-          </button>
-        </div>
+        <button
+          onClick={() => {
+            setConfirmActionType("save");
+            setShowConfirmModal(true);
+          }}
+          className="w-full sm:w-auto flex items-center justify-center gap-2 bg-natural-accent text-white px-5 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-natural-accent/90 transition-all shadow-md cursor-pointer active:scale-95 shrink-0"
+        >
+          <Save className="w-4 h-4" />
+          Publish Changes
+        </button>
       </div>
 
       {/* Save Status Toast */}
@@ -931,30 +915,33 @@ export function CMSPage() {
                 Exact customer portal order
               </p>
             </div>
-            <nav className="p-2 flex lg:flex-col gap-2 lg:gap-1 overflow-x-auto no-scrollbar">
+            <nav className="p-1.5 sm:p-2 flex items-center lg:items-stretch lg:flex-col gap-1 sm:gap-2 lg:gap-1">
               {tabs.map((tab, idx) => {
                 const isActive = activeTab === tab.id;
                 return (
                   <button
                     key={tab.id}
+                    type="button"
+                    aria-label={tab.label}
+                    title={tab.label}
                     onClick={() => navigateToPage(tab.id)}
                     className={cn(
-                      "shrink-0 min-w-[160px] lg:min-w-0 lg:w-full flex items-start gap-2.5 sm:gap-3 p-2.5 sm:p-3 rounded-xl text-left transition-all cursor-pointer group",
+                      "flex items-center lg:items-start gap-2 sm:gap-2.5 lg:gap-3 rounded-xl text-left transition-all cursor-pointer group",
                       isActive
-                        ? "bg-natural-accent text-white shadow-xs font-semibold"
-                        : "text-natural-text-main hover:bg-natural-bg/60 border border-natural-border/50 lg:border-transparent"
+                        ? "shrink-0 px-2.5 sm:px-3.5 py-2 sm:py-2.5 lg:w-full lg:p-3 bg-natural-accent text-white shadow-xs font-semibold"
+                        : "flex-1 justify-center lg:justify-start lg:w-full p-2 sm:p-2.5 lg:p-3 text-natural-text-main hover:bg-natural-bg/60 border border-natural-border/50 lg:border-transparent"
                     )}
                   >
                     <tab.icon
                       className={cn(
-                        "w-4 h-4 shrink-0 mt-0.5",
+                        "w-4 h-4 shrink-0 lg:mt-0.5",
                         isActive
                           ? "text-white"
                           : "text-natural-accent group-hover:scale-110 transition-transform"
                       )}
                     />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
+                    <div className={cn("flex-1 min-w-0", !isActive && "hidden lg:block")}>
+                      <div className="flex items-center justify-between gap-1.5 lg:gap-2">
                         <p className="text-xs font-bold tracking-wide whitespace-nowrap">
                           {tab.label}
                         </p>
@@ -969,7 +956,7 @@ export function CMSPage() {
                       </div>
                       <p
                         className={cn(
-                          "text-[10px] line-clamp-1 mt-0.5 hidden sm:block",
+                          "text-[10px] line-clamp-1 mt-0.5 hidden lg:block",
                           isActive ? "text-white/80" : "text-natural-text-light"
                         )}
                       >
@@ -2327,7 +2314,13 @@ export function CMSPage() {
         {/* RIGHT STICKY LIVE SIMULATION: MATCHES CUSTOMER SIDE EXACTLY */}
         {/* ========================================================================= */}
         {showLivePreview && (
-          <aside className="w-full lg:w-[400px] xl:w-[480px] 2xl:w-[540px] shrink-0 lg:sticky lg:top-6 max-h-[80dvh] lg:max-h-[calc(100vh-3rem)] overflow-y-auto custom-scrollbar p-4 rounded-2xl bg-[#080808] border border-white/20 shadow-2xl text-white space-y-4 animate-in slide-in-from-right-4 duration-300">
+          <div
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setShowLivePreview(false);
+            }}
+            className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 lg:contents animate-in fade-in duration-200"
+          >
+          <aside className="w-full max-w-md lg:max-w-none lg:w-[400px] xl:w-[480px] 2xl:w-[540px] shrink-0 lg:sticky lg:top-6 max-h-[88dvh] lg:max-h-[calc(100vh-3rem)] overflow-y-auto custom-scrollbar p-4 rounded-2xl bg-[#080808] border border-white/20 shadow-2xl text-white space-y-4 animate-in zoom-in-95 lg:slide-in-from-right-4 duration-200">
             {/* Simulation Header Bar */}
             <div className="flex items-center justify-between border-b border-white/10 pb-3 gap-2">
               <div className="flex items-center gap-2">
@@ -2766,6 +2759,7 @@ export function CMSPage() {
               </div>
             )}
           </aside>
+          </div>
         )}
       </div>
 
