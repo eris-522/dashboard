@@ -865,9 +865,6 @@ export function BookingPage() {
           });
         }
         setFetchError(null);
-        if (bData.length > 0) {
-          reconcileCompletedEvents(bData);
-        }
       }
     } catch (err) {
       console.error("Silent bookings refresh error:", err);
@@ -1020,9 +1017,6 @@ export function BookingPage() {
           });
         }
         setFetchError(null);
-        if (bData && bData.length > 0) {
-          reconcileCompletedEvents(bData);
-        }
       }
 
       const [pRes, pkgRes, menuRes, incRes] = await Promise.all([
@@ -1332,8 +1326,8 @@ export function BookingPage() {
         return;
       }
 
-      let isPasswordValid = confirmPassword === "admin123";
-      if (!isPasswordValid && currentUser?.email) {
+      let isPasswordValid = false;
+      if (currentUser?.email) {
         const { error } = await supabase.auth.signInWithPassword({
           email: currentUser.email,
           password: confirmPassword,
@@ -1358,35 +1352,44 @@ export function BookingPage() {
         confirmed_at: confirmedAt,
       };
 
-      // Attempt to update with payment_status: "Verified" and confirmed_at timestamp
-      let { error: updateErr } = await supabase
-        .from("bookings")
-        .update({
-          status: "Confirmed",
-          payment_status: "Verified",
-          logistics_info: updatedLogisticsInfo,
-        })
-        .eq("id", bookingId);
-
-      if (updateErr) {
-        // Fallback if payment_status or logistics_info column does not exist yet
-        const { error: fallbackErr } = await supabase
-          .from("bookings")
-          .update({ status: "Confirmed" })
-          .eq("id", bookingId);
-        updateErr = fallbackErr;
-      }
-
-      // Also keep fallback metadata in food_allergies in sync if present
-      if (!updateErr && targetBooking?.food_allergies?.includes("__PAYMENT_METADATA__:")) {
+      // Prepare synced fallback metadata if present on legacy booking
+      let syncedAllergies: string | undefined;
+      if (targetBooking?.food_allergies?.includes("__PAYMENT_METADATA__:")) {
         try {
           const parts = targetBooking.food_allergies.split("__PAYMENT_METADATA__:");
           const meta = JSON.parse(parts[1]);
           meta.status = "Verified";
           meta.logistics = { ...(meta.logistics || {}), confirmed_at: confirmedAt };
-          const updatedAllergies = `${parts[0]}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
-          await supabase.from("bookings").update({ food_allergies: updatedAllergies }).eq("id", bookingId);
+          syncedAllergies = `${parts[0]}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
         } catch (e) {}
+      }
+
+      const primaryConfirmPayload: Record<string, any> = {
+        status: "Confirmed",
+        payment_status: "Verified",
+        logistics_info: updatedLogisticsInfo,
+      };
+      if (syncedAllergies !== undefined) {
+        primaryConfirmPayload.food_allergies = syncedAllergies;
+      }
+
+      // Single primary UPDATE query (syncs food_allergies metadata in the same round-trip when present)
+      let { error: updateErr } = await supabase
+        .from("bookings")
+        .update(primaryConfirmPayload)
+        .eq("id", bookingId);
+
+      if (updateErr) {
+        // Fallback if payment_status or logistics_info column does not exist yet
+        const fallbackConfirmPayload: Record<string, any> = { status: "Confirmed" };
+        if (syncedAllergies !== undefined) {
+          fallbackConfirmPayload.food_allergies = syncedAllergies;
+        }
+        const { error: fallbackErr } = await supabase
+          .from("bookings")
+          .update(fallbackConfirmPayload)
+          .eq("id", bookingId);
+        updateErr = fallbackErr;
       }
 
       if (updateErr) {
@@ -1735,7 +1738,6 @@ export function BookingPage() {
     }
 
     window.dispatchEvent(new CustomEvent("bookingsUpdated"));
-    await fetchAllData(true);
     setConfirmAction(null);
     setSelectedBooking(null);
   };
@@ -2002,7 +2004,6 @@ export function BookingPage() {
     } catch (e) {}
 
     window.dispatchEvent(new CustomEvent("bookingsUpdated"));
-    await fetchAllData(true);
   };
 
   const getDamageAppraisalSummary = (booking: any) => {
@@ -2076,7 +2077,7 @@ export function BookingPage() {
         .slice(2, 8)}.jpg`;
       const { error: upErr } = await supabase.storage
         .from("receipts")
-        .upload(filePath, blob, { contentType: "image/jpeg", upsert: true });
+        .upload(filePath, blob, { contentType: "image/jpeg", cacheControl: "31536000", upsert: true });
       if (!upErr) {
         const { data: pub } = supabase.storage.from("receipts").getPublicUrl(filePath);
         if (pub?.publicUrl) return pub.publicUrl;
@@ -2458,7 +2459,6 @@ export function BookingPage() {
     } catch {}
 
     window.dispatchEvent(new CustomEvent("bookingsUpdated"));
-    await fetchAllData(true);
   };
 
   const handleSaveComplaintResolution = async (
@@ -2725,11 +2725,29 @@ export function BookingPage() {
     let updateSuccess = false;
     let lastErrorMsg = "";
 
+    const currentAllergies = targetBooking.food_allergies || "";
+    const hasMeta = currentAllergies.includes("__PAYMENT_METADATA__:");
+    let updatedAllergies = currentAllergies;
+    if (hasMeta) {
+      try {
+        const parts = currentAllergies.split("__PAYMENT_METADATA__:");
+        const meta = JSON.parse(parts[1]);
+        meta.finalBalanceStatus = "Verified";
+        if (updatedSchedule.length > 0) {
+          meta.installments = updatedSchedule;
+        }
+        updatedAllergies = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+      } catch (e) {}
+    }
+
     const updatePayload: any = {
       final_balance_status: "Verified",
     };
     if (updatedSchedule.length > 0) {
       updatePayload.installment_schedule = updatedSchedule;
+    }
+    if (hasMeta && updatedAllergies !== currentAllergies) {
+      updatePayload.food_allergies = updatedAllergies;
     }
 
     let { error: dbError } = await supabase
@@ -2739,9 +2757,13 @@ export function BookingPage() {
 
     if (dbError && updatedSchedule.length > 0) {
       // Fallback retry without installment_schedule if column missing
+      const retryPayload: Record<string, any> = { final_balance_status: "Verified" };
+      if (hasMeta && updatedAllergies !== currentAllergies) {
+        retryPayload.food_allergies = updatedAllergies;
+      }
       const { error: retryError } = await supabase
         .from("bookings")
-        .update({ final_balance_status: "Verified" })
+        .update(retryPayload)
         .eq("id", bookingId);
       if (!retryError) {
         dbError = null;
@@ -2752,34 +2774,20 @@ export function BookingPage() {
       updateSuccess = true;
     } else {
       lastErrorMsg = dbError.message;
+      // Legacy metadata fallback ONLY if direct columns failed
+      try {
+        if (!hasMeta) {
+          const meta: any = { finalBalanceStatus: "Verified", status: "Verified" };
+          if (updatedSchedule.length > 0) {
+            meta.installments = updatedSchedule;
+          }
+          updatedAllergies = `${currentAllergies.trim() ? currentAllergies.trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+        }
+        const fb = await supabase.from("bookings").update({ food_allergies: updatedAllergies }).eq("id", bookingId);
+        if (!fb.error) updateSuccess = true;
+        else lastErrorMsg = fb.error.message;
+      } catch (e) {}
     }
-
-    // Keep metadata in sync as dual-layer fallback in food_allergies
-    const currentAllergies = targetBooking.food_allergies || "";
-    let updatedAllergies = currentAllergies;
-    try {
-      if (currentAllergies.includes("__PAYMENT_METADATA__:")) {
-        const parts = currentAllergies.split("__PAYMENT_METADATA__:");
-        const meta = JSON.parse(parts[1]);
-        meta.finalBalanceStatus = "Verified";
-        if (updatedSchedule.length > 0) {
-          meta.installments = updatedSchedule;
-        }
-        updatedAllergies = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
-        const fb = await supabase.from("bookings").update({ food_allergies: updatedAllergies }).eq("id", bookingId);
-        if (!fb.error) updateSuccess = true;
-        else lastErrorMsg = fb.error.message;
-      } else if (!updateSuccess) {
-        const meta: any = { finalBalanceStatus: "Verified", status: "Verified" };
-        if (updatedSchedule.length > 0) {
-          meta.installments = updatedSchedule;
-        }
-        updatedAllergies = `${currentAllergies.trim() ? currentAllergies.trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
-        const fb = await supabase.from("bookings").update({ food_allergies: updatedAllergies }).eq("id", bookingId);
-        if (!fb.error) updateSuccess = true;
-        else lastErrorMsg = fb.error.message;
-      }
-    } catch (e) {}
 
     if (!updateSuccess) {
       console.error("Error verifying final balance:", lastErrorMsg);
@@ -2817,7 +2825,6 @@ export function BookingPage() {
     }
 
     window.dispatchEvent(new CustomEvent("bookingsUpdated"));
-    await fetchAllData(true);
   };
 
   const handleVerifyInstallment = async (bookingId: number | string, milestoneIndex: number) => {
@@ -2846,29 +2853,32 @@ export function BookingPage() {
       (item: any) => item.status === "Verified" || item.status === "Paid"
     );
 
+    let updatedAllergies = targetBooking.food_allergies || "";
+    const hasMeta = updatedAllergies.includes("__PAYMENT_METADATA__:");
+    if (hasMeta) {
+      try {
+        const parts = updatedAllergies.split("__PAYMENT_METADATA__:");
+        const meta = JSON.parse(parts[1]);
+        meta.installments = updatedSchedule;
+        if (allVerified) meta.finalBalanceStatus = "Verified";
+        updatedAllergies = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+      } catch (e) {}
+    }
+
     const updatePayload: any = {
       installment_schedule: updatedSchedule,
     };
     if (allVerified) {
       updatePayload.final_balance_status = "Verified";
     }
+    if (hasMeta) {
+      updatePayload.food_allergies = updatedAllergies;
+    }
 
-    const { error: dbError } = await supabase
+    await supabase
       .from("bookings")
       .update(updatePayload)
       .eq("id", bookingId);
-
-    let updatedAllergies = targetBooking.food_allergies || "";
-    try {
-      if (updatedAllergies.includes("__PAYMENT_METADATA__:")) {
-        const parts = updatedAllergies.split("__PAYMENT_METADATA__:");
-        const meta = JSON.parse(parts[1]);
-        meta.installments = updatedSchedule;
-        if (allVerified) meta.finalBalanceStatus = "Verified";
-        updatedAllergies = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
-        await supabase.from("bookings").update({ food_allergies: updatedAllergies }).eq("id", bookingId);
-      }
-    } catch (e) {}
 
     await logAuditAction({
       action: "Verified Installment Payment",
@@ -2900,7 +2910,6 @@ export function BookingPage() {
     }
 
     window.dispatchEvent(new CustomEvent("bookingsUpdated"));
-    await fetchAllData(true);
   };
 
   const handleSaveLogisticsSurcharge = async (bookingId: number | string) => {

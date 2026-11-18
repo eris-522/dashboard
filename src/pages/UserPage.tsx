@@ -72,7 +72,7 @@ export function UserPage() {
   const fetchUsers = async () => {
     const { data, error } = await supabase
       .from("profiles")
-      .select("*");
+      .select("id, name, full_name, email, role, status, phone_number, created_at");
 
     if (error) {
       console.error("Error fetching users:", error.message);

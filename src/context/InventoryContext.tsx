@@ -86,7 +86,7 @@ interface InventoryContextType {
   restoreBookingInventory: (bookingId: string | number, bookingName?: string, reason?: string) => Promise<boolean>;
   reconcileCompletedEvents: (bookingsList?: any[]) => Promise<number>;
   completeBookingAndReturnInventory: (bookingId: string | number, bookingName?: string) => Promise<boolean>;
-  reallocateReturnedStockToConfirmedBookings: (bookingsList?: any[], overrideRecords?: BookingDeductionRecord[]) => Promise<boolean>;
+  reallocateReturnedStockToConfirmedBookings: (bookingsList?: any[], overrideRecords?: BookingDeductionRecord[], existingInvItems?: InventoryItem[]) => Promise<boolean>;
   isBookingDeducted: (bookingId: string | number) => boolean;
   getAllocatedStock: (itemId: string | number) => number;
   getOutsourcedStock: (itemId: string | number) => number;
@@ -404,6 +404,8 @@ const mapDbRowToStockMovement = (row: any): StockMovement => ({
 export function InventoryProvider({ children }: { children: ReactNode }) {
   const bookingCtx = useContext(BookingContext);
   const contextBookings = bookingCtx?.bookings;
+  const contextBookingsRef = useRef<any[] | undefined>(contextBookings);
+  contextBookingsRef.current = contextBookings;
 
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -585,10 +587,10 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     .sort()
     .join('|');
   useEffect(() => {
-    if (hasLoadedInitialDataRef.current && contextBookings && contextBookings.length > 0) {
-      reconcileCompletedEvents();
+    if (!isLoading && hasLoadedInitialDataRef.current && contextBookings && contextBookings.length > 0) {
+      reconcileCompletedEvents(contextBookings);
     }
-  }, [bookingsSignature]);
+  }, [bookingsSignature, isLoading]);
 
   const pendingMovementsRef = useRef<any[]>([]);
   const movementFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -597,7 +599,6 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     refreshItems();
 
     let scopeDebounce: ReturnType<typeof setTimeout> | null = null;
-    let bookingsDebounce: ReturnType<typeof setTimeout> | null = null;
 
     // Listen to lightweight Broadcast sync (0 Postgres WAL decoding)
     const unsubscribeBroadcast = subscribeInventoryBroadcast((scope) => {
@@ -617,21 +618,9 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       }, 250);
     });
 
-    // Reuse BookingContext's single `bookings` Realtime listener instead of opening a duplicate channel
-    const handleBookingsSync = () => {
-      if (bookingsDebounce) clearTimeout(bookingsDebounce);
-      bookingsDebounce = setTimeout(async () => {
-        await Promise.all([refreshInventoryItemsOnly(), fetchDeductionsFromDb()]);
-        await reconcileCompletedEvents();
-      }, 350);
-    };
-    window.addEventListener("bookingsRealtimeSync", handleBookingsSync);
-
     return () => {
       if (scopeDebounce) clearTimeout(scopeDebounce);
-      if (bookingsDebounce) clearTimeout(bookingsDebounce);
       unsubscribeBroadcast();
-      window.removeEventListener("bookingsRealtimeSync", handleBookingsSync);
     };
   }, []);
 
@@ -987,46 +976,58 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
    */
   const reallocateReturnedStockToConfirmedBookings = async (
     bookingsList?: any[],
-    overrideRecords?: BookingDeductionRecord[]
+    overrideRecords?: BookingDeductionRecord[],
+    existingInvItems?: InventoryItem[]
   ): Promise<boolean> => {
+    const recordsSource: BookingDeductionRecord[] = overrideRecords || await fetchDeductionsFromDb();
+    const hasAnyOutsourced = recordsSource.some((rec) =>
+      rec.items.some((it) => (it.outsourcedQuantity || 0) > 0)
+    );
+    if (!hasAnyOutsourced) return false;
+
     let currentBookings = bookingsList;
     if (!currentBookings || currentBookings.length === 0) {
       const { data } = await supabase
         .from('bookings')
-        .select('*, packages(*), profiles(*)');
+        .select('id, status, event_date');
       currentBookings = data || [];
     }
 
     const confirmedBookings = (currentBookings || [])
       .filter((b: any) => (b.status || 'Pending') === 'Confirmed')
       .sort((a: any, b: any) => {
-        const timeA = a.event_date ? new Date(a.event_date).getTime() : Infinity;
-        const timeB = b.event_date ? new Date(b.event_date).getTime() : Infinity;
+        const dateA = a.event_date || a.date;
+        const dateB = b.event_date || b.date;
+        const timeA = dateA ? new Date(dateA).getTime() : Infinity;
+        const timeB = dateB ? new Date(dateB).getTime() : Infinity;
         return timeA - timeB;
       });
 
     if (confirmedBookings.length === 0) return false;
 
-    const { data: dbItems, error: invFetchErr } = await supabase
-      .from('inventory')
-      .select('*')
-      .order('name', { ascending: true });
+    let workingItems: InventoryItem[];
+    if (existingInvItems && existingInvItems.length > 0) {
+      workingItems = existingInvItems.map((it) => ({ ...it }));
+    } else {
+      const { data: dbItems, error: invFetchErr } = await supabase
+        .from('inventory')
+        .select('*')
+        .order('name', { ascending: true });
 
-    if (invFetchErr || !dbItems) {
-      return false;
+      if (invFetchErr || !dbItems) {
+        return false;
+      }
+
+      workingItems = dbItems.map((item: any) => ({
+        id: item.id,
+        name: item.name,
+        category: item.category,
+        stock: Number(item.stock) || 0,
+        minStock: Number(item.min_stock) || 0,
+        unit: item.unit || 'pcs',
+        status: computeItemStatus(Number(item.stock) || 0, Number(item.min_stock) || 0, item.status)
+      }));
     }
-
-    const workingItems: InventoryItem[] = dbItems.map((item: any) => ({
-      id: item.id,
-      name: item.name,
-      category: item.category,
-      stock: Number(item.stock) || 0,
-      minStock: Number(item.min_stock) || 0,
-      unit: item.unit || 'pcs',
-      status: computeItemStatus(Number(item.stock) || 0, Number(item.min_stock) || 0, item.status)
-    }));
-
-    let recordsSource: BookingDeductionRecord[] = overrideRecords || await fetchDeductionsFromDb();
 
     const workingRecords: BookingDeductionRecord[] = recordsSource.map(rec => ({
       ...rec,
@@ -1229,11 +1230,11 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
 
     isReconcilingRef.current = true;
     try {
-      // Always read bookings straight from Supabase (never from transient/optimistic UI state)
-      // so a booking is only treated as Confirmed once that status is actually saved.
-      const fetchBookingsPromise = supabase
-        .from('bookings')
-        .select('*, packages(*), profiles(*)');
+      const fetchBookingsPromise = (_bookingsList && _bookingsList.length > 0)
+        ? Promise.resolve({ data: _bookingsList, error: null })
+        : supabase
+            .from('bookings')
+            .select('id, status, event_date, guest_count, additional_pax, corkage_info, packages(name, inclusions), profiles(name)');
 
       const [bookingsRes, deductionsRes, invRes] = await Promise.all([
         fetchBookingsPromise,
@@ -1303,8 +1304,10 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // Refresh records from Supabase after any restorations
-      currentRecords = await fetchDeductionsFromDb();
+      // Refresh records from Supabase only if any restorations occurred
+      if (restoredCount > 0) {
+        currentRecords = await fetchDeductionsFromDb();
+      }
 
       // 2. Ensure every Confirmed booking has an active deduction record in Supabase
       const confirmedBookings = currentBookings.filter((b: any) => (b.status || 'Pending') === 'Confirmed');
@@ -1371,7 +1374,11 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       }
 
       // 4. Reallocate available warehouse supplies to ongoing confirmed bookings
-      await reallocateReturnedStockToConfirmedBookings(currentBookings, currentRecords);
+      await reallocateReturnedStockToConfirmedBookings(
+        currentBookings,
+        currentRecords,
+        (restoredCount === 0 && !anyNewDeduction) ? currentInvItems : undefined
+      );
 
       return restoredCount;
     } finally {
@@ -1403,20 +1410,16 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     return true;
   };
 
-  // Run automatic reconciliation and active booking sync periodically
+  // Run automatic reconciliation periodically while tab is visible (initial mount sync handled via bookingsSignature)
   useEffect(() => {
-    if (!isLoading && items.length > 0 && hasLoadedInitialDataRef.current) {
-      reconcileCompletedEvents();
-    }
-
     const interval = setInterval(() => {
-      if (hasLoadedInitialDataRef.current) {
-        reconcileCompletedEvents();
+      if (hasLoadedInitialDataRef.current && document.visibilityState === "visible") {
+        reconcileCompletedEvents(contextBookingsRef.current);
       }
     }, 300000); // Check every 5 minutes
 
     return () => clearInterval(interval);
-  }, [isLoading, items.length]);
+  }, []);
 
   const isBookingDeducted = (bookingId: string | number): boolean => {
     return deductionRecords.some(d => String(d.bookingId) === String(bookingId));

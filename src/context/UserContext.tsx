@@ -94,7 +94,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       if (session?.user) {
         const { data: adminProfile } = await supabase
           .from('admins')
-          .select('*')
+          .select('id, name, email, role, status, phone_number, created_at')
           .eq('id', session.user.id)
           .single();
 
@@ -119,6 +119,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
           setCurrentUser(null);
         }
       } else {
+        // No real Supabase session: never trust a cached user object from sessionStorage
+        sessionStorage.removeItem('rp_admin_current_user');
+        setCurrentUser(null);
         setIsLoading(false);
       }
     });
@@ -209,7 +212,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
         // System pulls from the 'admins' table to verify admin privileges
         const { data: adminProfile } = await supabase
           .from('admins')
-          .select('*')
+          .select('id, name, email, role, status, phone_number, created_at')
           .eq('id', authData.user.id)
           .single();
 
@@ -227,26 +230,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
       console.error('Supabase login failed:', err);
     }
 
-    // 2. Fallback Hardcoded Admin Access (if offline or logging in via alias)
-    if (
-      (cleanEmail === 'roxanpolicarpio.events@gmail.com' && (cleanPassword === 'admin123-' || cleanPassword === 'admin123')) ||
-      (cleanEmail === 'admin@roxanpolicarpio.com' && (cleanPassword === 'admin123-' || cleanPassword === 'admin123'))
-    ) {
-      const adminUser: User = {
-        id: '7dddf9d1-4b55-49df-8c77-61192afb2fd9',
-        name: 'Roxan Policarpio',
-        email: 'roxanpolicarpio.events@gmail.com',
-        role: 'Admin',
-        status: 'Active',
-        phone: '09214697142',
-        joined: 'Sep 16, 2026',
-      };
-      setCurrentUser(adminUser);
-      sessionStorage.setItem('rp_admin_current_user', JSON.stringify(adminUser));
-      supabase.auth.signInWithPassword({ email: cleanEmail, password: cleanPassword }).catch(() => {});
-      return true;
-    }
-
     return false;
   };
 
@@ -254,11 +237,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
     adminData: CreateAdminData
   ): Promise<{ success: boolean; message?: string; error?: string }> => {
     try {
+      // supabase-js attaches the signed-in admin's access token; the function verifies it server-side
       const { data, error } = await supabase.functions.invoke('create-admin', {
         body: adminData,
-        headers: {
-          'x-admin-email': currentUser?.email || 'roxanpolicarpio.events@gmail.com',
-        },
       });
 
       if (error) {

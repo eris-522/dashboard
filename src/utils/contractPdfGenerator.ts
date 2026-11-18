@@ -87,6 +87,41 @@ function renderStylizedSignatureDataUrl(name: string): string | null {
 }
 
 /**
+ * Resolves a stored signature (either a legacy Data URL or a Supabase Storage HTTP URL)
+ * into a Data URL for jsPDF embedding, falling back to a stylized signature on error.
+ */
+async function resolveSignatureImageDataUrl(
+  urlOrData: string | null | undefined,
+  signerName: string
+): Promise<string | null> {
+  if (urlOrData && urlOrData.startsWith("data:image/")) {
+    return urlOrData;
+  }
+
+  if (urlOrData && (urlOrData.startsWith("http://") || urlOrData.startsWith("https://"))) {
+    try {
+      const res = await fetch(urlOrData);
+      if (res.ok) {
+        const blob = await res.blob();
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(String(reader.result || ""));
+          reader.onerror = () => reject(new Error("FileReader failed"));
+          reader.readAsDataURL(blob);
+        });
+        if (dataUrl.startsWith("data:image/")) {
+          return dataUrl;
+        }
+      }
+    } catch {
+      // Fallback to stylized signature below
+    }
+  }
+
+  return renderStylizedSignatureDataUrl(signerName);
+}
+
+/**
  * Generates and downloads an official, multi-page Signed Catering Service Contract PDF
  * combining event details, itemized financials, all 20 clauses, and the client's signature.
  */
@@ -510,10 +545,13 @@ export async function downloadSignedContractPdf(data: ContractPdfInput): Promise
   const sigRightX = marginX + contentWidth / 2 + 6;
   const sigLineY = y + 37;
 
-  // Embed Client Signature Image (drawn canvas PNG or stylized electronic signature fallback)
-  let sigImgUrl = data.signature?.signature_data_url || null;
-  if (!sigImgUrl && data.termsAccepted) {
-    sigImgUrl = renderStylizedSignatureDataUrl(signerName);
+  // Embed Client Signature Image (drawn canvas PNG, Storage URL, or stylized electronic signature fallback)
+  let sigImgUrl: string | null = null;
+  if (data.signature?.signature_data_url || data.termsAccepted) {
+    sigImgUrl = await resolveSignatureImageDataUrl(
+      data.signature?.signature_data_url,
+      signerName
+    );
   }
   if (sigImgUrl && sigImgUrl.startsWith("data:image/")) {
     try {

@@ -26,7 +26,7 @@ export function RecentActivities({ onViewLogs }: { onViewLogs?: () => void }) {
     try {
       const { data, error } = await supabase
         .from("audit_logs")
-        .select("*")
+        .select("id, action, target, type, details, user_name, created_at")
         .order("created_at", { ascending: false })
         .limit(6);
 
@@ -45,22 +45,35 @@ export function RecentActivities({ onViewLogs }: { onViewLogs?: () => void }) {
   useEffect(() => {
     fetchRecentLogs();
 
-    // Listen to lightweight Broadcast sync instead of Postgres WAL decoding
-    const unsubscribeBroadcast = subscribeAuditBroadcast(() => {
-      fetchRecentLogs();
+    // Listen to lightweight Broadcast sync & in-memory patching instead of re-querying Supabase
+    const unsubscribeBroadcast = subscribeAuditBroadcast((payload) => {
+      if (payload.action === "clear") {
+        setActivities([]);
+      } else if (payload.log && payload.log.id) {
+        setActivities((prev) =>
+          [payload.log, ...prev.filter((a) => a.id !== payload.log.id)].slice(0, 6)
+        );
+      } else {
+        fetchRecentLogs();
+      }
     });
 
-    const handleCustomLog = () => {
-      fetchRecentLogs();
+    const handleCustomLog = (e: any) => {
+      const logItem = e?.detail;
+      if (logItem?.action) {
+        setActivities((prev) =>
+          [logItem, ...prev.filter((a) => a.id !== logItem.id)].slice(0, 6)
+        );
+      } else {
+        fetchRecentLogs();
+      }
     };
 
     window.addEventListener("auditLogged", handleCustomLog);
-    window.addEventListener("markAdminNotifRead", handleCustomLog);
 
     return () => {
       unsubscribeBroadcast();
       window.removeEventListener("auditLogged", handleCustomLog);
-      window.removeEventListener("markAdminNotifRead", handleCustomLog);
     };
   }, []);
 

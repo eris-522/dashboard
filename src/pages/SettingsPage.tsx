@@ -370,10 +370,11 @@ export function SettingsPage() {
       // Ensure active Supabase session before triggering email change
       const { data: sessionData } = await supabase.auth.getSession();
       if (!sessionData?.session) {
-        await supabase.auth.signInWithPassword({
-          email: previousEmail,
-          password: "admin123",
-        }).catch(() => {});
+        const expiredMsg = "Your session has expired. Please sign out and log in again to change your email.";
+        setEmailError(expiredMsg);
+        setSaveMessage({ type: "error", text: expiredMsg });
+        setShowConfirm(false);
+        return;
       }
 
       // Trigger Supabase Change Email Address template ("Confirm your new email address")

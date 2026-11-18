@@ -59,7 +59,7 @@ export function AuditTrailPage() {
 
       const { data, error } = await supabase
         .from("audit_logs")
-        .select("*")
+        .select("id, action, target, type, details, user_name, created_at")
         .order("created_at", { ascending: false })
         .range(from, to);
 
