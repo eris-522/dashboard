@@ -47,6 +47,20 @@ const categories = [
 ];
 const units = ["pcs", "sets", "boxes", "packs", "kg", "g", "lbs", "L", "ml"];
 
+const MAX_ITEM_NAME_LENGTH = 60;
+const MAX_STOCK_LIMIT = 10_000;
+const ITEM_NAME_INVALID_REGEX = /[^a-zA-ZÀ-ÿ\sñÑ\-']/;
+const ITEM_NAME_VALID_REGEX = /^[a-zA-ZÀ-ÿ\sñÑ\-']+$/;
+
+const sanitizeStockNumber = (raw: string, max: number = MAX_STOCK_LIMIT): number | undefined => {
+  const digits = raw.replace(/[^\d]/g, "");
+  if (!digits) return undefined;
+  const stripped = digits.replace(/^0+(?=\d)/, "");
+  const num = parseInt(stripped, 10);
+  if (isNaN(num)) return undefined;
+  return Math.min(max, Math.max(0, num));
+};
+
 type MiddleColumnId = "physicalStock" | "inUse" | "minStock" | "stockStatus";
 
 const DEFAULT_COLUMN_ORDER: MiddleColumnId[] = [
@@ -296,38 +310,68 @@ export function InventoryPage() {
 
   // Handler: Add Item
   const handleAddItem = async () => {
-    if (
-      !newItem.name ||
-      !newItem.category ||
-      newItem.stock === undefined ||
-      newItem.minStock === undefined
-    )
+    const trimmedName = (newItem.name || "").trim();
+    if (!trimmedName) {
+      setFormError("Item name is required.");
       return;
-
-    const nameRegex = /^[a-zA-Z\sñÑ\-']+$/;
-    if (!nameRegex.test(newItem.name)) {
-      setFormError("Item name cannot contain numbers or special characters.");
+    }
+    if (trimmedName.length < 2) {
+      setFormError("Item name must be at least 2 characters long.");
+      return;
+    }
+    if (trimmedName.length > MAX_ITEM_NAME_LENGTH) {
+      setFormError(`Item name cannot exceed ${MAX_ITEM_NAME_LENGTH} characters.`);
+      return;
+    }
+    if (!ITEM_NAME_VALID_REGEX.test(trimmedName)) {
+      setFormError("Item name can only contain letters, spaces, hyphens, and apostrophes.");
+      return;
+    }
+    const normalizedCandidate = trimmedName.replace(/\s+/g, " ").toLowerCase();
+    const duplicate = items.some(
+      (it) => it.name.trim().replace(/\s+/g, " ").toLowerCase() === normalizedCandidate,
+    );
+    if (duplicate) {
+      setFormError("An equipment item with this name already exists.");
       return;
     }
 
-    if (Number(newItem.stock) > 100000 || Number(newItem.minStock) > 100000) {
-      setFormError("Stock values cannot exceed 100,000.");
+    if (
+      !newItem.category ||
+      newItem.stock === undefined ||
+      newItem.minStock === undefined
+    ) {
+      setFormError("Please enter valid initial stock and minimum required stock.");
+      return;
+    }
+
+    const stockVal = Number(newItem.stock);
+    const minStockVal = Number(newItem.minStock);
+    if (
+      isNaN(stockVal) ||
+      isNaN(minStockVal) ||
+      stockVal < 0 ||
+      minStockVal < 0 ||
+      stockVal > MAX_STOCK_LIMIT ||
+      minStockVal > MAX_STOCK_LIMIT
+    ) {
+      setFormError(`Stock values must be between 0 and ${MAX_STOCK_LIMIT.toLocaleString()}.`);
       return;
     }
 
     await addItem({
-      name: newItem.name.trim(),
+      name: trimmedName,
       category: newItem.category,
-      stock: Number(newItem.stock),
-      minStock: Number(newItem.minStock),
+      stock: stockVal,
+      minStock: minStockVal,
       unit: newItem.unit || "pcs",
     });
 
     await logAuditAction({
       action: "Added Equipment Item",
-      target: newItem.name.trim(),
+      target: trimmedName,
       type: "Create",
-      details: `Added new equipment item ${newItem.name.trim()} (${newItem.category}) with initial stock of ${newItem.stock} ${newItem.unit || "pcs"}`,
+      details: `Added new equipment item ${trimmedName} (${newItem.category}) with initial stock of ${stockVal} ${newItem.unit || "pcs"}`,
     });
 
     setIsAddModalOpen(false);
@@ -431,8 +475,8 @@ export function InventoryPage() {
       return;
     }
 
-    if (calculatedNewStock > 100000) {
-      setFormError("Total stock cannot exceed 100,000.");
+    if (calculatedNewStock > MAX_STOCK_LIMIT) {
+      setFormError(`Total stock cannot exceed ${MAX_STOCK_LIMIT.toLocaleString()}.`);
       return;
     }
 
@@ -461,34 +505,57 @@ export function InventoryPage() {
   const handleSaveEditItem = async () => {
     if (!selectedItem) return;
 
-    if (!editFormData.name.trim()) {
+    const trimmedName = editFormData.name.trim();
+    if (!trimmedName) {
       setFormError("Item name is required.");
       return;
     }
-
-    const nameRegex = /^[a-zA-Z\sñÑ\-']+$/;
-    if (!nameRegex.test(editFormData.name)) {
-      setFormError("Item name cannot contain numbers or special characters.");
+    if (trimmedName.length < 2) {
+      setFormError("Item name must be at least 2 characters long.");
+      return;
+    }
+    if (trimmedName.length > MAX_ITEM_NAME_LENGTH) {
+      setFormError(`Item name cannot exceed ${MAX_ITEM_NAME_LENGTH} characters.`);
+      return;
+    }
+    if (!ITEM_NAME_VALID_REGEX.test(trimmedName)) {
+      setFormError("Item name can only contain letters, spaces, hyphens, and apostrophes.");
+      return;
+    }
+    const normalizedCandidate = trimmedName.replace(/\s+/g, " ").toLowerCase();
+    const duplicate = items.some(
+      (it) =>
+        String(it.id) !== String(selectedItem.id) &&
+        it.name.trim().replace(/\s+/g, " ").toLowerCase() === normalizedCandidate,
+    );
+    if (duplicate) {
+      setFormError("An equipment item with this name already exists.");
       return;
     }
 
-    if (Number(editFormData.minStock) > 100000) {
-      setFormError("Min. required stock cannot exceed 100,000.");
+    const minStockVal = Number(editFormData.minStock);
+    if (
+      editFormData.minStock === "" ||
+      isNaN(minStockVal) ||
+      minStockVal < 0 ||
+      minStockVal > MAX_STOCK_LIMIT
+    ) {
+      setFormError(`Min. required stock must be between 0 and ${MAX_STOCK_LIMIT.toLocaleString()}.`);
       return;
     }
 
     await updateItem(selectedItem.id, {
-      name: editFormData.name.trim(),
+      name: trimmedName,
       category: editFormData.category,
-      minStock: Number(editFormData.minStock) || 0,
+      minStock: minStockVal,
       unit: editFormData.unit,
     });
 
     await logAuditAction({
       action: "Updated Equipment Item",
-      target: editFormData.name,
+      target: trimmedName,
       type: "Update",
-      details: `Modified details for ${editFormData.name} in category ${editFormData.category}`,
+      details: `Modified details for ${trimmedName} in category ${editFormData.category}`,
     });
 
     setIsEditModalOpen(false);
@@ -1311,19 +1378,38 @@ export function InventoryPage() {
                 </div>
               )}
               <div className="space-y-1">
-                <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
-                  Item Name
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
+                    Item Name
+                  </label>
+                  <span className="text-[10px] text-natural-text-light/70 font-medium">
+                    {(newItem.name || "").length}/{MAX_ITEM_NAME_LENGTH}
+                  </span>
+                </div>
                 <input
                   type="text"
+                  maxLength={MAX_ITEM_NAME_LENGTH}
                   value={newItem.name}
                   onChange={(e) => {
-                    setNewItem({ ...newItem, name: e.target.value });
-                    setFormError(null);
+                    const raw = e.target.value;
+                    if (ITEM_NAME_INVALID_REGEX.test(raw)) {
+                      setFormError("Item name can only contain letters, spaces, hyphens, and apostrophes.");
+                    } else if (raw.length > MAX_ITEM_NAME_LENGTH) {
+                      setFormError(`Item name cannot exceed ${MAX_ITEM_NAME_LENGTH} characters.`);
+                    } else {
+                      setFormError(null);
+                    }
+                    const sanitized = raw
+                      .replace(/[^a-zA-ZÀ-ÿ\sñÑ\-']/g, "")
+                      .slice(0, MAX_ITEM_NAME_LENGTH);
+                    setNewItem({ ...newItem, name: sanitized });
                   }}
                   className="w-full px-4 py-2 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-natural-accent/10"
-                  placeholder="e.g. Wine Glasses, Chafing Dishes..."
+                  placeholder="e.g. Wine Glasses, Chafing Dishes"
                 />
+                <p className="text-[10px] text-natural-text-light">
+                  Letters, spaces, hyphens, and apostrophes only (max {MAX_ITEM_NAME_LENGTH} characters).
+                </p>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
@@ -1365,54 +1451,88 @@ export function InventoryPage() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
-                    Initial Stock
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
+                      Initial Stock
+                    </label>
+                    <span className="text-[10px] text-natural-text-light/70 font-medium">
+                      Max {MAX_STOCK_LIMIT.toLocaleString()}
+                    </span>
+                  </div>
                   <input
                     type="number"
                     min="0"
-                    max="100000"
+                    max={MAX_STOCK_LIMIT}
                     value={newItem.stock ?? ""}
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => {
-                      const val = e.target.value;
-                      if (val === "") {
+                      const raw = e.target.value;
+                      if (raw === "") {
                         setNewItem({ ...newItem, stock: undefined });
+                        setFormError(null);
                         return;
                       }
-                      const num = Math.min(100000, Math.max(0, Number(val)));
+                      const rawNum = Number(raw);
+                      if (!isNaN(rawNum) && rawNum > MAX_STOCK_LIMIT) {
+                        setFormError(`Initial stock cannot exceed ${MAX_STOCK_LIMIT.toLocaleString()}.`);
+                      } else {
+                        setFormError(null);
+                      }
+                      const num = sanitizeStockNumber(raw, MAX_STOCK_LIMIT);
+                      if (num !== undefined) {
+                        e.target.value = String(num);
+                      }
                       setNewItem({ ...newItem, stock: num });
                     }}
                     onKeyDown={(e) => {
-                      if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") {
+                      if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-" || e.key === ".") {
                         e.preventDefault();
                       }
                     }}
+                    placeholder="0"
                     className="w-full px-4 py-2 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:bg-white"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
-                    Min. Required Stock
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
+                      Min. Required Stock
+                    </label>
+                    <span className="text-[10px] text-natural-text-light/70 font-medium">
+                      Max {MAX_STOCK_LIMIT.toLocaleString()}
+                    </span>
+                  </div>
                   <input
                     type="number"
                     min="0"
-                    max="100000"
+                    max={MAX_STOCK_LIMIT}
                     value={newItem.minStock ?? ""}
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => {
-                      const val = e.target.value;
-                      if (val === "") {
+                      const raw = e.target.value;
+                      if (raw === "") {
                         setNewItem({ ...newItem, minStock: undefined });
+                        setFormError(null);
                         return;
                       }
-                      const num = Math.min(100000, Math.max(0, Number(val)));
+                      const rawNum = Number(raw);
+                      if (!isNaN(rawNum) && rawNum > MAX_STOCK_LIMIT) {
+                        setFormError(`Min. required stock cannot exceed ${MAX_STOCK_LIMIT.toLocaleString()}.`);
+                      } else {
+                        setFormError(null);
+                      }
+                      const num = sanitizeStockNumber(raw, MAX_STOCK_LIMIT);
+                      if (num !== undefined) {
+                        e.target.value = String(num);
+                      }
                       setNewItem({ ...newItem, minStock: num });
                     }}
                     onKeyDown={(e) => {
-                      if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") {
+                      if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-" || e.key === ".") {
                         e.preventDefault();
                       }
                     }}
+                    placeholder="10"
                     className="w-full px-4 py-2 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:bg-white"
                   />
                 </div>
@@ -1431,8 +1551,13 @@ export function InventoryPage() {
               </button>
               <button
                 onClick={handleAddItem}
-                disabled={!newItem.name || newItem.stock === undefined}
-                className="flex-1 bg-natural-accent text-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 disabled:opacity-50"
+                disabled={
+                  !newItem.name?.trim() ||
+                  newItem.name.trim().length < 2 ||
+                  newItem.stock === undefined ||
+                  newItem.minStock === undefined
+                }
+                className="flex-1 bg-natural-accent text-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               >
                 Create Item
               </button>
@@ -1592,30 +1717,28 @@ export function InventoryPage() {
                     <input
                       type="number"
                       min="0"
-                      max="100000"
+                      max={MAX_STOCK_LIMIT}
                       value={restockAmount}
+                      onFocus={(e) => e.target.select()}
                       onChange={(e) => {
-                        const val = e.target.value;
-                        if (val === "") {
+                        const raw = e.target.value;
+                        if (raw === "") {
                           setRestockAmount("");
                           setFormError(null);
                           return;
                         }
-                        const num = Number(val);
-                        if (num > 100000) {
-                          setRestockAmount(100000);
-                          setFormError("Quantity cannot exceed 100,000.");
-                          return;
+                        const rawNum = Number(raw);
+                        if (!isNaN(rawNum) && rawNum > MAX_STOCK_LIMIT) {
+                          setFormError(`Quantity cannot exceed ${MAX_STOCK_LIMIT.toLocaleString()}.`);
+                        } else {
+                          setFormError(null);
                         }
-                        if (num < 0) {
-                          setRestockAmount(0);
-                          return;
-                        }
+                        const num = sanitizeStockNumber(raw, MAX_STOCK_LIMIT) ?? 0;
+                        e.target.value = String(num);
                         setRestockAmount(num);
-                        setFormError(null);
                       }}
                       onKeyDown={(e) => {
-                        if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") {
+                        if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-" || e.key === ".") {
                           e.preventDefault();
                         }
                       }}
@@ -1784,18 +1907,37 @@ export function InventoryPage() {
                 </div>
               )}
               <div className="space-y-1">
-                <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
-                  Item Name
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
+                    Item Name
+                  </label>
+                  <span className="text-[10px] text-natural-text-light/70 font-medium">
+                    {(editFormData.name || "").length}/{MAX_ITEM_NAME_LENGTH}
+                  </span>
+                </div>
                 <input
                   type="text"
+                  maxLength={MAX_ITEM_NAME_LENGTH}
                   value={editFormData.name}
                   onChange={(e) => {
-                    setEditFormData({ ...editFormData, name: e.target.value });
-                    setFormError(null);
+                    const raw = e.target.value;
+                    if (ITEM_NAME_INVALID_REGEX.test(raw)) {
+                      setFormError("Item name can only contain letters, spaces, hyphens, and apostrophes.");
+                    } else if (raw.length > MAX_ITEM_NAME_LENGTH) {
+                      setFormError(`Item name cannot exceed ${MAX_ITEM_NAME_LENGTH} characters.`);
+                    } else {
+                      setFormError(null);
+                    }
+                    const sanitized = raw
+                      .replace(/[^a-zA-ZÀ-ÿ\sñÑ\-']/g, "")
+                      .slice(0, MAX_ITEM_NAME_LENGTH);
+                    setEditFormData({ ...editFormData, name: sanitized });
                   }}
                   className="w-full px-4 py-2 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:bg-white"
                 />
+                <p className="text-[10px] text-natural-text-light">
+                  Letters, spaces, hyphens, and apostrophes only (max {MAX_ITEM_NAME_LENGTH} characters).
+                </p>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
@@ -1836,17 +1978,23 @@ export function InventoryPage() {
                 </div>
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
-                  Min. Required Stock
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
+                    Min. Required Stock
+                  </label>
+                  <span className="text-[10px] text-natural-text-light/70 font-medium">
+                    Max {MAX_STOCK_LIMIT.toLocaleString()}
+                  </span>
+                </div>
                 <input
                   type="number"
                   min="0"
-                  max="100000"
+                  max={MAX_STOCK_LIMIT}
                   value={editFormData.minStock}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) => {
-                    const val = e.target.value;
-                    if (val === "") {
+                    const raw = e.target.value;
+                    if (raw === "") {
                       setEditFormData({
                         ...editFormData,
                         minStock: "",
@@ -1854,30 +2002,21 @@ export function InventoryPage() {
                       setFormError(null);
                       return;
                     }
-                    const num = Number(val);
-                    if (num > 100000) {
-                      setEditFormData({
-                        ...editFormData,
-                        minStock: 100000,
-                      });
-                      setFormError("Min. required stock cannot exceed 100,000.");
-                      return;
+                    const rawNum = Number(raw);
+                    if (!isNaN(rawNum) && rawNum > MAX_STOCK_LIMIT) {
+                      setFormError(`Min. required stock cannot exceed ${MAX_STOCK_LIMIT.toLocaleString()}.`);
+                    } else {
+                      setFormError(null);
                     }
-                    if (num < 0) {
-                      setEditFormData({
-                        ...editFormData,
-                        minStock: 0,
-                      });
-                      return;
-                    }
+                    const num = sanitizeStockNumber(raw, MAX_STOCK_LIMIT) ?? 0;
+                    e.target.value = String(num);
                     setEditFormData({
                       ...editFormData,
                       minStock: num,
                     });
-                    setFormError(null);
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") {
+                    if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-" || e.key === ".") {
                       e.preventDefault();
                     }
                   }}
@@ -1899,7 +2038,12 @@ export function InventoryPage() {
               </button>
               <button
                 onClick={handleSaveEditItem}
-                className="flex-1 bg-natural-accent text-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90"
+                disabled={
+                  !editFormData.name.trim() ||
+                  editFormData.name.trim().length < 2 ||
+                  editFormData.minStock === ""
+                }
+                className="flex-1 bg-natural-accent text-white py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               >
                 Save Changes
               </button>
