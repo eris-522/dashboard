@@ -1320,12 +1320,14 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
           const additionalPax = Number(b.additional_pax ?? b.additionalPax ?? 0);
           const totalPax = guestCount + additionalPax;
           const inclusions = b.packages?.inclusions || b.inclusions || [];
+          const corkage = (b as any).corkage_info || (b as any).logistics_info?.corkage || null;
           await deductBookingInventory(
             b.id,
             b.profiles?.name || b.profiles?.full_name || b.customerName || 'Client',
             pkgName,
             totalPax,
-            inclusions
+            inclusions,
+            corkage
           );
           anyNewDeduction = true;
         }

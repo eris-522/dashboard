@@ -53,6 +53,7 @@ export interface Booking {
   final_balance_reference?: string;
   final_balance_receipt?: string;
   installment_schedule?: any;
+  inclusions?: any[];
   selected_menu_items?: string[];
   logistics_info?: any;
   corkage_info?: any;
@@ -244,6 +245,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
               booking.profiles?.phone_number || booking.profiles?.phone || "",
             eventType: booking.event_type || "",
             package: booking.packages?.name || "",
+            inclusions: Array.isArray(booking.packages?.inclusions) ? booking.packages.inclusions : [],
             date: booking.event_date || "",
             time: booking.event_time || "",
             guestCount: booking.guest_count || 0,
