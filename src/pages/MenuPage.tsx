@@ -45,6 +45,8 @@ const categories = [
   "Archived",
 ];
 
+const MAX_DISH_NAME_LENGTH = 60;
+
 export const isSoup = (item: { name?: string; category?: string; sub_category?: string }) => {
   const sub = (item.sub_category || "").trim().toLowerCase();
   const cat = (item.category || "").trim().toLowerCase();
@@ -215,14 +217,28 @@ export function MenuPage() {
 
   // Transitions the user from the input form to the final validation check before altering the database
   const handleConfirmSave = () => {
-    // Prevent names with numbers or special characters (allows letters, spaces, hyphens, apostrophes, and ñ)
-    const nameRegex = /^[a-zA-Z\sñÑ\-']+$/;
-    if (!nameRegex.test(formData.name)) {
-      setFormError("Dish name cannot contain numbers or special characters.");
+    const trimmed = (formData.name || "").trim();
+    if (!trimmed) {
+      setFormError("Dish name is required.");
+      return;
+    }
+    if (trimmed.length < 2) {
+      setFormError("Dish name must be at least 2 characters long.");
+      return;
+    }
+    if (trimmed.length > MAX_DISH_NAME_LENGTH) {
+      setFormError(`Dish name cannot exceed ${MAX_DISH_NAME_LENGTH} characters.`);
       return;
     }
 
-    const candidate = normalizeDishName(formData.name);
+    // Prevent names with numbers or special characters (allows letters, spaces, hyphens, apostrophes, and ñ)
+    const nameRegex = /^[a-zA-ZÀ-ÿ\sñÑ\-']+$/;
+    if (!nameRegex.test(trimmed)) {
+      setFormError("Dish name can only contain letters, spaces, hyphens, and apostrophes.");
+      return;
+    }
+
+    const candidate = normalizeDishName(trimmed);
     const duplicate = menuItems.some(
       (item) =>
         item.id !== editingItem?.id &&
@@ -238,7 +254,7 @@ export function MenuPage() {
     setConfirmAction({
       type: editingItem ? "edit" : "create",
       itemId: editingItem?.id,
-      itemName: formData.name || "New Dish",
+      itemName: trimmed,
     });
   };
 
@@ -252,11 +268,13 @@ export function MenuPage() {
     if (!confirmAction) return;
     setFormError(null);
 
+    const cleanName = (formData.name || "").trim().slice(0, MAX_DISH_NAME_LENGTH);
+
     if (confirmAction.type === "create") {
       // Inserts a new row into the menu_items table
       const { error } = await supabase.from("menu_items").insert([
         {
-          name: formData.name,
+          name: cleanName,
           category: formData.category,
           sub_category: ["Main Course", "Appetizers"].includes(
             formData.category,
@@ -278,7 +296,7 @@ export function MenuPage() {
       }
       await logAuditAction({
         action: "Added Menu Item",
-        target: formData.name,
+        target: cleanName,
         type: "Create",
         details: `New dish added to ${formData.category} category`,
       });
@@ -287,7 +305,7 @@ export function MenuPage() {
       const { error } = await supabase
         .from("menu_items")
         .update({
-          name: formData.name,
+          name: cleanName,
           category: formData.category,
           sub_category: ["Main Course", "Appetizers"].includes(
             formData.category,
@@ -309,7 +327,7 @@ export function MenuPage() {
       }
       await logAuditAction({
         action: "Updated Menu Item",
-        target: formData.name,
+        target: cleanName,
         type: "Update",
         details: `Modified dish details`,
       });
@@ -777,19 +795,44 @@ export function MenuPage() {
               )}
 
               <div className="space-y-2">
-                <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
-                  Dish Name
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
+                    Dish Name
+                  </label>
+                  <span className="text-[10px] text-natural-text-light/70 font-medium">
+                    {(formData.name || "").length}/{MAX_DISH_NAME_LENGTH}
+                  </span>
+                </div>
                 <input
                   type="text"
+                  maxLength={MAX_DISH_NAME_LENGTH}
                   value={formData.name}
                   onChange={(e) => {
-                    setFormData({ ...formData, name: e.target.value });
-                    setFormError(null);
+                    const raw = e.target.value;
+                    const hasInvalid = /[^a-zA-ZÀ-ÿ\sñÑ\-']/.test(raw);
+                    if (hasInvalid) {
+                      setFormError("Dish name can only contain letters, spaces, hyphens, and apostrophes.");
+                    } else if (raw.length > MAX_DISH_NAME_LENGTH) {
+                      setFormError(`Dish name cannot exceed ${MAX_DISH_NAME_LENGTH} characters.`);
+                    } else {
+                      setFormError(null);
+                    }
+                    const sanitized = raw
+                      .replace(/[^a-zA-ZÀ-ÿ\sñÑ\-']/g, "")
+                      .slice(0, MAX_DISH_NAME_LENGTH);
+                    setFormData({ ...formData, name: sanitized });
                   }}
                   placeholder="e.g. Adobo Special"
-                  className="w-full px-4 py-2.5 bg-natural-bg border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 transition-all font-medium"
+                  className={cn(
+                    "w-full px-4 py-2.5 bg-natural-bg border rounded-xl text-sm focus:outline-none focus:ring-2 transition-all font-medium",
+                    formError && formError.includes("Dish name")
+                      ? "border-red-500 focus:ring-red-500/20"
+                      : "border-natural-border focus:ring-natural-accent/20"
+                  )}
                 />
+                <p className="text-[10px] text-natural-text-light">
+                  Letters, spaces, hyphens, and apostrophes only (max {MAX_DISH_NAME_LENGTH} characters).
+                </p>
               </div>
 
               <div className="space-y-2">
@@ -896,11 +939,13 @@ export function MenuPage() {
               <button
                 onClick={handleConfirmSave}
                 disabled={
-                  !formData.name ||
+                  !formData.name?.trim() ||
+                  formData.name.trim().length < 2 ||
+                  Boolean(formError && formError.includes("Dish name")) ||
                   (["Main Course", "Appetizers"].includes(formData.category) &&
                     !formData.sub_category)
                 }
-                className="bg-natural-accent text-white px-6 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-natural-accent/90 transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                className="bg-natural-accent text-white px-6 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-natural-accent/90 transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               >
                 {editingItem ? "Save Changes" : "Add Dish"}
               </button>
