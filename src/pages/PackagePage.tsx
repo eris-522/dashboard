@@ -38,13 +38,27 @@ export interface CateringPackage {
   category_limits?: Record<string, number>;
 }
 
-export const formatNumberWithCommas = (val?: string | number) => {
+const MAX_PACKAGE_NAME_LENGTH = 60;
+const MAX_PACKAGE_PAX = 500;
+const MIN_PACKAGE_PAX = 10;
+const MAX_PACKAGE_PAX_LENGTH = 15;
+const MAX_PACKAGE_PRICE = 1_000_000;
+const MAX_ADDITIONAL_PAX_PRICE = 10_000;
+const MAX_CATEGORY_DISH_LIMIT = 10;
+const MAX_INCLUSION_CATEGORY_LENGTH = 40;
+const MAX_INCLUSION_ITEM_LENGTH = 60;
+
+export const formatNumberWithCommas = (val?: string | number, max?: number) => {
   if (val === undefined || val === null || val === "") return "";
-  const raw = String(val).replace(/,/g, "").replace(/[^0-9.]/g, "");
-  if (!raw) return "";
-  const parts = raw.split(".");
-  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return parts.slice(0, 2).join(".");
+  const digits = String(val).replace(/,/g, "").replace(/[^\d]/g, "");
+  if (!digits) return "";
+  const stripped = digits.replace(/^0+(?=\d)/, "");
+  let num = parseInt(stripped, 10);
+  if (isNaN(num)) return "";
+  if (max !== undefined && num > max) {
+    num = max;
+  }
+  return String(num).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 };
 
 export const formatPrice = (price?: string | number) => {
@@ -54,12 +68,28 @@ export const formatPrice = (price?: string | number) => {
   return `₱${formatted}`;
 };
 
+const sanitizeGuestRangeInput = (raw: string): string => {
+  let cleaned = raw.replace(/[^\d\s-]/g, "");
+  const hyphenParts = cleaned.split("-");
+  if (hyphenParts.length > 2) {
+    cleaned = `${hyphenParts[0]}-${hyphenParts.slice(1).join("")}`;
+  }
+  cleaned = cleaned.replace(/\d+/g, (match) => {
+    const stripped = match.replace(/^0+(?=\d)/, "");
+    const num = parseInt(stripped, 10);
+    if (isNaN(num)) return "";
+    return String(Math.min(MAX_PACKAGE_PAX, num));
+  });
+  return cleaned.slice(0, MAX_PACKAGE_PAX_LENGTH);
+};
+
 export function PackagePage() {
   const { calculatePackageEquipment } = useInventory();
   // Feature: State management for database arrays and UI toggles
   const [packages, setPackages] = useState<CateringPackage[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   const [editingPackage, setEditingPackage] =
     useState<Partial<CateringPackage> | null>(null);
@@ -107,14 +137,19 @@ export function PackagePage() {
 
   // Feature: Main database read function (pruned columns).
   const fetchData = async () => {
-    const pkgResponse = await supabase
-      .from("packages")
-      .select("id, name, pax, price, additional_pax_price, tag, inclusions, status, image_url, category_limits, created_at")
-      .order("created_at", { ascending: false });
+    setIsLoading(true);
+    try {
+      const pkgResponse = await supabase
+        .from("packages")
+        .select("id, name, pax, price, additional_pax_price, tag, inclusions, status, image_url, category_limits, created_at")
+        .order("created_at", { ascending: false });
 
-    if (pkgResponse.error)
-      console.error("Error fetching packages:", pkgResponse.error);
-    else setPackages(pkgResponse.data as CateringPackage[]);
+      if (pkgResponse.error)
+        console.error("Error fetching packages:", pkgResponse.error);
+      else setPackages(pkgResponse.data as CateringPackage[]);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const fetchInclusions = async () => {
@@ -205,6 +240,11 @@ export function PackagePage() {
       image_url: "",
       category_limits: {},
     });
+    setFormError(null);
+    setAddingItemToCategory(null);
+    setIsAddingCategory(false);
+    setNewItemName("");
+    setNewCategoryName("");
     setIsModalOpen(true);
   };
 
@@ -234,16 +274,32 @@ export function PackagePage() {
   };
 
   const handleAddNewItemToCategory = async (category: string) => {
-    if (
-      !newItemName.trim() ||
-      dynamicInclusionCategories[category]?.includes(newItemName.trim())
-    ) {
+    const trimmedName = newItemName.trim().slice(0, MAX_INCLUSION_ITEM_LENGTH);
+    if (!trimmedName) {
       setNewItemName("");
       setAddingItemToCategory(null);
       return;
     }
 
-    const trimmedName = newItemName.trim();
+    if (
+      trimmedName.length < 2 ||
+      !/^[a-zA-ZÀ-ÿ\sñÑ&\-']+$/.test(trimmedName)
+    ) {
+      setFormError(
+        "Inclusion item name must be 2–60 characters and contain only letters, spaces, ampersands, hyphens, or apostrophes.",
+      );
+      return;
+    }
+
+    const existsInCategory = (dynamicInclusionCategories[category] || []).some(
+      (item) => item.toLowerCase() === trimmedName.toLowerCase(),
+    );
+    if (existsInCategory) {
+      setFormError(`"${trimmedName}" already exists in ${category}.`);
+      return;
+    }
+
+    setFormError(null);
 
     // Optimistic UI Update so the checkbox appears immediately
     setDynamicInclusionCategories((prev) => ({
@@ -279,17 +335,33 @@ export function PackagePage() {
   };
 
   const handleAddNewCategory = async () => {
-    const trimmedCategoryName = newCategoryName.trim();
+    const trimmedCategoryName = newCategoryName
+      .trim()
+      .slice(0, MAX_INCLUSION_CATEGORY_LENGTH);
     setFormError(null);
 
+    if (!trimmedCategoryName) {
+      setNewCategoryName("");
+      setIsAddingCategory(false);
+      return;
+    }
+
     if (
-      !trimmedCategoryName ||
+      trimmedCategoryName.length < 2 ||
+      !/^[a-zA-ZÀ-ÿ\sñÑ&\-']+$/.test(trimmedCategoryName)
+    ) {
+      setFormError(
+        "Category name must be 2–40 characters and contain only letters, spaces, ampersands, hyphens, or apostrophes.",
+      );
+      return;
+    }
+
+    if (
       Object.keys(dynamicInclusionCategories)
         .map((k) => k.toLowerCase())
         .includes(trimmedCategoryName.toLowerCase())
     ) {
-      setNewCategoryName("");
-      setIsAddingCategory(false);
+      setFormError(`Category "${trimmedCategoryName}" already exists.`);
       return;
     }
 
@@ -347,28 +419,96 @@ export function PackagePage() {
 
   // Feature: Moves user from the package input form to the final validation step
   const handleConfirmSave = () => {
-    if (editingPackage?.name) {
-      const nameRegex = /^[a-zA-Z\sñÑ\-']+$/;
-      if (!nameRegex.test(editingPackage.name)) {
-        setFormError(
-          "Package name cannot contain numbers or special characters.",
-        );
-        return;
-      }
+    const trimmedName = (editingPackage?.name || "").trim();
+    if (!trimmedName) {
+      setFormError("Package name is required.");
+      return;
+    }
+    if (trimmedName.length < 2) {
+      setFormError("Package name must be at least 2 characters long.");
+      return;
+    }
+    if (trimmedName.length > MAX_PACKAGE_NAME_LENGTH) {
+      setFormError(
+        `Package name cannot exceed ${MAX_PACKAGE_NAME_LENGTH} characters.`,
+      );
+      return;
+    }
+    const nameRegex = /^[a-zA-ZÀ-ÿ\sñÑ\-']+$/;
+    if (!nameRegex.test(trimmedName)) {
+      setFormError(
+        "Package name can only contain letters, spaces, hyphens, and apostrophes.",
+      );
+      return;
+    }
+    const normalizedCandidate = trimmedName.replace(/\s+/g, " ").toLowerCase();
+    const duplicatePkg = packages.some(
+      (pkg) =>
+        pkg.id !== editingPackage?.id &&
+        pkg.name.trim().replace(/\s+/g, " ").toLowerCase() ===
+          normalizedCandidate,
+    );
+    if (duplicatePkg) {
+      setFormError("A package with this name already exists.");
+      return;
     }
 
-    if (editingPackage?.pax) {
-      const nums = editingPackage.pax.match(/\d+/g);
-      if (!nums) {
-        setFormError("Please enter a valid guest count.");
-        return;
-      }
-      const hasInvalid = nums.some((n) => {
-        const num = parseInt(n, 10);
-        return num < 10 || num > 500;
-      });
-      if (hasInvalid) {
-        setFormError("Guest count must be between 10 and 500.");
+    const trimmedPax = (editingPackage?.pax || "").trim();
+    if (!trimmedPax || !/^\d+(\s*-\s*\d+)?$/.test(trimmedPax)) {
+      setFormError(
+        `Please enter a valid guest count or range (e.g. "80" or "80 - 100", between ${MIN_PACKAGE_PAX} and ${MAX_PACKAGE_PAX}).`,
+      );
+      return;
+    }
+    const nums = trimmedPax.match(/\d+/g);
+    if (!nums) {
+      setFormError("Please enter a valid guest count.");
+      return;
+    }
+    const parsedNums = nums.map((n) => parseInt(n, 10));
+    const hasInvalid = parsedNums.some(
+      (num) => num < MIN_PACKAGE_PAX || num > MAX_PACKAGE_PAX,
+    );
+    if (hasInvalid) {
+      setFormError(
+        `Guest count must be between ${MIN_PACKAGE_PAX} and ${MAX_PACKAGE_PAX}.`,
+      );
+      return;
+    }
+    if (parsedNums.length === 2 && parsedNums[0] > parsedNums[1]) {
+      setFormError("Minimum guest count cannot exceed maximum guest count.");
+      return;
+    }
+
+    const numericPrice = parseInt(
+      String(editingPackage?.price || "").replace(/,/g, ""),
+      10,
+    );
+    if (
+      !editingPackage?.price ||
+      isNaN(numericPrice) ||
+      numericPrice <= 0 ||
+      numericPrice > MAX_PACKAGE_PRICE
+    ) {
+      setFormError(
+        `Price must be between ₱1 and ₱${MAX_PACKAGE_PRICE.toLocaleString()}.`,
+      );
+      return;
+    }
+
+    if (editingPackage?.additional_pax_price) {
+      const numericAddPrice = parseInt(
+        String(editingPackage.additional_pax_price).replace(/,/g, ""),
+        10,
+      );
+      if (
+        isNaN(numericAddPrice) ||
+        numericAddPrice < 0 ||
+        numericAddPrice > MAX_ADDITIONAL_PAX_PRICE
+      ) {
+        setFormError(
+          `Additional pax price must be between ₱0 and ₱${MAX_ADDITIONAL_PAX_PRICE.toLocaleString()}.`,
+        );
         return;
       }
     }
@@ -384,7 +524,7 @@ export function PackagePage() {
       type: editingPackage?.id ? "edit" : "create",
       itemType: "package",
       itemId: editingPackage?.id,
-      itemName: editingPackage?.name || "New Package",
+      itemName: trimmedName || "New Package",
     });
   };
 
@@ -494,12 +634,19 @@ export function PackagePage() {
     }
 
     if (confirmAction.itemType === "package") {
+      const cleanName = editingPackage?.name
+        ?.trim()
+        .slice(0, MAX_PACKAGE_NAME_LENGTH);
+      const cleanPax = editingPackage?.pax
+        ?.trim()
+        .slice(0, MAX_PACKAGE_PAX_LENGTH);
+
       if (confirmAction.type === "create") {
         // Inserts new package into the 'packages' table
         const { error } = await supabase.from("packages").insert([
           {
-            name: editingPackage?.name,
-            pax: editingPackage?.pax,
+            name: cleanName,
+            pax: cleanPax,
             price: editingPackage?.price
               ? String(editingPackage.price).replace(/,/g, "")
               : null,
@@ -520,7 +667,7 @@ export function PackagePage() {
         } else {
           await logAuditAction({
             action: "Created Package",
-            target: editingPackage?.name || "New Package",
+            target: cleanName || "New Package",
             type: "Create",
             details: `Created new catering package`,
           });
@@ -530,8 +677,8 @@ export function PackagePage() {
         const { error } = await supabase
           .from("packages")
           .update({
-            name: editingPackage?.name,
-            pax: editingPackage?.pax,
+            name: cleanName,
+            pax: cleanPax,
             price: editingPackage?.price
               ? String(editingPackage.price).replace(/,/g, "")
               : null,
@@ -552,7 +699,7 @@ export function PackagePage() {
         } else {
           await logAuditAction({
             action: "Updated Package",
-            target: editingPackage?.name || "Package",
+            target: cleanName || "Package",
             type: "Update",
             details: `Modified package configuration`,
           });
@@ -652,8 +799,36 @@ export function PackagePage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {displayedPackages.map((pkg) => (
+      {isLoading ? (
+        <div className="glass-card bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl flex flex-col items-center justify-center py-20 text-natural-text-light px-4 text-center">
+          <div className="w-8 h-8 border-4 border-natural-accent border-t-transparent rounded-full animate-spin mb-4" />
+          <p className="font-serif italic text-sm text-natural-text-light">Loading packages...</p>
+        </div>
+      ) : displayedPackages.length === 0 ? (
+        <div className="glass-card bg-white dark:bg-natural-card border border-natural-border/60 rounded-2xl flex flex-col items-center justify-center py-20 text-natural-text-light px-4 text-center">
+          {showArchived ? (
+            <Archive className="w-12 h-12 mb-3 opacity-25 text-natural-accent" />
+          ) : (
+            <Package className="w-12 h-12 mb-3 opacity-25 text-natural-accent" />
+          )}
+          <p className="font-serif italic text-lg text-natural-text-main">
+            {showArchived
+              ? "No archived packages found"
+              : searchQuery
+                ? "No packages matching your search"
+                : "No packages available"}
+          </p>
+          <p className="text-xs uppercase tracking-wider mt-1.5 text-natural-text-light">
+            {searchQuery
+              ? `No packages match "${searchQuery}"`
+              : showArchived
+                ? "There are currently no archived packages in the system"
+                : "Create a new package or adjust your search filter"}
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {displayedPackages.map((pkg) => (
           <div
             key={pkg.id}
             className={cn(
@@ -845,7 +1020,8 @@ export function PackagePage() {
             </div>
           </div>
         ))}
-      </div>
+        </div>
+      )}
 
       {/* Package Modal */}
       {isModalOpen && editingPackage && (
@@ -881,19 +1057,40 @@ export function PackagePage() {
 
                     <div className="p-4 space-y-3">
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 sm:gap-3 items-start sm:items-center">
-                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider sm:col-span-1">
-                          Package Name
-                        </label>
+                        <div className="sm:col-span-1 flex items-center justify-between sm:block">
+                          <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider block">
+                            Package Name
+                          </label>
+                          <span className="text-[10px] text-natural-text-light/70 font-medium">
+                            {(editingPackage.name || "").length}/{MAX_PACKAGE_NAME_LENGTH}
+                          </span>
+                        </div>
                         <input
                           type="text"
+                          maxLength={MAX_PACKAGE_NAME_LENGTH}
                           value={editingPackage.name || ""}
                           onChange={(e) => {
+                            const raw = e.target.value;
+                            if (/[^a-zA-ZÀ-ÿ\sñÑ\-']/.test(raw)) {
+                              setFormError(
+                                "Package name can only contain letters, spaces, hyphens, and apostrophes.",
+                              );
+                            } else if (raw.length > MAX_PACKAGE_NAME_LENGTH) {
+                              setFormError(
+                                `Package name cannot exceed ${MAX_PACKAGE_NAME_LENGTH} characters.`,
+                              );
+                            } else {
+                              setFormError(null);
+                            }
+                            const sanitized = raw
+                              .replace(/[^a-zA-ZÀ-ÿ\sñÑ\-']/g, "")
+                              .slice(0, MAX_PACKAGE_NAME_LENGTH);
                             setEditingPackage({
                               ...editingPackage,
-                              name: e.target.value,
+                              name: sanitized,
                             });
-                            setFormError(null);
                           }}
+                          placeholder="e.g. Grand Wedding Package"
                           className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 sm:col-span-2"
                         />
                       </div>
@@ -905,14 +1102,24 @@ export function PackagePage() {
                         </label>
                         <input
                           type="text"
+                          maxLength={MAX_PACKAGE_PAX_LENGTH}
                           value={editingPackage.pax || ""}
-                          onChange={(e) =>
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            if (/[^\d\s-]/.test(raw)) {
+                              setFormError(
+                                "Guest range can only contain numbers and a hyphen (e.g. 80 - 100).",
+                              );
+                            } else {
+                              setFormError(null);
+                            }
+                            const sanitized = sanitizeGuestRangeInput(raw);
                             setEditingPackage({
                               ...editingPackage,
-                              pax: e.target.value,
-                            })
-                          }
-                          placeholder="e.g. 80 - 100 pax"
+                              pax: sanitized,
+                            });
+                          }}
+                          placeholder="e.g. 80 - 100 (10 to 500)"
                           className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 sm:col-span-2"
                         />
                       </div>
@@ -928,14 +1135,24 @@ export function PackagePage() {
                           </span>
                           <input
                             type="text"
+                            inputMode="numeric"
                             value={editingPackage.price || ""}
                             onChange={(e) => {
+                              const raw = e.target.value;
+                              if (/[^\d,]/.test(raw)) {
+                                setFormError("Price can only contain numbers.");
+                              } else {
+                                setFormError(null);
+                              }
                               setEditingPackage({
                                 ...editingPackage,
-                                price: formatNumberWithCommas(e.target.value),
+                                price: formatNumberWithCommas(
+                                  raw,
+                                  MAX_PACKAGE_PRICE,
+                                ),
                               });
                             }}
-                            placeholder="99,000"
+                            placeholder="e.g. 99,000 (Max 1,000,000)"
                             className="w-full pl-8 pr-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20"
                           />
                         </div>
@@ -952,16 +1169,26 @@ export function PackagePage() {
                           </span>
                           <input
                             type="text"
+                            inputMode="numeric"
                             value={editingPackage.additional_pax_price || ""}
                             onChange={(e) => {
+                              const raw = e.target.value;
+                              if (/[^\d,]/.test(raw)) {
+                                setFormError(
+                                  "Additional pax price can only contain numbers.",
+                                );
+                              } else {
+                                setFormError(null);
+                              }
                               setEditingPackage({
                                 ...editingPackage,
                                 additional_pax_price: formatNumberWithCommas(
-                                  e.target.value,
+                                  raw,
+                                  MAX_ADDITIONAL_PAX_PRICE,
                                 ),
                               });
                             }}
-                            placeholder="e.g. 500"
+                            placeholder="e.g. 500 (Max 10,000)"
                             className="w-full pl-8 pr-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20"
                           />
                         </div>
@@ -1032,9 +1259,14 @@ export function PackagePage() {
 
                       {/* Category Limits */}
                       <div className="pt-3 border-t border-natural-border/50">
-                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider block mb-3">
-                          Menu Dish Limits (Customer Booking)
-                        </label>
+                        <div className="flex items-center justify-between mb-3">
+                          <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider block">
+                            Menu Dish Limits (Customer Booking)
+                          </label>
+                          <span className="text-[10px] text-natural-text-light/70 font-medium">
+                            Max {MAX_CATEGORY_DISH_LIMIT} per category
+                          </span>
+                        </div>
                         <div className="grid grid-cols-2 gap-2">
                           {[
                             "Appetizer",
@@ -1056,16 +1288,47 @@ export function PackagePage() {
                               <input
                                 type="number"
                                 min="0"
+                                max={MAX_CATEGORY_DISH_LIMIT}
                                 value={
-                                  editingPackage.category_limits?.[cat] || 0
+                                  editingPackage.category_limits?.[cat] ?? 0
                                 }
+                                onFocus={(e) => e.target.select()}
+                                onKeyDown={(e) => {
+                                  if (
+                                    e.key === "e" ||
+                                    e.key === "E" ||
+                                    e.key === "+" ||
+                                    e.key === "-" ||
+                                    e.key === "."
+                                  ) {
+                                    e.preventDefault();
+                                  }
+                                }}
                                 onChange={(e) => {
-                                  const val = parseInt(e.target.value, 10);
+                                  const digits = e.target.value.replace(
+                                    /[^\d]/g,
+                                    "",
+                                  );
+                                  const stripped = digits.replace(
+                                    /^0+(?=\d)/,
+                                    "",
+                                  );
+                                  const clamped =
+                                    stripped === ""
+                                      ? 0
+                                      : Math.min(
+                                          MAX_CATEGORY_DISH_LIMIT,
+                                          Math.max(
+                                            0,
+                                            parseInt(stripped, 10) || 0,
+                                          ),
+                                        );
+                                  e.target.value = String(clamped);
                                   setEditingPackage((prev) => ({
                                     ...prev!,
                                     category_limits: {
                                       ...(prev?.category_limits || {}),
-                                      [cat]: isNaN(val) ? 0 : val,
+                                      [cat]: clamped,
                                     },
                                   }));
                                 }}
@@ -1163,30 +1426,48 @@ export function PackagePage() {
                                     <div className="flex items-center gap-2">
                                       <input
                                         type="text"
+                                        maxLength={MAX_INCLUSION_ITEM_LENGTH}
                                         value={newItemName}
-                                        onChange={(e) =>
-                                          setNewItemName(e.target.value)
-                                        }
+                                        onChange={(e) => {
+                                          const raw = e.target.value;
+                                          if (/[^a-zA-ZÀ-ÿ\sñÑ&\-']/.test(raw)) {
+                                            setFormError(
+                                              "Inclusion item can only contain letters, spaces, ampersands, hyphens, and apostrophes.",
+                                            );
+                                          } else {
+                                            setFormError(null);
+                                          }
+                                          setNewItemName(
+                                            raw
+                                              .replace(/[^a-zA-ZÀ-ÿ\sñÑ&\-']/g, "")
+                                              .slice(0, MAX_INCLUSION_ITEM_LENGTH),
+                                          );
+                                        }}
                                         onKeyDown={(e) =>
                                           e.key === "Enter" &&
                                           handleAddNewItemToCategory(category)
                                         }
-                                        placeholder="New item name"
+                                        placeholder="New item (letters only, max 60)"
                                         className="w-full px-2 py-1 bg-natural-bg border border-natural-border rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-natural-accent/20"
                                         autoFocus
                                       />
                                       <button
+                                        disabled={
+                                          !newItemName.trim() ||
+                                          newItemName.trim().length < 2
+                                        }
                                         onClick={() =>
                                           handleAddNewItemToCategory(category)
                                         }
-                                        className="p-1 text-green-600 dark:text-emerald-400 hover:bg-green-50 dark:hover:bg-emerald-950/40 rounded-md"
+                                        className="p-1 text-green-600 dark:text-emerald-400 hover:bg-green-50 dark:hover:bg-emerald-950/40 rounded-md disabled:opacity-40 disabled:cursor-not-allowed"
                                       >
                                         <Check className="w-4 h-4" />
                                       </button>
                                       <button
-                                        onClick={() =>
-                                          setAddingItemToCategory(null)
-                                        }
+                                        onClick={() => {
+                                          setAddingItemToCategory(null);
+                                          setFormError(null);
+                                        }}
                                         className="p-1 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-md"
                                       >
                                         <X className="w-4 h-4" />
@@ -1197,6 +1478,7 @@ export function PackagePage() {
                                       onClick={() => {
                                         setAddingItemToCategory(category);
                                         setNewItemName("");
+                                        setFormError(null);
                                       }}
                                       className="flex items-center gap-1 text-xs font-bold text-natural-accent/80 hover:text-natural-accent"
                                     >
@@ -1214,25 +1496,45 @@ export function PackagePage() {
                           <div className="flex items-center gap-2">
                             <input
                               type="text"
+                              maxLength={MAX_INCLUSION_CATEGORY_LENGTH}
                               value={newCategoryName}
-                              onChange={(e) =>
-                                setNewCategoryName(e.target.value)
-                              }
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                if (/[^a-zA-ZÀ-ÿ\sñÑ&\-']/.test(raw)) {
+                                  setFormError(
+                                    "Category name can only contain letters, spaces, ampersands, hyphens, and apostrophes.",
+                                  );
+                                } else {
+                                  setFormError(null);
+                                }
+                                setNewCategoryName(
+                                  raw
+                                    .replace(/[^a-zA-ZÀ-ÿ\sñÑ&\-']/g, "")
+                                    .slice(0, MAX_INCLUSION_CATEGORY_LENGTH),
+                                );
+                              }}
                               onKeyDown={(e) =>
                                 e.key === "Enter" && handleAddNewCategory()
                               }
-                              placeholder="New category name"
+                              placeholder="New category (letters only, max 40)"
                               className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-natural-accent/20"
                               autoFocus
                             />
                             <button
+                              disabled={
+                                !newCategoryName.trim() ||
+                                newCategoryName.trim().length < 2
+                              }
                               onClick={handleAddNewCategory}
-                              className="p-2 text-white bg-green-600 hover:bg-green-700 rounded-lg"
+                              className="p-2 text-white bg-green-600 hover:bg-green-700 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                               <Check className="w-4 h-4" />
                             </button>
                             <button
-                              onClick={() => setIsAddingCategory(false)}
+                              onClick={() => {
+                                setIsAddingCategory(false);
+                                setFormError(null);
+                              }}
                               className="p-2 text-white bg-red-600 hover:bg-red-700 rounded-lg"
                             >
                               <X className="w-4 h-4" />
@@ -1243,6 +1545,7 @@ export function PackagePage() {
                             onClick={() => {
                               setIsAddingCategory(true);
                               setNewCategoryName("");
+                              setFormError(null);
                             }}
                             className="w-full flex items-center justify-center gap-2 px-4 py-2 text-xs font-bold text-natural-accent uppercase tracking-widest border-2 border-dashed border-natural-border/50 rounded-lg hover:bg-natural-accent/5 hover:border-natural-accent/50 transition-all"
                           >

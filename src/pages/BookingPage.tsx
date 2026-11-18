@@ -4416,7 +4416,37 @@ export function BookingPage() {
             <>
             {/* Mobile Booking Cards */}
             <div className="md:hidden divide-y divide-natural-border">
-              {sortedBookings.map((booking) => {
+              {isLoading ? (
+                <div className="flex flex-col items-center justify-center py-16 text-natural-text-light px-4 text-center">
+                  <div className="w-8 h-8 border-4 border-natural-accent border-t-transparent rounded-full animate-spin mb-4" />
+                  <p className="font-serif italic text-sm text-natural-text-light">
+                    Loading bookings...
+                  </p>
+                </div>
+              ) : sortedBookings.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-natural-text-light px-4 text-center">
+                  {statusFilter === "Archived" ? (
+                    <Archive className="w-10 h-10 mb-3 opacity-25 text-natural-accent" />
+                  ) : (
+                    <Calendar className="w-10 h-10 mb-3 opacity-25 text-natural-accent" />
+                  )}
+                  <p className="font-serif italic text-base text-natural-text-main">
+                    {statusFilter === "Archived"
+                      ? "No archived bookings found"
+                      : "No bookings found"}
+                  </p>
+                  <p className="text-xs uppercase tracking-wider mt-1 text-natural-text-light">
+                    {searchQuery
+                      ? `No bookings match "${searchQuery}"`
+                      : statusFilter === "Archived"
+                        ? "There are currently no archived bookings in the system"
+                        : statusFilter !== "All Status"
+                          ? `No bookings with status "${statusFilter}"`
+                          : "No bookings recorded yet"}
+                  </p>
+                </div>
+              ) : (
+                sortedBookings.map((booking) => {
                 const clientName =
                   booking.profiles?.name ||
                   booking.profiles?.full_name ||
@@ -4820,7 +4850,7 @@ export function BookingPage() {
                     </div>
                   </div>
                 );
-              })}
+              }))}
             </div>
 
             <table className="hidden md:table w-full text-left border-collapse">
@@ -4923,7 +4953,45 @@ export function BookingPage() {
                 </tr>
               </thead>
               <tbody>
-                {sortedBookings.map((booking) => (
+                {isLoading ? (
+                  <tr>
+                    <td colSpan={8} className="py-20 text-center">
+                      <div className="flex flex-col items-center justify-center text-natural-text-light">
+                        <div className="w-8 h-8 border-4 border-natural-accent border-t-transparent rounded-full animate-spin mb-4" />
+                        <p className="font-serif italic text-sm text-natural-text-light">
+                          Loading bookings...
+                        </p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : sortedBookings.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="py-20 text-center">
+                      <div className="flex flex-col items-center justify-center text-natural-text-light px-4">
+                        {statusFilter === "Archived" ? (
+                          <Archive className="w-12 h-12 mb-3 opacity-25 text-natural-accent" />
+                        ) : (
+                          <Calendar className="w-12 h-12 mb-3 opacity-25 text-natural-accent" />
+                        )}
+                        <p className="font-serif italic text-lg text-natural-text-main">
+                          {statusFilter === "Archived"
+                            ? "No archived bookings found"
+                            : "No bookings found"}
+                        </p>
+                        <p className="text-xs uppercase tracking-wider mt-1.5 text-natural-text-light">
+                          {searchQuery
+                            ? `No bookings match "${searchQuery}"`
+                            : statusFilter === "Archived"
+                              ? "There are currently no archived bookings in the system"
+                              : statusFilter !== "All Status"
+                                ? `No bookings with status "${statusFilter}"`
+                                : "No bookings recorded yet"}
+                        </p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  sortedBookings.map((booking) => (
                   <tr
                     key={booking.id}
                     className={cn(
@@ -5363,7 +5431,7 @@ export function BookingPage() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                )))}
               </tbody>
             </table>
             </>

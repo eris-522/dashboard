@@ -965,10 +965,20 @@ export function InventoryPage() {
               </div>
             ) : sortedItems.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-natural-text-light px-4 text-center">
-                <PackageSearch className="w-12 h-12 mb-4 opacity-20" />
-                <p className="font-serif italic">No equipment items found</p>
-                <p className="text-xs uppercase tracking-wider mt-1">
-                  Adjust filters or add new equipment items to your monitoring list
+                {showArchived ? (
+                  <Archive className="w-12 h-12 mb-4 opacity-25 text-natural-accent" />
+                ) : (
+                  <PackageSearch className="w-12 h-12 mb-4 opacity-20" />
+                )}
+                <p className="font-serif italic text-lg text-natural-text-main">
+                  {showArchived ? "No archived equipment items found" : "No equipment items found"}
+                </p>
+                <p className="text-xs uppercase tracking-wider mt-1 text-natural-text-light">
+                  {searchQuery
+                    ? `No items match "${searchQuery}"`
+                    : showArchived
+                      ? "There are currently no archived equipment items in the system"
+                      : "Adjust filters or add new equipment items to your monitoring list"}
                 </p>
               </div>
             ) : (

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import {
   Search,
+  Users,
   UserPlus,
   Filter,
   MoreVertical,
@@ -617,9 +618,25 @@ export function UserPage() {
             </tbody>
           </table>
           {sortedUsers.length === 0 && (
-            <div className="py-20 text-center">
-              <p className="text-natural-text-light font-serif italic">
-                No users found matching your criteria
+            <div className="py-20 text-center flex flex-col items-center justify-center text-natural-text-light px-4">
+              {statusFilter === "Archived" ? (
+                <Archive className="w-12 h-12 mb-3 opacity-25 text-natural-accent" />
+              ) : (
+                <Users className="w-12 h-12 mb-3 opacity-25 text-natural-accent" />
+              )}
+              <p className="font-serif italic text-lg text-natural-text-main">
+                {statusFilter === "Archived"
+                  ? "No archived users found"
+                  : "No users found"}
+              </p>
+              <p className="text-xs uppercase tracking-wider mt-1.5 text-natural-text-light">
+                {searchQuery
+                  ? `No users match "${searchQuery}"`
+                  : statusFilter === "Archived"
+                    ? "There are currently no archived user accounts in the system"
+                    : statusFilter !== "All Status"
+                      ? `No users with status "${statusFilter}"`
+                      : "No user accounts registered"}
               </p>
             </div>
           )}
