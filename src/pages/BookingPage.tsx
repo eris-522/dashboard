@@ -64,6 +64,21 @@ import {
   isServiceIncludedInPackage,
 } from "../utils/overtimeBilling";
 
+const MAX_LOGISTICS_FEE = 100_000;
+const MAX_EXCESS_FEE = 500_000;
+const MAX_CUSTOM_DISH_LENGTH = 60;
+
+/** Strips non-digit characters, removes leading zeros unless value is single "0", and clamps to max */
+const formatNumericInput = (raw: string, max: number): string => {
+  const digits = raw.replace(/[^\d]/g, "");
+  if (!digits) return "";
+  const stripped = digits.replace(/^0+(?=\d)/, "");
+  const num = parseInt(stripped, 10);
+  if (isNaN(num)) return "";
+  if (num > max) return String(max);
+  return String(num);
+};
+
 type SortField =
   | "customerName"
   | "date"
@@ -586,6 +601,7 @@ export function BookingPage() {
   const [subClientNote, setSubClientNote] = useState<string>("");
   const [isSavingSub, setIsSavingSub] = useState<boolean>(false);
   const [subMessage, setSubMessage] = useState<string>("");
+  const [subCustomDishError, setSubCustomDishError] = useState<string>("");
   // Off-menu dishes scoped to the open booking (stored in booking_custom_dishes, never in menu_items)
   const [bookingCustomDishes, setBookingCustomDishes] = useState<any[]>([]);
   const [restoringDish, setRestoringDish] = useState<string | null>(null);
@@ -2929,8 +2945,8 @@ export function BookingPage() {
     const currentLogistics = getBookingLogistics(targetBooking);
     const payment = getBookingPayment(targetBooking);
 
-    const newTravelFee = Math.max(0, parseFloat(customTravelFeeInput) || 0);
-    const newHaulingFee = Math.max(0, parseFloat(customHaulingFeeInput) || 0);
+    const newTravelFee = Math.max(0, Math.min(MAX_LOGISTICS_FEE, parseFloat(customTravelFeeInput) || 0));
+    const newHaulingFee = Math.max(0, Math.min(MAX_LOGISTICS_FEE, parseFloat(customHaulingFeeInput) || 0));
 
     const updatedLogistics: any = {
       ...currentLogistics,
@@ -3571,6 +3587,7 @@ export function BookingPage() {
     setSubReplacementDish(chosen);
     setIsCustomReplacement(false);
     setSubCustomReplacement("");
+    setSubCustomDishError("");
     setSubReason("Ingredient shortage / Out of stock in market");
     setSubClientNote(
       `Due to fresh ingredient availability in the local market, "${initialDish}" has been substituted with "${chosen}" of equivalent quality.`
@@ -3786,6 +3803,21 @@ export function BookingPage() {
   const handleConfirmDishSubstitution = async () => {
     const finalReplacement = (isCustomReplacement ? subCustomReplacement : subReplacementDish).trim();
     if (!selectedBooking || !subOriginalDish || !finalReplacement) return;
+
+    if (isCustomReplacement) {
+      if (finalReplacement.length < 2) {
+        setSubMessage("Custom dish name must be at least 2 characters long.");
+        return;
+      }
+      if (finalReplacement.length > MAX_CUSTOM_DISH_LENGTH) {
+        setSubMessage(`Custom dish name cannot exceed ${MAX_CUSTOM_DISH_LENGTH} characters.`);
+        return;
+      }
+      if (!/^[a-zA-ZÀ-ÿ\sñÑ\-']+$/.test(finalReplacement)) {
+        setSubMessage("Custom dish name can only contain letters, spaces, hyphens, and apostrophes.");
+        return;
+      }
+    }
 
     const rawSubs: any[] = Array.isArray(selectedBooking.dish_substitutions)
       ? selectedBooking.dish_substitutions
@@ -7321,42 +7353,82 @@ export function BookingPage() {
                               <div className="p-3 rounded-xl bg-natural-bg/70 dark:bg-natural-sidebar/50 border border-natural-accent/40 space-y-2.5">
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                                   <div className="space-y-1">
-                                    <label
-                                      htmlFor="excess-actual-headcount-input"
-                                      className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block"
-                                    >
-                                      Actual Headcount Served
-                                    </label>
+                                    <div className="flex items-center justify-between">
+                                      <label
+                                        htmlFor="excess-actual-headcount-input"
+                                        className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block"
+                                      >
+                                        Actual Headcount Served
+                                      </label>
+                                      <span className="text-[10px] text-natural-text-light/70 font-medium">
+                                        Max 10,000
+                                      </span>
+                                    </div>
                                     <input
                                       id="excess-actual-headcount-input"
                                       type="number"
                                       min="1"
+                                      max="10000"
                                       value={editExcessActualHeadcount}
+                                      onFocus={(e) => e.target.select()}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") {
+                                          e.preventDefault();
+                                        }
+                                      }}
                                       onChange={(e) => {
-                                        const val = e.target.value;
-                                        setEditExcessActualHeadcount(val);
-                                        const parsed = Math.max(1, parseInt(val, 10) || totalPax);
+                                        const clean = formatNumericInput(e.target.value, 10000);
+                                        setEditExcessActualHeadcount(clean);
+                                        const parsed = Math.max(1, parseInt(clean, 10) || totalPax);
                                         const autoExcess = Math.max(0, parsed - totalPax);
-                                        setEditExcessFeeInput(String(autoExcess * 500));
+                                        setEditExcessFeeInput(
+                                          formatNumericInput(String(autoExcess * 500), MAX_EXCESS_FEE)
+                                        );
+                                      }}
+                                      onBlur={(e) => {
+                                        if (e.target.value === "") {
+                                          setEditExcessActualHeadcount(String(totalPax));
+                                        }
                                       }}
                                       className="w-full px-2.5 py-1.5 text-xs font-semibold bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
                                     />
                                   </div>
 
                                   <div className="space-y-1">
-                                    <label
-                                      htmlFor="excess-surcharge-amount-input"
-                                      className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block"
-                                    >
-                                      Surcharge Amount (₱)
-                                    </label>
+                                    <div className="flex items-center justify-between">
+                                      <label
+                                        htmlFor="excess-surcharge-amount-input"
+                                        className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light block"
+                                      >
+                                        Surcharge Amount (₱)
+                                      </label>
+                                      <span className="text-[10px] text-natural-text-light/70 font-medium">
+                                        Max ₱{MAX_EXCESS_FEE.toLocaleString()}
+                                      </span>
+                                    </div>
                                     <input
                                       id="excess-surcharge-amount-input"
                                       type="number"
                                       min="0"
+                                      max={MAX_EXCESS_FEE}
                                       step="100"
                                       value={editExcessFeeInput}
-                                      onChange={(e) => setEditExcessFeeInput(e.target.value)}
+                                      onFocus={(e) => e.target.select()}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") {
+                                          e.preventDefault();
+                                        }
+                                      }}
+                                      onChange={(e) =>
+                                        setEditExcessFeeInput(
+                                          formatNumericInput(e.target.value, MAX_EXCESS_FEE)
+                                        )
+                                      }
+                                      onBlur={(e) => {
+                                        if (e.target.value === "") {
+                                          setEditExcessFeeInput("0");
+                                        }
+                                      }}
                                       className="w-full px-2.5 py-1.5 text-xs font-semibold bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
                                     />
                                   </div>
@@ -7960,20 +8032,41 @@ export function BookingPage() {
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div className="space-y-1">
-                            <label
-                              htmlFor="custom-travel-fee-input"
-                              className="block text-[10px] font-bold uppercase tracking-wider text-natural-text-light"
-                            >
-                              Out-of-Town Travel Fee (₱)
-                            </label>
+                            <div className="flex items-center justify-between">
+                              <label
+                                htmlFor="custom-travel-fee-input"
+                                className="block text-[10px] font-bold uppercase tracking-wider text-natural-text-light"
+                              >
+                                Out-of-Town Travel Fee (₱)
+                              </label>
+                              <span className="text-[10px] text-natural-text-light/70 font-medium">
+                                Max ₱{MAX_LOGISTICS_FEE.toLocaleString()}
+                              </span>
+                            </div>
                             <input
                               id="custom-travel-fee-input"
                               type="number"
                               min="0"
+                              max={MAX_LOGISTICS_FEE}
                               step="100"
                               disabled={isCancelled || isSavingLogistics}
                               value={customTravelFeeInput}
-                              onChange={(e) => setCustomTravelFeeInput(e.target.value)}
+                              onFocus={(e) => e.target.select()}
+                              onKeyDown={(e) => {
+                                if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") {
+                                  e.preventDefault();
+                                }
+                              }}
+                              onChange={(e) =>
+                                setCustomTravelFeeInput(
+                                  formatNumericInput(e.target.value, MAX_LOGISTICS_FEE)
+                                )
+                              }
+                              onBlur={(e) => {
+                                if (e.target.value === "") {
+                                  setCustomTravelFeeInput("0");
+                                }
+                              }}
                               placeholder="0"
                               className={cn(
                                 "w-full px-3 py-2 text-xs font-semibold bg-natural-bg/60 border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent",
@@ -7996,28 +8089,54 @@ export function BookingPage() {
                               >
                                 Hauling / Stairs Fee (₱)
                               </label>
-                              {!isCancelled &&
-                                recommendedHauling > 0 &&
-                                Number(customHaulingFeeInput) !== recommendedHauling && (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setCustomHaulingFeeInput(String(recommendedHauling))
-                                    }
-                                    className="text-[10px] font-bold text-natural-accent hover:underline cursor-pointer"
-                                  >
-                                    Use Auto (₱{recommendedHauling.toLocaleString()})
-                                  </button>
-                                )}
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-natural-text-light/70 font-medium">
+                                  Max ₱{MAX_LOGISTICS_FEE.toLocaleString()}
+                                </span>
+                                {!isCancelled &&
+                                  recommendedHauling > 0 &&
+                                  Number(customHaulingFeeInput) !== recommendedHauling && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setCustomHaulingFeeInput(
+                                          formatNumericInput(
+                                            String(recommendedHauling),
+                                            MAX_LOGISTICS_FEE
+                                          )
+                                        )
+                                      }
+                                      className="text-[10px] font-bold text-natural-accent hover:underline cursor-pointer"
+                                    >
+                                      Use Auto (₱{recommendedHauling.toLocaleString()})
+                                    </button>
+                                  )}
+                              </div>
                             </div>
                             <input
                               id="custom-hauling-fee-input"
                               type="number"
                               min="0"
+                              max={MAX_LOGISTICS_FEE}
                               step="150"
                               disabled={isCancelled || isSavingLogistics}
                               value={customHaulingFeeInput}
-                              onChange={(e) => setCustomHaulingFeeInput(e.target.value)}
+                              onFocus={(e) => e.target.select()}
+                              onKeyDown={(e) => {
+                                if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") {
+                                  e.preventDefault();
+                                }
+                              }}
+                              onChange={(e) =>
+                                setCustomHaulingFeeInput(
+                                  formatNumericInput(e.target.value, MAX_LOGISTICS_FEE)
+                                )
+                              }
+                              onBlur={(e) => {
+                                if (e.target.value === "") {
+                                  setCustomHaulingFeeInput("0");
+                                }
+                              }}
                               placeholder="0"
                               className={cn(
                                 "w-full px-3 py-2 text-xs font-semibold bg-natural-bg/60 border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent",
@@ -8052,6 +8171,17 @@ export function BookingPage() {
                                     (logistics.haulingFee || 0)
                                   ).toLocaleString()}
                                 </strong>
+                                {(Number(customTravelFeeInput) !== (logistics.travelFee || 0) ||
+                                  Number(customHaulingFeeInput) !== (logistics.haulingFee || 0)) && (
+                                  <span className="ml-1.5 text-natural-accent font-semibold text-[11px]">
+                                    (Pending: ₱
+                                    {(
+                                      (Number(customTravelFeeInput) || 0) +
+                                      (Number(customHaulingFeeInput) || 0)
+                                    ).toLocaleString()}
+                                    )
+                                  </span>
+                                )}
                               </span>
                             )}
                           </div>
@@ -10556,8 +10686,19 @@ export function BookingPage() {
                             <input
                               type="number"
                               min="1"
+                              max="10000"
                               value={completeActualHeadcount}
-                              onChange={(e) => setCompleteActualHeadcount(e.target.value)}
+                              onFocus={(e) => e.target.select()}
+                              onKeyDown={(e) => {
+                                if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") {
+                                  e.preventDefault();
+                                }
+                              }}
+                              onChange={(e) =>
+                                setCompleteActualHeadcount(
+                                  formatNumericInput(e.target.value, 10000)
+                                )
+                              }
                               placeholder={String(guaranteedCount)}
                               className="w-full px-3 py-1.5 text-xs font-semibold bg-natural-bg/70 border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
                             />
@@ -11187,6 +11328,7 @@ export function BookingPage() {
                     onClick={() => {
                       const next = !isCustomReplacement;
                       setIsCustomReplacement(next);
+                      setSubCustomDishError("");
                       if (next) {
                         const val = subCustomReplacement || "";
                         setSubReplacementDish(val);
@@ -11215,21 +11357,61 @@ export function BookingPage() {
 
                 {isCustomReplacement ? (
                   <div className="space-y-2 animate-in fade-in duration-150">
-                    <input
-                      type="text"
-                      autoFocus
-                      value={subCustomReplacement}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setSubCustomReplacement(val);
-                        setSubReplacementDish(val);
-                        setSubClientNote(
-                          `Due to fresh ingredient availability in the local market, "${subOriginalDish}" has been substituted with "${val}" of equivalent quality.`
-                        );
-                      }}
-                      placeholder="Type custom replacement dish"
-                      className="w-full bg-natural-bg border border-natural-accent/50 px-3 py-2 rounded-lg text-xs font-medium text-natural-text-main focus:border-natural-accent focus:outline-none"
-                    />
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light">
+                          Custom Replacement Dish Name
+                        </label>
+                        <span className="text-[10px] text-natural-text-light/70 font-medium">
+                          {subCustomReplacement.length}/{MAX_CUSTOM_DISH_LENGTH}
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        autoFocus
+                        maxLength={MAX_CUSTOM_DISH_LENGTH}
+                        value={subCustomReplacement}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          const hasInvalidChars = /[^a-zA-ZÀ-ÿ\sñÑ\-']/.test(raw);
+                          if (hasInvalidChars) {
+                            setSubCustomDishError(
+                              "Dish name can only contain letters, spaces, hyphens, and apostrophes."
+                            );
+                          } else if (raw.length > MAX_CUSTOM_DISH_LENGTH) {
+                            setSubCustomDishError(
+                              `Dish name cannot exceed ${MAX_CUSTOM_DISH_LENGTH} characters.`
+                            );
+                          } else {
+                            setSubCustomDishError("");
+                          }
+                          const filtered = raw
+                            .replace(/[^a-zA-ZÀ-ÿ\sñÑ\-']/g, "")
+                            .slice(0, MAX_CUSTOM_DISH_LENGTH);
+                          setSubCustomReplacement(filtered);
+                          setSubReplacementDish(filtered);
+                          setSubClientNote(
+                            `Due to fresh ingredient availability in the local market, "${subOriginalDish}" has been substituted with "${filtered.trim()}" of equivalent quality.`
+                          );
+                        }}
+                        placeholder="e.g. Beef Caldereta Especial"
+                        className={cn(
+                          "w-full bg-natural-bg border px-3 py-2 rounded-lg text-xs font-medium text-natural-text-main focus:outline-none transition-colors",
+                          subCustomDishError
+                            ? "border-red-500 focus:border-red-500 ring-1 ring-red-500/20"
+                            : "border-natural-accent/50 focus:border-natural-accent"
+                        )}
+                      />
+                      {subCustomDishError ? (
+                        <p className="text-[11px] font-medium text-red-600 dark:text-red-400">
+                          {subCustomDishError}
+                        </p>
+                      ) : (
+                        <p className="text-[10px] text-natural-text-light">
+                          Letters, spaces, hyphens, and apostrophes only (max {MAX_CUSTOM_DISH_LENGTH} chars).
+                        </p>
+                      )}
+                    </div>
                     <div className="flex items-center gap-2">
                       <label className="text-[10px] font-bold uppercase tracking-wider text-natural-text-light whitespace-nowrap">
                         Category:
@@ -11256,6 +11438,7 @@ export function BookingPage() {
                     onChange={(e) => {
                       if (e.target.value === "__CUSTOM__") {
                         setIsCustomReplacement(true);
+                        setSubCustomDishError("");
                         setSubCustomReplacement("");
                         setSubReplacementDish("");
                         return;
@@ -11331,9 +11514,16 @@ export function BookingPage() {
               </button>
               <button
                 type="button"
-                disabled={isSavingSub || !(isCustomReplacement ? subCustomReplacement.trim() : subReplacementDish.trim())}
+                disabled={
+                  isSavingSub ||
+                  (isCustomReplacement
+                    ? !subCustomReplacement.trim() ||
+                      subCustomReplacement.trim().length < 2 ||
+                      Boolean(subCustomDishError)
+                    : !subReplacementDish.trim())
+                }
                 onClick={handleConfirmDishSubstitution}
-                className="px-5 py-2 bg-natural-accent hover:bg-natural-accent/90 disabled:opacity-50 text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-all shadow-2xs cursor-pointer flex items-center gap-1.5"
+                className="px-5 py-2 bg-natural-accent hover:bg-natural-accent/90 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-all shadow-2xs cursor-pointer flex items-center gap-1.5"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isSavingSub ? "animate-spin" : ""}`} />
                 {isSavingSub ? "Saving..." : "Confirm Substitution & Notify Client"}
