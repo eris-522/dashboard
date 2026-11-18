@@ -28,6 +28,8 @@ import { logAuditAction } from "../utils/auditLogger";
 type SortField = "name" | "created_at" | "status";
 type SortOrder = "asc" | "desc" | null;
 
+const MAX_NAME_LENGTH = 70;
+
 interface SortConfig {
   field: SortField | null;
   order: SortOrder;
@@ -212,11 +214,13 @@ export function UserPage() {
   };
 
   const handleConfirmSave = () => {
+    const trimmed = (formData.name || "").trim().slice(0, MAX_NAME_LENGTH);
+    if (!trimmed) return;
     setIsModalOpen(false);
     setConfirmAction({
       type: "edit",
       userId: editingUser?.id,
-      userName: formData.name || "User",
+      userName: trimmed,
     });
   };
 
@@ -224,7 +228,7 @@ export function UserPage() {
     if (!confirmAction) return;
 
     if (confirmAction.type === "edit" && confirmAction.userId) {
-      const trimmedName = (formData.name ?? "").toString().trim();
+      const trimmedName = (formData.name ?? "").toString().trim().slice(0, MAX_NAME_LENGTH);
 
       const { error: updateError } = await supabase
         .from("profiles")
@@ -639,14 +643,23 @@ export function UserPage() {
 
             <div className="p-6 space-y-5">
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider pl-1">
-                  Full Name
-                </label>
+                <div className="flex items-center justify-between pl-1">
+                  <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
+                    Full Name
+                  </label>
+                  <span className="text-[10px] text-natural-text-light/70 font-medium">
+                    {(formData.name || "").length}/{MAX_NAME_LENGTH}
+                  </span>
+                </div>
                 <input
                   type="text"
+                  maxLength={MAX_NAME_LENGTH}
                   value={formData.name || ""}
                   onChange={(e) =>
-                    setFormData({ ...formData, name: e.target.value })
+                    setFormData({
+                      ...formData,
+                      name: e.target.value.slice(0, MAX_NAME_LENGTH),
+                    })
                   }
                   className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white transition-all shadow-xs"
                   placeholder="e.g. Juan Luna"
@@ -699,7 +712,8 @@ export function UserPage() {
               </button>
               <button
                 onClick={handleConfirmSave}
-                className="flex-1 bg-natural-accent text-white px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm flex items-center justify-center"
+                disabled={!formData.name?.trim()}
+                className="flex-1 bg-natural-accent text-white px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               >
                 Update Profile
               </button>
