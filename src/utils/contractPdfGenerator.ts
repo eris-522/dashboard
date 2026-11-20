@@ -1,5 +1,10 @@
 import { jsPDF } from "jspdf";
 import { CATERING_CONTRACT_TERMS } from "../data/cateringContractTerms";
+import {
+  extractPrivateReceiptPath,
+  isSafeRasterDataUrl,
+  resolvePrivateReceiptUrl,
+} from "./storageMedia";
 
 export interface ContractPdfInput {
   bookingId: string | number;
@@ -86,35 +91,82 @@ function renderStylizedSignatureDataUrl(name: string): string | null {
   }
 }
 
+const MAX_SIGNATURE_FETCH_BYTES = 5 * 1024 * 1024;
+const SIGNATURE_FETCH_TIMEOUT_MS = 5000;
+
+function isAllowedSupabaseStorageUrl(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== "https:") return false;
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    if (!supabaseUrl) return false;
+    const allowedOrigin = new URL(supabaseUrl).origin;
+    return (
+      parsed.origin === allowedOrigin &&
+      parsed.pathname.startsWith("/storage/v1/object/")
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Resolves a stored signature (either a legacy Data URL or a Supabase Storage HTTP URL)
- * into a Data URL for jsPDF embedding, falling back to a stylized signature on error.
+ * Resolves a stored signature (safe raster Data URL, private `receipts://` path,
+ * or verified Supabase Storage HTTPS URL) into a Data URL for jsPDF embedding,
+ * rejecting arbitrary third-party URLs to prevent client-side SSRF.
  */
 async function resolveSignatureImageDataUrl(
   urlOrData: string | null | undefined,
   signerName: string
 ): Promise<string | null> {
-  if (urlOrData && urlOrData.startsWith("data:image/")) {
-    return urlOrData;
+  if (urlOrData && urlOrData.toLowerCase().startsWith("data:")) {
+    return isSafeRasterDataUrl(urlOrData)
+      ? urlOrData
+      : renderStylizedSignatureDataUrl(signerName);
   }
 
-  if (urlOrData && (urlOrData.startsWith("http://") || urlOrData.startsWith("https://"))) {
+  let fetchUrl: string | null = null;
+  if (urlOrData && extractPrivateReceiptPath(urlOrData)) {
+    const signed = await resolvePrivateReceiptUrl(urlOrData);
+    if (signed && isAllowedSupabaseStorageUrl(signed)) {
+      fetchUrl = signed;
+    }
+  } else if (urlOrData && isAllowedSupabaseStorageUrl(urlOrData)) {
+    fetchUrl = urlOrData;
+  }
+
+  if (fetchUrl) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SIGNATURE_FETCH_TIMEOUT_MS);
     try {
-      const res = await fetch(urlOrData);
+      const res = await fetch(fetchUrl, { signal: controller.signal });
       if (res.ok) {
+        const contentLen = Number(res.headers.get("content-length") || 0);
+        if (contentLen > MAX_SIGNATURE_FETCH_BYTES) {
+          throw new Error("Signature image too large");
+        }
         const blob = await res.blob();
-        const dataUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(String(reader.result || ""));
-          reader.onerror = () => reject(new Error("FileReader failed"));
-          reader.readAsDataURL(blob);
-        });
-        if (dataUrl.startsWith("data:image/")) {
-          return dataUrl;
+        const blobType = (blob.type || "").toLowerCase();
+        if (
+          blob.size <= MAX_SIGNATURE_FETCH_BYTES &&
+          blobType.startsWith("image/") &&
+          blobType !== "image/svg+xml"
+        ) {
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(String(reader.result || ""));
+            reader.onerror = () => reject(new Error("FileReader failed"));
+            reader.readAsDataURL(blob);
+          });
+          if (isSafeRasterDataUrl(dataUrl)) {
+            return dataUrl;
+          }
         }
       }
     } catch {
       // Fallback to stylized signature below
+    } finally {
+      clearTimeout(timer);
     }
   }
 

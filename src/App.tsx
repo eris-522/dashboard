@@ -412,7 +412,18 @@ function AppContent() {
  * Manages the active view state and provides context providers for data domains.
  */
 function MainApp() {
-  const { currentUser } = useUser();
+  const { currentUser, isAuthChecking } = useUser();
+
+  if (isAuthChecking) {
+    return (
+      <div className="min-h-screen bg-natural-bg flex flex-col items-center justify-center p-4">
+        <div className="w-8 h-8 border-4 border-natural-accent border-t-transparent rounded-full animate-spin mb-3" />
+        <p className="text-xs font-bold uppercase tracking-widest text-natural-text-light">
+          Verifying Session...
+        </p>
+      </div>
+    );
+  }
 
   if (!currentUser) {
     return (

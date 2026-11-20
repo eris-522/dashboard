@@ -1,4 +1,4 @@
-import React, { useState, useRef, DragEvent, ChangeEvent } from "react";
+import React, { useState, useEffect, useRef, DragEvent, ChangeEvent } from "react";
 import {
   UploadCloud,
   Link as LinkIcon,
@@ -26,10 +26,26 @@ export interface ImageUploadFieldProps {
   maxDimension?: number;
 }
 
+const MAX_CMS_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB
+const ALLOWED_CMS_IMAGE_MIMES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+]);
+
+function isSafeCmsHttpsUrl(raw: string): boolean {
+  try {
+    const parsed = new URL(raw.trim());
+    return parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Optimizes and converts an image File to a lightweight data URL using HTML Canvas.
- * This prevents massive 10MB raw photos from overwhelming browser storage/database,
- * scaling it down to a crisp web-optimized resolution.
+ * Optimizes and converts a raster image File to a lightweight data URL using HTML Canvas.
+ * Blocks SVGs to prevent stored XSS payloads and limits GIF pass-through by MIME allowlist.
  */
 async function processImageFile(
   file: File,
@@ -37,7 +53,7 @@ async function processImageFile(
   quality = 0.78
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    if (file.type === "image/svg+xml" || file.type === "image/gif") {
+    if (file.type === "image/gif") {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as string);
       reader.onerror = reject;
@@ -120,7 +136,7 @@ async function tryUploadToSupabase(
     const fileName = `img_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
     const filePath = `cms/${fileName}`;
 
-    for (const bucket of ["cms", "public", "images", "receipts"]) {
+    for (const bucket of ["cms", "public", "images"]) {
       const { data, error } = await supabase.storage
         .from(bucket)
         .upload(filePath, uploadPayload, {
@@ -168,13 +184,23 @@ export function ImageUploadField({
   const [uploadFileName, setUploadFileName] = useState<string | null>(null);
   const [uploadFileSize, setUploadFileSize] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [urlDraft, setUrlDraft] = useState<string>(value || "");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    setUrlDraft(value || "");
+  }, [value]);
+
   const handleFile = async (file: File) => {
-    if (!file.type.startsWith("image/")) {
+    const mime = (file.type || "").toLowerCase();
+    if (!mime || mime === "image/svg+xml" || !ALLOWED_CMS_IMAGE_MIMES.has(mime)) {
       setErrorMsg(
-        "Please select a valid image file (PNG, JPG, JPEG, WebP, GIF)."
+        "Please select a valid raster image file (PNG, JPG, JPEG, WebP, or GIF; SVG is not allowed)."
       );
+      return;
+    }
+    if (file.size > MAX_CMS_IMAGE_BYTES) {
+      setErrorMsg("Image file exceeds the 10 MB maximum size limit.");
       return;
     }
 
@@ -190,14 +216,17 @@ export function ImageUploadField({
           : `${sizeKb} KB`;
       setUploadFileSize(sizeStr);
 
-      // 1. Generate optimized client data URL immediately for responsive UI
+      // 1. Optimize image client-side
       const optimizedDataUrl = await processImageFile(file, maxDimension);
 
-      // 2. Try remote Supabase upload using the compressed image blob
+      // 2. Upload strictly to CMS/public buckets (never write raw Base64 to Postgres)
       const remoteUrl = await tryUploadToSupabase(file, optimizedDataUrl);
+      if (!remoteUrl) {
+        setErrorMsg("Cloud storage upload failed. Please check your session and try again.");
+        return;
+      }
 
-      // 3. Update value (prefer remote URL if available, else optimized Data URL)
-      onChange(remoteUrl || optimizedDataUrl);
+      onChange(remoteUrl);
     } catch (err: any) {
       console.error("Image processing error:", err);
       setErrorMsg("Failed to process image file. Please try another file.");
@@ -364,11 +393,28 @@ export function ImageUploadField({
           <div className="flex items-center gap-2">
             <input
               type="url"
-              value={value || ""}
-              onChange={(e) => onChange(e.target.value)}
+              value={urlDraft}
+              onChange={(e) => {
+                const nextVal = e.target.value;
+                setUrlDraft(nextVal);
+                if (!nextVal.trim()) {
+                  setErrorMsg(null);
+                  onChange("");
+                } else if (isSafeCmsHttpsUrl(nextVal)) {
+                  setErrorMsg(null);
+                  onChange(nextVal.trim());
+                } else {
+                  setErrorMsg(null);
+                }
+              }}
               onBlur={() => {
-                if (!value?.trim() && defaultValue) {
+                const trimmed = urlDraft.trim();
+                if (!trimmed && defaultValue) {
+                  setErrorMsg(null);
+                  setUrlDraft(defaultValue);
                   onChange(defaultValue);
+                } else if (trimmed && !isSafeCmsHttpsUrl(trimmed)) {
+                  setErrorMsg("Only https:// image URLs are permitted.");
                 }
               }}
               placeholder={defaultValue || placeholder}

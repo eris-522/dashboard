@@ -55,6 +55,7 @@ import { useInventory } from "../context/InventoryContext";
 import { logAuditAction } from "../utils/auditLogger";
 import { subscribeCatalogBroadcast } from "../utils/liveBroadcast";
 import { downloadSignedContractPdf } from "../utils/contractPdfGenerator";
+import { SignedStorageImage } from "../components/SignedStorageImage";
 import {
   OVERTIME_SERVICE_RATES,
   calculateServiceWindow,
@@ -2050,7 +2051,17 @@ export function BookingPage() {
     file: File,
     bookingId: string | number
   ): Promise<string> => {
-    const compressToJpeg = (): Promise<{ dataUrl: string; blob: Blob }> =>
+    const MAX_DAMAGE_BYTES = 10 * 1024 * 1024;
+    const ALLOWED_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
+    const mime = (file.type || "").toLowerCase();
+    if (!mime || mime === "image/svg+xml" || !ALLOWED_MIMES.has(mime)) {
+      throw new Error("Please select a valid JPG, PNG, or WebP photo.");
+    }
+    if (file.size > MAX_DAMAGE_BYTES) {
+      throw new Error("Photo exceeds the 10 MB maximum file size.");
+    }
+
+    const compressToJpeg = (): Promise<{ blob: Blob }> =>
       new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (ev) => {
@@ -2069,10 +2080,9 @@ export function BookingPage() {
             ctx.fillStyle = "#ffffff";
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            const dataUrl = canvas.toDataURL("image/jpeg", 0.76);
             canvas.toBlob(
               (blob) => {
-                if (blob) resolve({ dataUrl, blob });
+                if (blob) resolve({ blob });
                 else reject(new Error("Compression failed"));
               },
               "image/jpeg",
@@ -2086,20 +2096,18 @@ export function BookingPage() {
         reader.readAsDataURL(file);
       });
 
-    const { dataUrl, blob } = await compressToJpeg();
-    try {
-      const filePath = `damage-evidence/${bookingId}/${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2, 8)}.jpg`;
-      const { error: upErr } = await supabase.storage
-        .from("receipts")
-        .upload(filePath, blob, { contentType: "image/jpeg", cacheControl: "31536000", upsert: true });
-      if (!upErr) {
-        const { data: pub } = supabase.storage.from("receipts").getPublicUrl(filePath);
-        if (pub?.publicUrl) return pub.publicUrl;
-      }
-    } catch {}
-    return dataUrl;
+    const { blob } = await compressToJpeg();
+    const safeBookingId = String(bookingId).replace(/[^a-zA-Z0-9_-]/g, "");
+    const filePath = `damage-evidence/${safeBookingId}/${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}.jpg`;
+    const { data, error: upErr } = await supabase.storage
+      .from("receipts")
+      .upload(filePath, blob, { contentType: "image/jpeg", cacheControl: "31536000", upsert: false });
+    if (upErr || !data?.path) {
+      throw new Error(upErr?.message || "Failed to upload damage evidence photo.");
+    }
+    return `receipts://${data.path}`;
   };
 
   const handleSaveDamageAppraisal = async (
@@ -6691,14 +6699,10 @@ export function BookingPage() {
                               {payment.receipt_url ? (
                                 <div className="flex items-center justify-between gap-2 bg-natural-bg/70 dark:bg-natural-sidebar/50 p-2.5 rounded-lg border border-natural-border">
                                   <div className="flex items-center gap-2 min-w-0">
-                                    <img
+                                    <SignedStorageImage
                                       src={payment.receipt_url}
                                       alt="Deposit receipt slip thumbnail"
                                       className="w-10 h-10 object-cover rounded-md border border-natural-border cursor-pointer hover:opacity-80 transition-opacity shrink-0"
-                                      onError={(e) => {
-                                        (e.target as HTMLImageElement).src =
-                                          "https://images.unsplash.com/photo-1554415707-9e4c07d3882d?auto=format&fit=crop&q=80&w=800";
-                                      }}
                                       onClick={() =>
                                         setViewingReceipt({
                                           url: payment.receipt_url,
@@ -7235,14 +7239,10 @@ export function BookingPage() {
                             {hasFinalReceipt ? (
                               <div className="flex items-center justify-between gap-2.5 bg-natural-bg/70 dark:bg-natural-sidebar/50 p-2.5 rounded-lg border border-natural-border">
                                 <div className="flex items-center gap-2 min-w-0">
-                                  <img
+                                  <SignedStorageImage
                                     src={payment.final_balance_receipt}
                                     alt="Final balance receipt slip thumbnail"
                                     className="w-10 h-10 object-cover rounded-md border border-natural-border cursor-pointer hover:opacity-80 transition-opacity shrink-0"
-                                    onError={(e) => {
-                                      (e.target as HTMLImageElement).src =
-                                        "https://images.unsplash.com/photo-1554415707-9e4c07d3882d?auto=format&fit=crop&q=80&w=800";
-                                    }}
                                     onClick={() =>
                                       setViewingReceipt({
                                         url: payment.final_balance_receipt,
@@ -7553,14 +7553,10 @@ export function BookingPage() {
                                 {excessInfo.postEventBilling?.receipt_url ? (
                                   <div className="flex items-center justify-between gap-2.5 bg-natural-bg/70 dark:bg-natural-sidebar/50 p-2.5 rounded-lg border border-natural-border">
                                     <div className="flex items-center gap-2 min-w-0">
-                                      <img
+                                      <SignedStorageImage
                                         src={excessInfo.postEventBilling.receipt_url}
                                         alt="Excess surcharge receipt slip thumbnail"
                                         className="w-10 h-10 object-cover rounded-md border border-natural-border cursor-pointer hover:opacity-80 transition-opacity shrink-0"
-                                        onError={(e) => {
-                                          (e.target as HTMLImageElement).src =
-                                            "https://images.unsplash.com/photo-1554415707-9e4c07d3882d?auto=format&fit=crop&q=80&w=800";
-                                        }}
                                         onClick={() =>
                                           setViewingReceipt({
                                             url: excessInfo.postEventBilling!.receipt_url!,
@@ -7741,7 +7737,7 @@ export function BookingPage() {
                                 {damageInfo.damageAppraisal.receipt_url ? (
                                   <div className="flex items-center justify-between gap-2.5 bg-natural-bg/70 dark:bg-natural-sidebar/50 p-2.5 rounded-lg border border-natural-border">
                                     <div className="flex items-center gap-2 min-w-0">
-                                      <img
+                                      <SignedStorageImage
                                         src={damageInfo.damageAppraisal.receipt_url}
                                         alt="Damage invoice receipt slip thumbnail"
                                         className="w-10 h-10 object-cover rounded-md border border-natural-border cursor-pointer hover:opacity-80 transition-opacity shrink-0"
@@ -9680,7 +9676,7 @@ export function BookingPage() {
                                         <div className="sm:col-span-4 flex items-center gap-2">
                                           {dRow.photo_url ? (
                                             <div className="flex items-center gap-2">
-                                              <img
+                                              <SignedStorageImage
                                                 src={dRow.photo_url}
                                                 alt={`Evidence for ${dRow.item_name}`}
                                                 className="w-8 h-8 object-cover rounded border border-natural-border cursor-pointer"
@@ -9734,8 +9730,8 @@ export function BookingPage() {
                                                         r.id === dRow.id ? { ...r, photo_url: url } : r
                                                       )
                                                     );
-                                                  } catch {
-                                                    setDamageFormError("Could not attach photo.");
+                                                  } catch (err: any) {
+                                                    setDamageFormError(err?.message || "Could not attach photo.");
                                                   }
                                                 }}
                                                 className="hidden"
@@ -9906,7 +9902,7 @@ export function BookingPage() {
 
                         <div className="flex items-center gap-2.5 shrink-0">
                           {sig?.signature_data_url && (
-                            <img
+                            <SignedStorageImage
                               src={sig.signature_data_url}
                               alt={`Signature of ${recordedSignerName}`}
                               className="h-9 w-24 object-contain bg-white rounded border border-natural-border px-2 py-0.5"
@@ -10869,7 +10865,7 @@ export function BookingPage() {
                           {payment?.receipt_url ? (
                             <div className="pt-2 border-t border-natural-border/60 flex items-center justify-between gap-2">
                               <div className="flex items-center gap-2 overflow-hidden">
-                                <img
+                                <SignedStorageImage
                                   src={payment.receipt_url}
                                   alt="Deposit Slip"
                                   className="w-8 h-8 object-cover rounded border border-natural-border cursor-pointer hover:opacity-80 transition-opacity shrink-0"
@@ -10954,7 +10950,7 @@ export function BookingPage() {
                           {payment?.final_balance_receipt ? (
                             <div className="pt-2 border-t border-natural-border/60 flex items-center justify-between gap-2">
                               <div className="flex items-center gap-2 overflow-hidden">
-                                <img
+                                <SignedStorageImage
                                   src={payment.final_balance_receipt}
                                   alt="Final Balance Slip"
                                   className="w-8 h-8 object-cover rounded border border-natural-border cursor-pointer hover:opacity-80 transition-opacity shrink-0"
@@ -11626,13 +11622,15 @@ export function BookingPage() {
             </div>
 
             <div className="p-4 bg-natural-bg/10 flex-1 overflow-y-auto flex flex-col items-center justify-center min-h-[300px]">
-              <img
+              <SignedStorageImage
                 src={viewingReceipt.url}
                 alt="Proof of Payment"
                 className="max-h-[55vh] w-auto max-w-full rounded-lg shadow-md object-contain border border-natural-border bg-white dark:bg-natural-bg/40"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1554415707-9e4c07d3882d?auto=format&fit=crop&q=80&w=800";
-                }}
+                fallback={
+                  <div className="py-12 px-6 text-center text-xs text-natural-text-light">
+                    Unable to load payment proof preview.
+                  </div>
+                }
               />
             </div>
 

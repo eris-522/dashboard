@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
 import { supabase } from '../utils/supabase';
+import { clearSignedUrlCache } from '../utils/storageMedia';
 
 export interface User {
   id: string | number;
@@ -12,20 +13,11 @@ export interface User {
   joined: string;
 }
 
-export interface CreateAdminData {
-  name: string;
-  email: string;
-  password?: string;
-  role?: string;
-  phone_number?: string;
-  action?: 'invite' | 'create' | 'resend_invite';
-  redirectTo?: string;
-}
-
 interface UserContextType {
   users: User[];
   currentUser: User | null;
   isLoading: boolean;
+  isAuthChecking: boolean;
   refreshUsers: (silent?: boolean) => Promise<void>;
   activeUserCount: number;
   totalUserCount: number;
@@ -35,7 +27,6 @@ interface UserContextType {
   removeUser: (id: string | number) => void;
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
-  createAdminUser: (adminData: CreateAdminData) => Promise<{ success: boolean; message?: string; error?: string }>;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -53,16 +44,15 @@ function toUser(row: any): User {
   };
 }
 
+function isAuthorizedSingleAdmin(user: User): boolean {
+  return user.status === 'Active' && user.role === 'Admin';
+}
+
 export function UserProvider({ children }: { children: ReactNode }) {
   const [users, setUsers] = useState<User[]>([]);
-  const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    try {
-      const saved = sessionStorage.getItem('rp_admin_current_user');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
+  // Never synchronously hydrate unverified sessionStorage prior to verifying JWT + admins table
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
 
   const refreshUsers = async (silent = false) => {
@@ -89,52 +79,73 @@ export function UserProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    // Check for an existing session to auto-login the admin, and kick out unauthorized customers
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session?.user) {
-        const { data: adminProfile } = await supabase
-          .from('admins')
-          .select('id, name, email, role, status, phone_number, created_at')
-          .eq('id', session.user.id)
-          .single();
+    let mounted = true;
 
-        if (adminProfile) {
-          const user = toUser(adminProfile);
-          if (user.status === 'Pending Invite' && session.user.email_confirmed_at) {
-            await supabase.from('admins').update({ status: 'Active' }).eq('id', session.user.id);
-            user.status = 'Active';
-          }
+    const verifyExistingSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!mounted) return;
 
-          if (user.status === 'Active' || user.status === 'Inactive' || user.status === 'Pending Invite') {
-            setCurrentUser(user);
-            sessionStorage.setItem('rp_admin_current_user', JSON.stringify(user));
-          } else {
-            await supabase.auth.signOut();
-            sessionStorage.removeItem('rp_admin_current_user');
-            setCurrentUser(null);
+        if (session?.user) {
+          const { data: adminProfile } = await supabase
+            .from('admins')
+            .select('id, name, email, role, status, phone_number, created_at')
+            .eq('id', session.user.id)
+            .maybeSingle();
+
+          if (!mounted) return;
+
+          if (adminProfile) {
+            const user = toUser(adminProfile);
+            if (isAuthorizedSingleAdmin(user)) {
+              setCurrentUser(user);
+              sessionStorage.setItem('rp_admin_current_user', JSON.stringify(user));
+              return;
+            }
           }
-        } else {
-          await supabase.auth.signOut(); // Kick out if they are a customer (not in admins table)
-          sessionStorage.removeItem('rp_admin_current_user');
-          setCurrentUser(null);
+          await supabase.auth.signOut();
         }
-      } else {
-        // No real Supabase session: never trust a cached user object from sessionStorage
+
         sessionStorage.removeItem('rp_admin_current_user');
         setCurrentUser(null);
         setIsLoading(false);
+      } catch {
+        if (!mounted) return;
+        sessionStorage.removeItem('rp_admin_current_user');
+        setCurrentUser(null);
+        setIsLoading(false);
+      } finally {
+        if (mounted) {
+          setIsAuthChecking(false);
+        }
+      }
+    };
+
+    verifyExistingSession();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        clearSignedUrlCache();
+        sessionStorage.removeItem('rp_admin_current_user');
+        setCurrentUser(null);
+        setUsers([]);
       }
     });
+
+    return () => {
+      mounted = false;
+      authListener.subscription.unsubscribe();
+    };
   }, []);
 
-  // Only fetch customer profiles & open Realtime listener once an admin is actually signed in
+  // Only fetch customer profiles & open Realtime listeners once an authorized Admin session is verified
   useEffect(() => {
     if (!currentUser?.id) return;
 
     refreshUsers();
 
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    const channel = supabase
+    const profilesChannel = supabase
       .channel(`users-ctx-${Date.now()}-${Math.random().toString(36).slice(2)}`)
       .on(
         "postgres_changes",
@@ -148,9 +159,38 @@ export function UserProvider({ children }: { children: ReactNode }) {
       )
       .subscribe();
 
+    // Immediately evict session if the single Admin row is deactivated or modified out-of-band
+    const adminGuardChannel = supabase
+      .channel(`admin-guard-${currentUser.id}-${Date.now()}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "admins",
+          filter: `id=eq.${currentUser.id}`,
+        },
+        async (payload: any) => {
+          const updated = payload?.new;
+          if (
+            payload?.eventType === "DELETE" ||
+            !updated ||
+            updated.status !== "Active" ||
+            updated.role !== "Admin"
+          ) {
+            clearSignedUrlCache();
+            sessionStorage.removeItem("rp_admin_current_user");
+            setCurrentUser(null);
+            await supabase.auth.signOut();
+          }
+        }
+      )
+      .subscribe();
+
     return () => {
       if (debounceTimer) clearTimeout(debounceTimer);
-      supabase.removeChannel(channel);
+      supabase.removeChannel(profilesChannel);
+      supabase.removeChannel(adminGuardChannel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id]);
@@ -161,10 +201,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
     [users],
   );
 
-  /**
-   * Registers a new user in the system with a formatted join date.
-   * NOTE: This is local-only behavior; the real DB create flow is in UserPage.
-   */
   const addUser = (userData: Omit<User, 'id' | 'joined'>) => {
     const newUser: User = {
       ...userData,
@@ -188,12 +224,12 @@ export function UserProvider({ children }: { children: ReactNode }) {
   };
 
   const archiveUser = (id: string | number) => {
-    if (id === 0 || String(id) === '7dddf9d1-4b55-49df-8c77-61192afb2fd9') return; // Protect primary admin
+    if (id === 0 || String(id) === '7dddf9d1-4b55-49df-8c77-61192afb2fd9') return;
     setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, status: 'Archived' } : u)));
   };
 
   const removeUser = (id: string | number) => {
-    if (id === 0 || String(id) === '7dddf9d1-4b55-49df-8c77-61192afb2fd9') return; // Protect primary admin
+    if (id === 0 || String(id) === '7dddf9d1-4b55-49df-8c77-61192afb2fd9') return;
     setUsers((prev) => prev.filter((u) => u.id !== id));
   };
 
@@ -201,7 +237,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
     const cleanEmail = (email || '').trim().toLowerCase();
     const cleanPassword = (password || '').trim();
 
-    // 1. Supabase Auth authentication for database-registered admin users (checks latest email, password & profile)
     try {
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: cleanEmail,
@@ -209,16 +244,15 @@ export function UserProvider({ children }: { children: ReactNode }) {
       });
 
       if (!authError && authData?.user) {
-        // System pulls from the 'admins' table to verify admin privileges
         const { data: adminProfile } = await supabase
           .from('admins')
           .select('id, name, email, role, status, phone_number, created_at')
           .eq('id', authData.user.id)
-          .single();
+          .maybeSingle();
 
         if (adminProfile) {
           const user = toUser(adminProfile);
-          if (user.status === 'Active' || user.status === 'Inactive') {
+          if (isAuthorizedSingleAdmin(user)) {
             setCurrentUser(user);
             sessionStorage.setItem('rp_admin_current_user', JSON.stringify(user));
             return true;
@@ -233,43 +267,12 @@ export function UserProvider({ children }: { children: ReactNode }) {
     return false;
   };
 
-  const createAdminUser = async (
-    adminData: CreateAdminData
-  ): Promise<{ success: boolean; message?: string; error?: string }> => {
-    try {
-      // supabase-js attaches the signed-in admin's access token; the function verifies it server-side
-      const { data, error } = await supabase.functions.invoke('create-admin', {
-        body: adminData,
-      });
-
-      if (error) {
-        return {
-          success: false,
-          error: error.message || 'Failed to invoke admin creation service.',
-        };
-      }
-
-      if (data?.error) {
-        return { success: false, error: data.error };
-      }
-
-      await refreshUsers(true);
-      return {
-        success: true,
-        message: data?.message || 'Admin user created successfully.',
-      };
-    } catch (err: any) {
-      return {
-        success: false,
-        error: err?.message || 'Unexpected network error.',
-      };
-    }
-  };
-
   const logout = () => {
+    clearSignedUrlCache();
     supabase.auth.signOut().catch(console.error);
     sessionStorage.removeItem('rp_admin_current_user');
     setCurrentUser(null);
+    setUsers([]);
   };
 
   return (
@@ -278,6 +281,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
         users,
         currentUser,
         isLoading,
+        isAuthChecking,
         refreshUsers,
         activeUserCount,
         totalUserCount,
@@ -287,7 +291,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
         removeUser,
         login,
         logout,
-        createAdminUser,
       }}>
       {children}
     </UserContext.Provider>

@@ -7,7 +7,7 @@ export type InventoryBroadcastScope = "items" | "deductions" | "movements" | "ru
 
 type CatalogListener = (key: CatalogBroadcastKey) => void;
 type InventoryListener = (scope: InventoryBroadcastScope) => void;
-type AuditListener = (payload: { action: "insert" | "clear"; log?: any }) => void;
+type AuditListener = (payload: { action: "insert" }) => void;
 
 const catalogListeners = new Set<CatalogListener>();
 const inventoryListeners = new Set<InventoryListener>();
@@ -44,10 +44,10 @@ function ensureBroadcastChannel() {
       });
     })
     .on("broadcast", { event: "audit_change" }, (msg: any) => {
-      const data = msg?.payload || { action: "insert" };
+      if (msg?.payload?.action !== "insert") return;
       auditListeners.forEach((fn) => {
         try {
-          fn(data);
+          fn({ action: "insert" });
         } catch (err) {
           console.error("[liveBroadcast] audit listener error:", err);
         }
@@ -84,13 +84,13 @@ export async function broadcastInventoryChange(scope: InventoryBroadcastScope = 
   }
 }
 
-export async function broadcastAuditChange(action: "insert" | "clear", log?: any) {
+export async function broadcastAuditChange(action: "insert") {
   try {
     const ch = ensureBroadcastChannel();
     await ch.send({
       type: "broadcast",
       event: "audit_change",
-      payload: { action, log, ts: Date.now() },
+      payload: { action, ts: Date.now() },
     });
   } catch (err) {
     console.warn("[liveBroadcast] audit send warning:", err);

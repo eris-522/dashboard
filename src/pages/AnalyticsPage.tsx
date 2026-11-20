@@ -196,41 +196,41 @@ export function AnalyticsPage() {
     ].filter((d) => d.value > 0);
   }, [activeItems]);
 
-  // CSV Report Generator
+  // CSV Report Generator (formula-injection safe & RFC-4180 quoted)
+  const csvCell = (raw: unknown): string => {
+    const str = String(raw ?? "");
+    const safe = /^[=+\-@\t\r]/.test(str) ? `'${str}` : str;
+    return `"${safe.replace(/"/g, '""')}"`;
+  };
+
   const handleExportReport = () => {
     const periodLabel = timeRange === "all" ? "All Time" : `Year ${timeRange}`;
-    let csv = `ROXAN POLICARPIO CATERING SERVICES - BUSINESS ANALYTICS REPORT\n`;
-    csv += `Generated: ${new Date().toLocaleString()}\n`;
-    csv += `Reporting Period: ${periodLabel}\n\n`;
+    const lines: string[] = [
+      csvCell("ROXAN POLICARPIO CATERING SERVICES - BUSINESS ANALYTICS REPORT"),
+      `${csvCell("Generated")},${csvCell(new Date().toLocaleString())}`,
+      `${csvCell("Reporting Period")},${csvCell(periodLabel)}`,
+      "",
+      csvCell("--- EXECUTIVE SUMMARY ---"),
+      `${csvCell("Total Confirmed Revenue")},${csvCell(`PHP ${totalRevenue.toLocaleString()}`)}`,
+      `${csvCell("Total Confirmed Events")},${csvCell(confirmedBookings.length)}`,
+      `${csvCell("Total Guests Served")},${csvCell(`${totalPaxServed.toLocaleString()} Pax`)}`,
+      `${csvCell("Average Event Value")},${csvCell(`PHP ${Math.round(avgEventValue).toLocaleString()}`)}`,
+      `${csvCell("Equipment Units Allocated")},${csvCell(`${totalAllocatedEquipment} Units`)}`,
+      "",
+      csvCell("--- MONTHLY PERFORMANCE BREAKDOWN ---"),
+      [csvCell("Month"), csvCell("Revenue (PHP)"), csvCell("Confirmed Events"), csvCell("Guests Served")].join(","),
+      ...monthlyData.map((m) => [csvCell(m.name), csvCell(m.revenue), csvCell(m.events), csvCell(m.guests)].join(",")),
+      "",
+      csvCell("--- PACKAGE PERFORMANCE BREAKDOWN ---"),
+      [csvCell("Package Name"), csvCell("Bookings Count"), csvCell("Total Revenue (PHP)"), csvCell("Revenue Share (%)")].join(","),
+      ...packageAnalytics.map((p) => [csvCell(p.name), csvCell(p.count), csvCell(p.revenue), csvCell(`${p.percent.toFixed(1)}%`)].join(",")),
+      "",
+      csvCell("--- EVENT TYPE BREAKDOWN ---"),
+      [csvCell("Event Type"), csvCell("Total Bookings"), csvCell("Revenue Generated (PHP)")].join(","),
+      ...eventTypeAnalytics.map((e) => [csvCell(e.type), csvCell(e.count), csvCell(e.revenue)].join(",")),
+    ];
 
-    csv += `--- EXECUTIVE SUMMARY ---\n`;
-    csv += `Total Confirmed Revenue,PHP ${totalRevenue.toLocaleString()}\n`;
-    csv += `Total Confirmed Events,${confirmedBookings.length}\n`;
-    csv += `Total Guests Served,${totalPaxServed.toLocaleString()} Pax\n`;
-    csv += `Average Event Value,PHP ${Math.round(avgEventValue).toLocaleString()}\n`;
-    csv += `Equipment Units Allocated,${totalAllocatedEquipment} Units\n\n`;
-
-    csv += `--- MONTHLY PERFORMANCE BREAKDOWN ---\n`;
-    csv += `Month,Revenue (PHP),Confirmed Events,Guests Served\n`;
-    monthlyData.forEach((m) => {
-      csv += `${m.name},${m.revenue},${m.events},${m.guests}\n`;
-    });
-    csv += `\n`;
-
-    csv += `--- PACKAGE PERFORMANCE BREAKDOWN ---\n`;
-    csv += `Package Name,Bookings Count,Total Revenue (PHP),Revenue Share (%)\n`;
-    packageAnalytics.forEach((p) => {
-      csv += `"${p.name}",${p.count},${p.revenue},${p.percent.toFixed(1)}%\n`;
-    });
-    csv += `\n`;
-
-    csv += `--- EVENT TYPE BREAKDOWN ---\n`;
-    csv += `Event Type,Total Bookings,Revenue Generated (PHP)\n`;
-    eventTypeAnalytics.forEach((e) => {
-      csv += `"${e.type}",${e.count},${e.revenue}\n`;
-    });
-
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
@@ -241,6 +241,7 @@ export function AnalyticsPage() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   return (

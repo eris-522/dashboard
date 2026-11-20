@@ -17,7 +17,7 @@ import {
 import { cn } from "../lib/utils";
 import { format } from "date-fns";
 import { supabase } from "../utils/supabase";
-import { subscribeAuditBroadcast, broadcastAuditChange } from "../utils/liveBroadcast";
+import { subscribeAuditBroadcast } from "../utils/liveBroadcast";
 
 export function AuditTrailPage() {
   const [logs, setLogs] = useState<any[]>([]);
@@ -34,17 +34,18 @@ export function AuditTrailPage() {
   useEffect(() => {
     fetchLogs(0, false);
 
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const unsubscribe = subscribeAuditBroadcast((payload) => {
-      if (payload.action === "clear") {
-        setLogs([]);
-      } else if (payload.log && payload.log.id) {
-        setLogs((prev) => [payload.log, ...prev.filter((l) => l.id !== payload.log.id)]);
-      } else {
-        fetchLogs(0, false);
+      if (payload.action === "insert") {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          fetchLogs(0, false);
+        }, 300);
       }
     });
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       unsubscribe();
     };
   }, []);
@@ -88,46 +89,34 @@ export function AuditTrailPage() {
     }
   };
 
-  /**
-   * Clears the current session's audit log display after user confirmation.
-   * Note: In a production environment, this would require high-level authorization.
-   */
-  const handleClearLogs = async () => {
-    if (
-      confirm(
-        "Are you sure you want to clear all audit logs? This action cannot be undone.",
-      )
-    ) {
-      const { error } = await supabase.from("audit_logs").delete().neq("id", 0);
-      if (error) {
-        console.error("Error clearing logs:", error);
-      } else {
-        setLogs([]);
-        broadcastAuditChange("clear");
-      }
-    }
+  const csvCell = (raw: unknown): string => {
+    const str = String(raw ?? "");
+    const safe = /^[=+\-@\t\r]/.test(str) ? `'${str}` : str;
+    return `"${safe.replace(/"/g, '""')}"`;
   };
 
   const handleDownloadArchive = () => {
     if (filteredLogs.length === 0) return;
     const headers = ["ID", "Timestamp", "User", "Type", "Action", "Target", "Details"];
     const rows = filteredLogs.map((l) => [
-      l.id,
-      l.created_at || l.timestamp,
-      `"${(l.user_name || l.user || "System").replace(/"/g, '""')}"`,
-      `"${(l.type || "").replace(/"/g, '""')}"`,
-      `"${(l.action || "").replace(/"/g, '""')}"`,
-      `"${(l.target || "").replace(/"/g, '""')}"`,
-      `"${(l.details || "").replace(/"/g, '""')}"`,
+      csvCell(l.id),
+      csvCell(l.created_at || l.timestamp || ""),
+      csvCell(l.user_name || l.user || "System"),
+      csvCell(l.type || ""),
+      csvCell(l.action || ""),
+      csvCell(l.target || ""),
+      csvCell(l.details || ""),
     ]);
-    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
-    const encodedUri = encodeURI(csvContent);
+    const csvContent = [headers.map(csvCell).join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
+    link.setAttribute("href", url);
     link.setAttribute("download", `audit_trail_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const isEquipmentLog = (log: any) => {
@@ -311,13 +300,6 @@ export function AuditTrailPage() {
             >
               <RefreshCw className={cn("w-3.5 h-3.5", isLoading && "animate-spin")} />
               Refresh
-            </button>
-            <button
-              onClick={handleClearLogs}
-              className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-3.5 py-2 border border-natural-border rounded-lg text-xs font-bold text-natural-text-main hover:bg-natural-bg transition-all uppercase tracking-widest cursor-pointer"
-            >
-              <History className="w-3.5 h-3.5" />
-              Clear Logs
             </button>
             <button
               onClick={handleDownloadArchive}

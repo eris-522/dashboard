@@ -45,16 +45,13 @@ export function RecentActivities({ onViewLogs }: { onViewLogs?: () => void }) {
   useEffect(() => {
     fetchRecentLogs();
 
-    // Listen to lightweight Broadcast sync & in-memory patching instead of re-querying Supabase
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const unsubscribeBroadcast = subscribeAuditBroadcast((payload) => {
-      if (payload.action === "clear") {
-        setActivities([]);
-      } else if (payload.log && payload.log.id) {
-        setActivities((prev) =>
-          [payload.log, ...prev.filter((a) => a.id !== payload.log.id)].slice(0, 6)
-        );
-      } else {
-        fetchRecentLogs();
+      if (payload.action === "insert") {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          fetchRecentLogs();
+        }, 300);
       }
     });
 
@@ -72,6 +69,7 @@ export function RecentActivities({ onViewLogs }: { onViewLogs?: () => void }) {
     window.addEventListener("auditLogged", handleCustomLog);
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       unsubscribeBroadcast();
       window.removeEventListener("auditLogged", handleCustomLog);
     };

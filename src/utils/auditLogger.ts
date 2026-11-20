@@ -55,7 +55,7 @@ export const logAuditAction = async (data: AuditLogData) => {
           detail: inserted,
         }),
       );
-      broadcastAuditChange("insert", inserted);
+      broadcastAuditChange("insert");
     }
   } catch (error) {
     console.error("Failed to log audit action:", error);

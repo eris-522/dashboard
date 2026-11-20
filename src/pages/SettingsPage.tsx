@@ -174,6 +174,9 @@ export const validatePasswordStrength = (password: string): string => {
   if (!password) {
     return "New password is required.";
   }
+  if (password !== password.trim()) {
+    return "Password cannot start or end with spaces.";
+  }
   if (password.length < 6) {
     return "Password must be at least 6 characters long.";
   }
@@ -194,19 +197,11 @@ export function SettingsPage() {
 
   // Profile validation error states (validated on blur, cleared on input)
   const [nameError, setNameError] = useState("");
-  const [emailError, setEmailError] = useState("");
   const [phoneError, setPhoneError] = useState("");
   const [profileBanner, setProfileBanner] = useState<{ type: string; text: string }>({
     type: "",
     text: "",
   });
-
-  // Email change OTP confirmation state
-  const [emailOtpStep, setEmailOtpStep] = useState(false);
-  const [emailOtpCode, setEmailOtpCode] = useState("");
-  const [emailOtpError, setEmailOtpError] = useState("");
-  const [isSendingEmailOtp, setIsSendingEmailOtp] = useState(false);
-  const [emailOtpSentTo, setEmailOtpSentTo] = useState("");
 
   // Save Confirmation Modal state
   const [showConfirm, setShowConfirm] = useState(false);
@@ -232,6 +227,7 @@ export function SettingsPage() {
 
   const isPasswordReadyForOtp = Boolean(
     newPassword.trim() &&
+    newPassword === newPassword.trim() &&
     newPassword.length >= 6 &&
     confirmPassword.trim() &&
     newPassword === confirmPassword
@@ -262,10 +258,6 @@ export function SettingsPage() {
     { id: "appearance", label: "Appearance", icon: Palette },
     { id: "security", label: "Security", icon: Shield },
   ];
-
-  const isEmailChanged =
-    formData.email.trim().toLowerCase() !==
-    (currentUser.email || "").trim().toLowerCase();
 
   // Verify OTP for password change using Supabase 'recovery' or 'email' OTP type
   const verifyEmailOtpToken = async (targetEmail: string, token: string) => {
@@ -301,127 +293,7 @@ export function SettingsPage() {
     };
   };
 
-  // Verify OTP for email change using Supabase 'email_change' OTP type
-  const verifyEmailChangeOtp = async (newEmail: string, token: string) => {
-    const cleanNewEmail = newEmail.trim().toLowerCase();
-    const cleanToken = token.trim();
-
-    // 1. Try verifying with new email (standard Supabase email_change template)
-    const { data: newData, error: newErr } = await supabase.auth.verifyOtp({
-      email: cleanNewEmail,
-      token: cleanToken,
-      type: "email_change",
-    });
-
-    if (!newErr) {
-      return { success: true, data: newData };
-    }
-
-    // 2. Try verifying with previous email in case project has Secure Email Change enabled
-    const previousEmail = (currentUser?.email || "").trim().toLowerCase();
-    if (previousEmail && previousEmail !== cleanNewEmail) {
-      const { data: prevData, error: prevErr } = await supabase.auth.verifyOtp({
-        email: previousEmail,
-        token: cleanToken,
-        type: "email_change",
-      });
-
-      if (!prevErr) {
-        return { success: true, data: prevData };
-      }
-    }
-
-    return {
-      success: false,
-      error:
-        newErr?.message ||
-        "Invalid or expired OTP code. Please check your email and try again.",
-    };
-  };
-
-  // Dispatch OTP to confirm an email change using Supabase Change Email Address template
-  const handleSendEmailChangeOtp = async () => {
-    const targetNewEmail = formData.email.trim().toLowerCase();
-    const previousEmail = (currentUser.email || "").trim().toLowerCase();
-
-    setIsSendingEmailOtp(true);
-    setSaveMessage({ type: "", text: "" });
-    setEmailOtpError("");
-
-    try {
-      // Check if the new email is already in use by another admin
-      const { data: existingAdmin } = await supabase
-        .from("admins")
-        .select("id")
-        .ilike("email", targetNewEmail)
-        .neq("id", String(currentUser.id))
-        .maybeSingle();
-
-      if (existingAdmin) {
-        setEmailError("This email address is already registered to another administrator.");
-        setSaveMessage({
-          type: "error",
-          text: "This email address is already registered to another administrator.",
-        });
-        setShowConfirm(false);
-        return;
-      }
-
-      // Ensure active Supabase session before triggering email change
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData?.session) {
-        const expiredMsg = "Your session has expired. Please sign out and log in again to change your email.";
-        setEmailError(expiredMsg);
-        setSaveMessage({ type: "error", text: expiredMsg });
-        setShowConfirm(false);
-        return;
-      }
-
-      // Trigger Supabase Change Email Address template ("Confirm your new email address")
-      const { error: updateErr } = await supabase.auth.updateUser({
-        email: targetNewEmail,
-      });
-
-      if (updateErr) {
-        const lower = updateErr.message.toLowerCase();
-        if (lower.includes("already registered") || lower.includes("already in use")) {
-          setEmailError("This email address is already in use by another account.");
-          setSaveMessage({
-            type: "error",
-            text: "This email address is already in use by another account.",
-          });
-          setShowConfirm(false);
-          return;
-        }
-
-        // If an email change was already initiated, resend using email_change type
-        const { error: resendErr } = await supabase.auth.resend({
-          type: "email_change",
-          email: targetNewEmail,
-        });
-
-        if (resendErr) {
-          throw new Error(updateErr.message || resendErr.message);
-        }
-      }
-
-      setEmailOtpSentTo(targetNewEmail);
-      setEmailOtpStep(true);
-      setSaveMessage({
-        type: "success",
-        text: `Confirmation OTP sent to ${targetNewEmail} ("Confirm your new email address"). Enter the code below to confirm your new email.`,
-      });
-    } catch (err: any) {
-      setSaveMessage({
-        type: "error",
-        text: err?.message || "Failed to send email change verification OTP.",
-      });
-    } finally {
-      setIsSendingEmailOtp(false);
-    }
-  };
-
-  // Validate profile inputs and open confirmation dialog
+  // Validate profile inputs and open confirmation dialog (primary admin email is permanently locked)
   const handleInitiateSaveClick = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setProfileBanner({ type: "", text: "" });
@@ -429,32 +301,26 @@ export function SettingsPage() {
 
     if (activeSection === "profile") {
       const nErr = validateFullName(formData.name);
-      const eErr = validateEmailFormat(formData.email);
       const pErr = validatePhPhoneFormat(formData.phone);
 
       setNameError(nErr);
-      setEmailError(eErr);
       setPhoneError(pErr);
 
-      if (nErr || eErr || pErr) {
+      if (nErr || pErr) {
         setProfileBanner({
           type: "error",
-          text: nErr || eErr || pErr,
+          text: nErr || pErr,
         });
         return;
       }
     }
 
-    setEmailOtpStep(false);
-    setEmailOtpCode("");
-    setEmailOtpError("");
     setShowConfirm(true);
   };
 
   const handleSave = async () => {
     setIsSaving(true);
     setSaveMessage({ type: "", text: "" });
-    setEmailOtpError("");
 
     try {
       if (activeSection === "appearance") {
@@ -478,78 +344,30 @@ export function SettingsPage() {
       }
 
       const cleanName = formData.name.trim();
-      const cleanEmail = formData.email.trim().toLowerCase();
+      const lockedEmail = (currentUser.email || "").trim().toLowerCase();
       const cleanPhoneDigits = normalizePhPhoneDigits(formData.phone);
       const formattedAdminPhone = `0${cleanPhoneDigits}`; // e.g., 09467158519
 
       const nErr = validateFullName(cleanName);
-      const eErr = validateEmailFormat(cleanEmail);
       const pErr = validatePhPhoneFormat(cleanPhoneDigits);
 
-      if (nErr || eErr || pErr) {
+      if (nErr || pErr) {
         setNameError(nErr);
-        setEmailError(eErr);
         setPhoneError(pErr);
         setSaveMessage({
           type: "error",
-          text: nErr || eErr || pErr,
+          text: nErr || pErr,
         });
         return;
       }
 
-      // If email is changing, require confirmation OTP sent via Supabase Change Email template
-      if (isEmailChanged) {
-        if (!emailOtpStep) {
-          await handleSendEmailChangeOtp();
-          return;
-        }
-
-        const cleanOtp = emailOtpCode.replace(/\D/g, "").trim();
-        if (!cleanOtp || cleanOtp.length < 6) {
-          setEmailOtpError("Please enter the 6-digit confirmation code.");
-          setSaveMessage({
-            type: "error",
-            text: "Please enter the 6-digit confirmation code.",
-          });
-          return;
-        }
-
-        const otpResult = await verifyEmailChangeOtp(cleanEmail, cleanOtp);
-        if (!otpResult.success) {
-          setEmailOtpError(otpResult.error || "Invalid confirmation code.");
-          setSaveMessage({
-            type: "error",
-            text: otpResult.error || "Invalid confirmation code.",
-          });
-          return;
-        }
-      }
-
-      if (currentUser.id === 0 || currentUser.id === "0") {
-        updateUser(currentUser.id, {
-          name: cleanName,
-          email: cleanEmail,
-          phone: formattedAdminPhone,
-        });
-        setSaveMessage({
-          type: "success",
-          text: "Settings saved locally for fallback account!",
-        });
-        setTimeout(() => {
-          setShowConfirm(false);
-          setEmailOtpStep(false);
-          setEmailOtpCode("");
-        }, 1500);
-        return;
-      }
-
-      // Atomically update auth.users, auth.identities, public.admins, and public.profiles
+      // Atomically update admin name and contact number (email remains locked to primary admin)
       const { data: rpcResult, error: rpcError } = await supabase.rpc(
         "update_admin_profile_data",
         {
           p_admin_id: currentUser.id,
           p_name: cleanName,
-          p_email: cleanEmail,
+          p_email: lockedEmail,
           p_phone: formattedAdminPhone,
         },
       );
@@ -564,38 +382,28 @@ export function SettingsPage() {
 
       updateUser(currentUser.id, {
         name: cleanName,
-        email: cleanEmail,
+        email: lockedEmail,
         phone: formattedAdminPhone,
       });
 
       await logAuditAction({
-        action: isEmailChanged
-          ? "Updated Profile & Email Address (OTP Verified)"
-          : "Updated Profile Settings",
+        action: "Updated Profile Settings",
         target: cleanName,
         type: "Update",
-        details: isEmailChanged
-          ? `Updated profile and verified email change OTP to update email from ${currentUser.email} to ${cleanEmail}`
-          : `Updated personal profile name (${cleanName}) and contact number (+63 ${cleanPhoneDigits})`,
+        details: `Updated personal profile name (${cleanName}) and contact number (+63 ${cleanPhoneDigits})`,
       });
 
       setSaveMessage({
         type: "success",
-        text: isEmailChanged
-          ? "OTP verified! Your email address and profile settings have been updated."
-          : "Profile settings saved successfully!",
+        text: "Profile settings saved successfully!",
       });
       setProfileBanner({
         type: "success",
-        text: isEmailChanged
-          ? `Profile and email address updated to ${cleanEmail}.`
-          : "Profile settings saved successfully!",
+        text: "Profile settings saved successfully!",
       });
 
       setTimeout(() => {
         setShowConfirm(false);
-        setEmailOtpStep(false);
-        setEmailOtpCode("");
         setSaveMessage({ type: "", text: "" });
       }, 1500);
     } catch (err: any) {
@@ -907,13 +715,13 @@ export function SettingsPage() {
                   )}
                 </div>
 
-                {/* Email Address */}
+                {/* Email Address (Permanently Locked for Single Admin) */}
                 <div className="space-y-1.5">
                   <label
                     htmlFor="admin-profile-email"
                     className="block text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest"
                   >
-                    Email Address <span className="text-red-500">*</span>
+                    Email Address <span className="text-natural-text-light opacity-70">(Protected)</span>
                   </label>
                   <div className="relative">
                     <Mail className="absolute left-3 top-3 w-4 h-4 text-natural-text-light opacity-40" />
@@ -921,47 +729,17 @@ export function SettingsPage() {
                       id="admin-profile-email"
                       name="email"
                       type="email"
-                      required
-                      autoComplete="email"
-                      autoCorrect="off"
-                      autoCapitalize="off"
-                      spellCheck={false}
-                      value={formData.email}
-                      aria-describedby="admin-email-hint admin-email-error"
-                      aria-invalid={!!emailError}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setFormData({ ...formData, email: val });
-                        if (emailError) {
-                          setEmailError(validateEmailFormat(val));
-                        }
-                      }}
-                      onBlur={(e) => {
-                        setEmailError(validateEmailFormat(e.target.value));
-                      }}
-                      className={cn(
-                        "w-full pl-10 pr-4 py-2.5 bg-natural-bg/30 border rounded-lg text-sm focus:outline-none focus:ring-2 transition-all text-natural-text-main",
-                        emailError
-                          ? "border-red-500 focus:ring-red-500/20"
-                          : "border-natural-border focus:ring-natural-accent/10",
-                      )}
+                      readOnly
+                      value={currentUser.email || formData.email}
+                      aria-describedby="admin-email-hint"
+                      className="w-full pl-10 pr-10 py-2.5 bg-natural-bg/50 border border-natural-border rounded-lg text-sm text-natural-text-light cursor-not-allowed opacity-85 focus:outline-none"
                     />
+                    <Lock className="absolute right-3 top-3 w-4 h-4 text-natural-text-light opacity-50" />
                   </div>
-                  {emailError && (
-                    <p
-                      id="admin-email-error"
-                      className="text-xs font-semibold text-red-600 dark:text-red-400 flex items-center gap-1 mt-1"
-                    >
-                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                      {emailError}
-                    </p>
-                  )}
-                  {isEmailChanged && !emailError && (
-                    <p className="text-[11px] font-semibold text-natural-accent flex items-center gap-1 mt-1">
-                      <KeyRound className="w-3.5 h-3.5 shrink-0" />
-                      A confirmation OTP will be sent to verify this email change when you save.
-                    </p>
-                  )}
+                  <p id="admin-email-hint" className="text-[11px] text-natural-text-light flex items-center gap-1 mt-1">
+                    <Shield className="w-3.5 h-3.5 shrink-0 text-natural-accent" />
+                    Primary administrator email is permanently locked for account security.
+                  </p>
                 </div>
 
                 {/* Contact Number (PH Mobile Format) */}
@@ -1036,9 +814,7 @@ export function SettingsPage() {
                   className="w-full sm:w-auto flex items-center justify-center gap-2 bg-natural-accent text-white px-6 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-sm cursor-pointer active:scale-95"
                 >
                   <Save className="w-4 h-4" />
-                  {isEmailChanged
-                    ? "Send OTP & Save Profile"
-                    : "Save Profile Changes"}
+                  Save Profile Changes
                 </button>
               </div>
             </form>
@@ -1670,124 +1446,24 @@ export function SettingsPage() {
         </div>
       </div>
 
-      {/* Save Confirmation & Email Change OTP Modal */}
+      {/* Save Confirmation Modal */}
       {showConfirm && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-3 sm:p-4 animate-in fade-in duration-200">
           <div className="bg-natural-card rounded-2xl shadow-2xl w-full max-w-md max-h-[92dvh] overflow-y-auto animate-in zoom-in-95 duration-200 border border-natural-border">
             <div className="p-6 sm:p-8 text-center">
               <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 rotate-3 shadow-lg transition-transform hover:rotate-0 bg-natural-accent shadow-natural-accent/20">
-                {activeSection === "profile" && isEmailChanged ? (
-                  <KeyRound className="w-8 h-8 text-white" />
-                ) : (
-                  <Save className="w-8 h-8 text-white" />
-                )}
+                <Save className="w-8 h-8 text-white" />
               </div>
 
               <h3 className="text-xl font-serif font-bold text-natural-text-main mb-2">
-                {activeSection === "profile" && isEmailChanged
-                  ? emailOtpStep
-                    ? "Enter Email Change OTP"
-                    : "Confirm Email Address Change"
-                  : "Save Changes?"}
+                Save Changes?
               </h3>
 
               <p className="text-sm text-natural-text-light mb-6 leading-relaxed">
-                {activeSection === "appearance" ? (
-                  `Save current display preferences (${theme} theme with ${accentColor} accent) to your profile?`
-                ) : isEmailChanged ? (
-                  emailOtpStep ? (
-                    <>
-                      Enter the 6-digit confirmation code sent to{" "}
-                      <strong className="text-natural-accent">
-                        {emailOtpSentTo || formData.email.trim().toLowerCase()}
-                      </strong>{" "}
-                      to confirm changing your email to{" "}
-                      <strong className="text-natural-accent">
-                        {formData.email.trim().toLowerCase()}
-                      </strong>
-                      .
-                    </>
-                  ) : (
-                    <>
-                      You are changing your email from{" "}
-                      <strong className="text-natural-text-main">{currentUser.email}</strong> to{" "}
-                      <strong className="text-natural-accent">
-                        {formData.email.trim().toLowerCase()}
-                      </strong>
-                      . A confirmation OTP will be sent to verify your new email address.
-                    </>
-                  )
-                ) : (
-                  "You are about to update your profile settings. Are you sure you want to proceed?"
-                )}
+                {activeSection === "appearance"
+                  ? `Save current display preferences (${theme} theme with ${accentColor} accent) to your profile?`
+                  : "You are about to update your profile settings. Are you sure you want to proceed?"}
               </p>
-
-              {/* OTP Input inside modal when confirming an email change */}
-              {activeSection === "profile" && isEmailChanged && emailOtpStep && (
-                <div className="mb-6 text-left space-y-2">
-                  <label
-                    htmlFor="modal-email-change-otp"
-                    className="block text-[0.65rem] font-bold text-natural-text-light uppercase tracking-widest"
-                  >
-                    Verification OTP Code <span className="text-red-500">*</span>
-                  </label>
-                  <p
-                    id="modal-email-otp-hint"
-                    className="text-[11px] text-natural-text-light"
-                  >
-                    Check the inbox of {emailOtpSentTo || formData.email.trim().toLowerCase()} for the 6-digit code.
-                  </p>
-                  <input
-                    id="modal-email-change-otp"
-                    name="email_change_otp"
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    autoCorrect="off"
-                    autoCapitalize="off"
-                    spellCheck={false}
-                    pattern="\d{6,8}"
-                    maxLength={8}
-                    placeholder="123456"
-                    value={emailOtpCode}
-                    aria-describedby="modal-email-otp-hint modal-email-otp-error"
-                    aria-invalid={!!emailOtpError}
-                    onChange={(e) => {
-                      const digits = e.target.value.replace(/\D/g, "").slice(0, 8);
-                      setEmailOtpCode(digits);
-                      if (emailOtpError && digits.length >= 6) {
-                        setEmailOtpError("");
-                      }
-                    }}
-                    className={cn(
-                      "w-full px-4 py-3 bg-natural-bg/50 border rounded-xl font-mono text-center text-lg tracking-[0.4em] focus:outline-none focus:ring-2 transition-all text-natural-text-main",
-                      emailOtpError
-                        ? "border-red-500 focus:ring-red-500/20"
-                        : "border-natural-border focus:ring-natural-accent/20",
-                    )}
-                  />
-                  <div className="flex items-center justify-between pt-1">
-                    {emailOtpError ? (
-                      <p
-                        id="modal-email-otp-error"
-                        className="text-[11px] font-semibold text-red-600 dark:text-red-400"
-                      >
-                        {emailOtpError}
-                      </p>
-                    ) : (
-                      <span />
-                    )}
-                    <button
-                      type="button"
-                      onClick={handleSendEmailChangeOtp}
-                      disabled={isSendingEmailOtp || isSaving}
-                      className="text-[11px] font-bold text-natural-accent hover:underline cursor-pointer disabled:opacity-50"
-                    >
-                      {isSendingEmailOtp ? "Resending..." : "Resend OTP"}
-                    </button>
-                  </div>
-                </div>
-              )}
 
               {saveMessage.text && (
                 <div
@@ -1806,27 +1482,18 @@ export function SettingsPage() {
                 <button
                   type="button"
                   onClick={handleSave}
-                  disabled={isSaving || isSendingEmailOtp}
+                  disabled={isSaving}
                   className="w-full py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] text-white bg-natural-accent hover:bg-natural-accent/90 transition-all shadow-md active:scale-[0.98] disabled:opacity-50 cursor-pointer"
                 >
-                  {isSaving || isSendingEmailOtp
-                    ? "Processing..."
-                    : activeSection === "profile" && isEmailChanged
-                      ? emailOtpStep
-                        ? "Verify OTP & Update Email"
-                        : "Send Email Change OTP"
-                      : "Confirm Save"}
+                  {isSaving ? "Processing..." : "Confirm Save"}
                 </button>
                 <button
                   type="button"
                   onClick={() => {
                     setShowConfirm(false);
-                    setEmailOtpStep(false);
-                    setEmailOtpCode("");
-                    setEmailOtpError("");
                     setSaveMessage({ type: "", text: "" });
                   }}
-                  disabled={isSaving || isSendingEmailOtp}
+                  disabled={isSaving}
                   className="w-full py-3 rounded-xl text-xs font-bold uppercase tracking-[0.2em] text-natural-text-light border border-natural-border hover:bg-natural-bg transition-all active:scale-[0.98] disabled:opacity-50 cursor-pointer"
                 >
                   Cancel
