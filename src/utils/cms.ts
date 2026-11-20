@@ -623,7 +623,9 @@ export async function fetchCMSContent(): Promise<FullCMSData> {
   // 1. Fetch from Supabase primary table `cms_content` first (source of truth across local/port-forwarded/Vercel)
   let loadedFromSupabase = false;
   try {
-    const { data, error } = await supabase.from("cms_content").select("*");
+    const { data, error } = await supabase
+      .from("cms_content")
+      .select("id, section, data, updated_at");
     if (!error && data && data.length > 0) {
       data.forEach((row: any) => {
         const sectionKey = (row.id || row.section) as keyof FullCMSData;
@@ -645,7 +647,7 @@ export async function fetchCMSContent(): Promise<FullCMSData> {
     try {
       const { data, error } = await supabase
         .from("inclusions")
-        .select("*")
+        .select("id, category, items")
         .like("category", "__CMS_%");
 
       if (!error && data && data.length > 0) {
@@ -765,4 +767,89 @@ export async function saveCMSSection<K extends keyof FullCMSData>(
   } catch (e) {}
 
   return { success: true, data: normalizedData };
+}
+
+/**
+ * Atomically saves multiple CMS sections in a single Supabase upsert and single audit log entry.
+ */
+export async function saveCMSSectionsBatch<K extends keyof FullCMSData>(
+  sections: Pick<FullCMSData, K>,
+  userName = "Admin User"
+): Promise<{ success: boolean; data: Pick<FullCMSData, K> }> {
+  const entries = (Object.keys(sections) as K[]).filter((k) => sections[k] !== undefined);
+  const normalizedMap = {} as Pick<FullCMSData, K>;
+  const updatedAt = new Date().toISOString();
+
+  entries.forEach((sectionKey) => {
+    normalizedMap[sectionKey] = mergeSectionWithDefaults(sectionKey, sections[sectionKey]);
+  });
+
+  // 1. Update local storage cache once
+  try {
+    const cached = localStorage.getItem(LOCAL_STORAGE_CMS_KEY);
+    const parsed = cached ? JSON.parse(cached) : { ...DEFAULT_CMS_DATA };
+    entries.forEach((sectionKey) => {
+      parsed[sectionKey] = normalizedMap[sectionKey];
+    });
+    localStorage.setItem(LOCAL_STORAGE_CMS_KEY, JSON.stringify(parsed));
+  } catch (e) {
+    console.warn("Error updating local storage cache for batch CMS save:", e);
+  }
+
+  // 2. Dispatch local window events
+  entries.forEach((sectionKey) => {
+    try {
+      window.dispatchEvent(
+        new CustomEvent("cms_section_updated", {
+          detail: { section: sectionKey, data: normalizedMap[sectionKey] },
+        })
+      );
+    } catch (e) {}
+  });
+
+  // 3. Single batch upsert to `cms_content`
+  if (entries.length > 0) {
+    const rows = entries.map((sectionKey) => ({
+      id: sectionKey,
+      section: sectionKey,
+      data: normalizedMap[sectionKey] as any,
+      updated_at: updatedAt,
+      updated_by: userName,
+    }));
+
+    const { error: upsertError } = await supabase
+      .from("cms_content")
+      .upsert(rows, { onConflict: "id" });
+
+    if (upsertError) {
+      console.error("Batch cms_content save error:", upsertError.message);
+      throw new Error(`Failed to save to database: ${upsertError.message}`);
+    }
+  }
+
+  // 4. Best-effort broadcast per section
+  await Promise.all(
+    entries.map(async (sectionKey) => {
+      try {
+        await broadcastChannel.send({
+          type: "broadcast",
+          event: "cms_update",
+          payload: { section: sectionKey, data: normalizedMap[sectionKey] },
+        });
+      } catch (e) {}
+    })
+  );
+
+  // 5. Consolidated single audit log entry
+  try {
+    const sectionList = entries.map((k) => String(k)).join(", ");
+    await logAuditAction({
+      action: "Updated CMS: HOME",
+      target: "Website Home & Global Sections",
+      type: "Update",
+      details: `Admin published batch CMS update (${sectionList}).`,
+    });
+  } catch (e) {}
+
+  return { success: true, data: normalizedMap };
 }

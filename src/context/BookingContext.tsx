@@ -64,8 +64,52 @@ export interface Booking {
   updated_at?: string;
 }
 
+export interface DashboardMetrics {
+  status_counts: {
+    confirmed_completed: number;
+    pending: number;
+    cancelled: number;
+    archived: number;
+    total: number;
+  };
+  active_customer_count: number;
+  low_stock_count: number;
+  available_years: number[];
+  monthly_series: Array<{
+    year: number;
+    month_idx: number;
+    revenue: number;
+    events: number;
+    guests: number;
+  }>;
+  package_by_year: Array<{
+    year: number;
+    name: string;
+    count: number;
+    revenue: number;
+  }>;
+  event_type_by_year: Array<{
+    year: number;
+    type: string;
+    count: number;
+    revenue: number;
+  }>;
+}
+
+const splitVenueLocation = (rawLocation?: string | null): { venueName: string; venueAddress: string } => {
+  const clean = String(rawLocation || "").trim();
+  if (!clean) return { venueName: "", venueAddress: "" };
+  const sepIdx = clean.indexOf(" - ");
+  if (sepIdx === -1) return { venueName: clean, venueAddress: "" };
+  return {
+    venueName: clean.slice(0, sepIdx).trim(),
+    venueAddress: clean.slice(sepIdx + 3).trim(),
+  };
+};
+
 interface BookingContextType {
   bookings: Booking[];
+  dashboardMetrics: DashboardMetrics | null;
   isLoading: boolean;
   error: string | null;
   addBooking: (booking: Omit<Booking, "id">) => void;
@@ -80,6 +124,7 @@ const initialBookings: Booking[] = [];
 
 export function BookingProvider({ children }: { children: ReactNode }) {
   const [bookings, setBookings] = useState<Booking[]>(initialBookings);
+  const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetrics | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -160,7 +205,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   }, []);
 
   /**
-   * Fetches all active bookings from Supabase with lightweight joined fields
+   * Fetches active bookings (bounded) + aggregate dashboard metrics RPC in parallel.
    */
   const refreshBookings = async (silent = false) => {
     const requestId = ++latestRequestRef.current;
@@ -169,24 +214,38 @@ export function BookingProvider({ children }: { children: ReactNode }) {
       if (!silent) setIsLoading(true);
       setError(null);
 
-      const { data: bData, error: bError } = await supabase
-        .from("bookings")
-        .select(
-          `
-          *,
-          profiles (id, name, email, phone_number, status),
-          packages (id, name, price, pax, additional_pax_price, inclusions, category_limits)
-        `,
-        )
-        .order("created_at", { ascending: false });
+      const [{ data: bData, error: bError }, metricsRes] = await Promise.all([
+        supabase
+          .from("bookings")
+          .select(
+            `
+            id, user_id, package_id, event_date, event_time, event_location, event_type,
+            guest_count, additional_pax, selected_menu_items, selected_add_ons, status,
+            cancellation_reason, cancelled_by, food_allergies, payment_method, downpayment_amount,
+            payment_status, receipt_url, reference_number, terms_accepted, payment_scheme,
+            final_balance_amount, final_balance_status, final_balance_method,
+            final_balance_reference, final_balance_receipt, installment_schedule,
+            logistics_info, corkage_info, overtime_info, dish_substitutions,
+            modification_requests, created_at,
+            profiles (id, name, email, phone_number, status),
+            packages (id, name, type, price, pax, additional_pax_price, inclusions, category_limits)
+          `,
+          )
+          .order("created_at", { ascending: false })
+          .limit(500),
+        supabase.rpc("get_admin_dashboard_metrics"),
+      ]);
 
       // A newer refresh has been started; discard this stale result
       if (requestId !== latestRequestRef.current) return;
 
+      if (!metricsRes.error && metricsRes.data) {
+        setDashboardMetrics(metricsRes.data as DashboardMetrics);
+      }
+
       if (bError) {
         setError(`Error fetching bookings: ${bError.message}`);
         console.error("Error fetching bookings:", bError.message);
-        setBookings([]);
       } else {
         // Transform database rows to Booking interface
         const transformedBookings = (bData || []).map((booking: any) => {
@@ -204,6 +263,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
           let finalBalanceReceipt = booking.final_balance_receipt || "";
           let installmentSchedule = booking.installment_schedule || null;
           let logisticsInfo = booking.logistics_info || null;
+          let embeddedOvertime: any = null;
 
           // Fallback extraction if embedded in food_allergies
           if (typeof booking.food_allergies === "string" && booking.food_allergies.includes("__PAYMENT_METADATA__:")) {
@@ -226,6 +286,9 @@ export function BookingProvider({ children }: { children: ReactNode }) {
               if ((!logisticsInfo || Object.keys(logisticsInfo).length === 0) && parsed.logistics) {
                 logisticsInfo = parsed.logistics;
               }
+              if (parsed.overtime) {
+                embeddedOvertime = parsed.overtime;
+              }
             } catch (e) {}
           }
 
@@ -233,6 +296,8 @@ export function BookingProvider({ children }: { children: ReactNode }) {
           const cleanFoodAllergies = typeof booking.food_allergies === "string" && booking.food_allergies.includes("__PAYMENT_METADATA__:")
             ? booking.food_allergies.split("__PAYMENT_METADATA__:")[0].trim()
             : (booking.food_allergies || "");
+
+          const { venueName, venueAddress } = splitVenueLocation(booking.event_location);
 
           return {
             id: booking.id,
@@ -243,22 +308,22 @@ export function BookingProvider({ children }: { children: ReactNode }) {
             email: booking.profiles?.email || "",
             phone:
               booking.profiles?.phone_number || booking.profiles?.phone || "",
-            eventType: booking.event_type || "",
+            eventType: booking.event_type || booking.packages?.type || "",
             package: booking.packages?.name || "",
             inclusions: Array.isArray(booking.packages?.inclusions) ? booking.packages.inclusions : [],
             date: booking.event_date || "",
             time: booking.event_time || "",
             guestCount: booking.guest_count || 0,
             additionalPax: booking.additional_pax || 0,
-            venueName: booking.event_location?.split(" - ")[0] || "",
-            venueAddress: booking.event_location?.split(" - ")[1] || "",
+            venueName,
+            venueAddress,
             menu: booking.selected_menu_items || [],
             selected_menu_items: booking.selected_menu_items || [],
             additionalServices: booking.selected_add_ons || [],
             foodAllergies: cleanFoodAllergies,
             logistics_info: logisticsInfo,
             corkage_info: booking.corkage_info || logisticsInfo?.corkage || null,
-            overtime_info: booking.overtime_info || null,
+            overtime_info: booking.overtime_info || embeddedOvertime || null,
             dish_substitutions: Array.isArray(booking.dish_substitutions) ? booking.dish_substitutions : [],
             modification_requests: Array.isArray(booking.modification_requests) ? booking.modification_requests : [],
             cancelled_by: booking.cancelled_by || "",
@@ -280,6 +345,9 @@ export function BookingProvider({ children }: { children: ReactNode }) {
               const extraPax = Number(booking.additional_pax) || 0;
               const travelFee = Number(logisticsInfo?.travelFee) || 0;
               const haulingFee = Number(logisticsInfo?.haulingFee) || 0;
+              const rainLaundryFee =
+                Number(logisticsInfo?.rainLaundryFee) ||
+                (logisticsInfo?.rainLaundryApplied ? 2000 : 0);
               const corkageObj = booking.corkage_info || logisticsInfo?.corkage || null;
               const corkageFee =
                 Number(corkageObj?.totalCorkageFee) ||
@@ -287,7 +355,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
                   Number(corkageObj?.alcoholicBeveragesCount || 0) * 400 +
                   Number(corkageObj?.outsideFoodCount || 0) * 400) ||
                 0;
-              let otData = booking.overtime_info;
+              let otData = booking.overtime_info || embeddedOvertime;
               if (typeof otData === "string") {
                 try {
                   otData = JSON.parse(otData);
@@ -296,8 +364,24 @@ export function BookingProvider({ children }: { children: ReactNode }) {
               const prebookedOTFee = Number(otData?.prebooked?.total_prebooked_fee) || 0;
               const dayOfOTFee = Number(otData?.day_of?.total_day_of_fee) || 0;
               const totalOTFee = Number(otData?.total_overtime_fee) || (prebookedOTFee + dayOfOTFee);
+              const excessFee =
+                Number(
+                  logisticsInfo?.post_event_billing?.excess_guest_fee ??
+                    logisticsInfo?.post_event_billing?.excess_fee
+                ) || 0;
+              const damageFee = Number(logisticsInfo?.damage_appraisal?.total_damage_fee) || 0;
 
-              return basePrice + addPrice * extraPax + travelFee + haulingFee + corkageFee + totalOTFee;
+              return (
+                basePrice +
+                addPrice * extraPax +
+                travelFee +
+                haulingFee +
+                rainLaundryFee +
+                corkageFee +
+                totalOTFee +
+                excessFee +
+                damageFee
+              );
             })(),
             status: booking.status || "Pending",
             downpayment_amount: downpaymentAmount,
@@ -319,7 +403,6 @@ export function BookingProvider({ children }: { children: ReactNode }) {
               booking.reason ||
               "",
             created_at: booking.created_at,
-            updated_at: booking.updated_at,
           };
         });
         setBookings(transformedBookings);
@@ -329,7 +412,6 @@ export function BookingProvider({ children }: { children: ReactNode }) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
       setError(errorMsg);
       console.error("Unexpected error in refreshBookings:", err);
-      setBookings([]);
     } finally {
       setIsLoading(false);
     }
@@ -370,6 +452,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     <BookingContext.Provider
       value={{
         bookings,
+        dashboardMetrics,
         isLoading,
         error,
         addBooking,

@@ -171,17 +171,30 @@ export function NotificationCenter({
   const [expandedKey, setExpandedKey] = React.useState<string | null>(null);
   const [showAll, setShowAll] = React.useState(false);
   const [readDuringSession, setReadDuringSession] = React.useState<string[]>([]);
+  const resetTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deepLinkTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+      if (deepLinkTimerRef.current) clearTimeout(deepLinkTimerRef.current);
+    };
+  }, []);
 
   React.useEffect(() => {
     if (isOpen) {
-      refreshBookings(true);
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+        resetTimerRef.current = null;
+      }
+      refreshBookings(false);
     } else {
-      setTimeout(() => {
+      resetTimerRef.current = setTimeout(() => {
         setShowAll(false);
         setReadDuringSession([]);
       }, 200);
     }
-  }, [isOpen]);
+  }, [isOpen, refreshBookings]);
 
   const allNotifications = React.useMemo(() => {
     const raw = buildAdminNotifications(bookings);
@@ -588,18 +601,28 @@ export function NotificationCenter({
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
+                              const detail = {
+                                bookingId: booking.id,
+                                tab: isComplaint
+                                  ? "complaints"
+                                  : isAnyPayment
+                                  ? "payments"
+                                  : undefined,
+                              };
+                              try {
+                                sessionStorage.setItem(
+                                  "rp_pending_admin_booking_overview",
+                                  JSON.stringify(detail)
+                                );
+                              } catch {}
                               if (onManageBooking) onManageBooking();
-                              setTimeout(() => {
+                              if (deepLinkTimerRef.current) {
+                                clearTimeout(deepLinkTimerRef.current);
+                              }
+                              deepLinkTimerRef.current = setTimeout(() => {
                                 window.dispatchEvent(
                                   new CustomEvent("openAdminBookingOverview", {
-                                    detail: {
-                                      bookingId: booking.id,
-                                      tab: isComplaint
-                                        ? "complaints"
-                                        : isAnyPayment
-                                        ? "payments"
-                                        : undefined,
-                                    },
+                                    detail,
                                   })
                                 );
                               }, 80);

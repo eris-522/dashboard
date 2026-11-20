@@ -34,7 +34,6 @@ import {
   normalizeStockStatus,
   computeItemStatus,
 } from "../context/InventoryContext";
-import { useBooking } from "../context/BookingContext";
 import { supabase } from "../utils/supabase";
 import { logAuditAction } from "../utils/auditLogger";
 
@@ -49,8 +48,9 @@ const units = ["pcs", "sets", "boxes", "packs", "kg", "g", "lbs", "L", "ml"];
 
 const MAX_ITEM_NAME_LENGTH = 60;
 const MAX_STOCK_LIMIT = 10_000;
-const ITEM_NAME_INVALID_REGEX = /[^a-zA-ZÀ-ÿ\sñÑ\-']/;
-const ITEM_NAME_VALID_REGEX = /^[a-zA-ZÀ-ÿ\sñÑ\-']+$/;
+const INVENTORY_PAGE_SIZE = 25;
+const ITEM_NAME_INVALID_REGEX = /[^a-zA-Z0-9À-ÿ\sñÑ&/().,\-']/;
+const ITEM_NAME_VALID_REGEX = /^[a-zA-Z0-9À-ÿ\sñÑ&/().,\-']+$/;
 
 const sanitizeStockNumber = (raw: string, max: number = MAX_STOCK_LIMIT): number | undefined => {
   const digits = raw.replace(/[^\d]/g, "");
@@ -94,17 +94,7 @@ export function InventoryPage() {
     getAllocatedStock,
     getOutsourcedStock,
     refreshItems,
-    reconcileCompletedEvents,
   } = useInventory();
-
-  const { bookings } = useBooking();
-
-  // Automatically sync active confirmed bookings on page load
-  useEffect(() => {
-    if (bookings && bookings.length > 0) {
-      reconcileCompletedEvents(bookings);
-    }
-  }, [bookings]);
 
   // Filter & Search
   const [searchQuery, setSearchQuery] = useState("");
@@ -112,6 +102,7 @@ export function InventoryPage() {
   const [filterStatus, setFilterStatus] = useState("All");
   const [showArchived, setShowArchived] = useState(false);
   const [sortStatus, setSortStatus] = useState<"asc" | "desc" | null>(null);
+  const [currentPage, setCurrentPage] = useState(0);
 
   // Dynamic Adjustable Columns (monitoring table only)
   const [columnOrder, setColumnOrder] = useState<MiddleColumnId[]>(() => {
@@ -323,8 +314,8 @@ export function InventoryPage() {
       setFormError(`Item name cannot exceed ${MAX_ITEM_NAME_LENGTH} characters.`);
       return;
     }
-    if (!ITEM_NAME_VALID_REGEX.test(trimmedName)) {
-      setFormError("Item name can only contain letters, spaces, hyphens, and apostrophes.");
+    if (!ITEM_NAME_VALID_REGEX.test(trimmedName) || !/[a-zA-Z0-9À-ÿñÑ]/.test(trimmedName)) {
+      setFormError("Item name may only contain letters, numbers, spaces, and standard symbols (& / ( ) . , - ').");
       return;
     }
     const normalizedCandidate = trimmedName.replace(/\s+/g, " ").toLowerCase();
@@ -445,7 +436,7 @@ export function InventoryPage() {
   const stepQuantity = useCallback((delta: number) => {
     setRestockAmount((prev) => {
       const cur = Number(prev) || 0;
-      const next = Math.max(0, Math.min(100000, cur + delta));
+      const next = Math.max(0, Math.min(MAX_STOCK_LIMIT, cur + delta));
       return next;
     });
     setFormError(null);
@@ -518,8 +509,8 @@ export function InventoryPage() {
       setFormError(`Item name cannot exceed ${MAX_ITEM_NAME_LENGTH} characters.`);
       return;
     }
-    if (!ITEM_NAME_VALID_REGEX.test(trimmedName)) {
-      setFormError("Item name can only contain letters, spaces, hyphens, and apostrophes.");
+    if (!ITEM_NAME_VALID_REGEX.test(trimmedName) || !/[a-zA-Z0-9À-ÿñÑ]/.test(trimmedName)) {
+      setFormError("Item name may only contain letters, numbers, spaces, and standard symbols (& / ( ) . , - ').");
       return;
     }
     const normalizedCandidate = trimmedName.replace(/\s+/g, " ").toLowerCase();
@@ -614,6 +605,17 @@ export function InventoryPage() {
       return a.name.localeCompare(b.name);
     });
   }, [filteredItems, sortStatus]);
+
+  useEffect(() => {
+    setCurrentPage(0);
+  }, [searchQuery, filterCategory, filterStatus, showArchived]);
+
+  const totalInventoryPages = Math.max(1, Math.ceil(sortedItems.length / INVENTORY_PAGE_SIZE));
+  const safeInventoryPage = Math.min(currentPage, totalInventoryPages - 1);
+  const paginatedItems = useMemo(() => {
+    const start = safeInventoryPage * INVENTORY_PAGE_SIZE;
+    return sortedItems.slice(start, start + INVENTORY_PAGE_SIZE);
+  }, [sortedItems, safeInventoryPage]);
 
   const activeItems = useMemo(() => {
     return items.filter(
@@ -1052,7 +1054,7 @@ export function InventoryPage() {
               <>
               {/* Mobile Equipment Cards */}
               <div className="md:hidden divide-y divide-natural-border">
-                {sortedItems.map((item) => {
+                {paginatedItems.map((item) => {
                   const allocated = getAllocatedStock(item.id);
                   const outsourced = getOutsourcedStock(item.id);
                   const totalStock = item.stock + allocated;
@@ -1259,7 +1261,7 @@ export function InventoryPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedItems.map((item) => {
+                  {paginatedItems.map((item) => {
                     return (
                       <tr
                         key={item.id}
@@ -1350,6 +1352,31 @@ export function InventoryPage() {
               </>
             )}
           </div>
+          {sortedItems.length > INVENTORY_PAGE_SIZE && (
+            <div className="px-4 py-3 border-t border-natural-border flex items-center justify-between bg-natural-bg/10">
+              <span className="text-xs font-medium text-natural-text-light">
+                Page {safeInventoryPage + 1} of {totalInventoryPages} ({sortedItems.length} items)
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={safeInventoryPage === 0}
+                  onClick={() => setCurrentPage((p) => Math.max(0, p - 1))}
+                  className="px-3 py-1.5 rounded-lg border border-natural-border text-xs font-bold text-natural-text-main hover:bg-natural-bg disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  disabled={safeInventoryPage + 1 >= totalInventoryPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalInventoryPages - 1, p + 1))}
+                  className="px-3 py-1.5 rounded-lg border border-natural-border text-xs font-bold text-natural-text-main hover:bg-natural-bg disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
       {/* MODAL: ADD ITEM */}
@@ -1393,22 +1420,22 @@ export function InventoryPage() {
                   onChange={(e) => {
                     const raw = e.target.value;
                     if (ITEM_NAME_INVALID_REGEX.test(raw)) {
-                      setFormError("Item name can only contain letters, spaces, hyphens, and apostrophes.");
+                      setFormError("Item name may only contain letters, numbers, spaces, and standard symbols (& / ( ) . , - ').");
                     } else if (raw.length > MAX_ITEM_NAME_LENGTH) {
                       setFormError(`Item name cannot exceed ${MAX_ITEM_NAME_LENGTH} characters.`);
                     } else {
                       setFormError(null);
                     }
                     const sanitized = raw
-                      .replace(/[^a-zA-ZÀ-ÿ\sñÑ\-']/g, "")
+                      .replace(/[^a-zA-Z0-9À-ÿ\sñÑ&/().,\-']/g, "")
                       .slice(0, MAX_ITEM_NAME_LENGTH);
                     setNewItem({ ...newItem, name: sanitized });
                   }}
                   className="w-full px-4 py-2 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-natural-accent/10"
-                  placeholder="e.g. Wine Glasses, Chafing Dishes"
+                  placeholder="e.g. Wine Glasses, 10-Seater Round Table"
                 />
                 <p className="text-[10px] text-natural-text-light">
-                  Letters, spaces, hyphens, and apostrophes only (max {MAX_ITEM_NAME_LENGTH} characters).
+                  Letters, numbers, spaces, and &amp; / ( ) . , - ' allowed (max {MAX_ITEM_NAME_LENGTH} characters).
                 </p>
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -1922,21 +1949,21 @@ export function InventoryPage() {
                   onChange={(e) => {
                     const raw = e.target.value;
                     if (ITEM_NAME_INVALID_REGEX.test(raw)) {
-                      setFormError("Item name can only contain letters, spaces, hyphens, and apostrophes.");
+                      setFormError("Item name may only contain letters, numbers, spaces, and standard symbols (& / ( ) . , - ').");
                     } else if (raw.length > MAX_ITEM_NAME_LENGTH) {
                       setFormError(`Item name cannot exceed ${MAX_ITEM_NAME_LENGTH} characters.`);
                     } else {
                       setFormError(null);
                     }
                     const sanitized = raw
-                      .replace(/[^a-zA-ZÀ-ÿ\sñÑ\-']/g, "")
+                      .replace(/[^a-zA-Z0-9À-ÿ\sñÑ&/().,\-']/g, "")
                       .slice(0, MAX_ITEM_NAME_LENGTH);
                     setEditFormData({ ...editFormData, name: sanitized });
                   }}
                   className="w-full px-4 py-2 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:bg-white"
                 />
                 <p className="text-[10px] text-natural-text-light">
-                  Letters, spaces, hyphens, and apostrophes only (max {MAX_ITEM_NAME_LENGTH} characters).
+                  Letters, numbers, spaces, and &amp; / ( ) . , - ' allowed (max {MAX_ITEM_NAME_LENGTH} characters).
                 </p>
               </div>
               <div className="grid grid-cols-2 gap-4">

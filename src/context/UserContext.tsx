@@ -50,6 +50,8 @@ function isAuthorizedSingleAdmin(user: User): boolean {
 
 export function UserProvider({ children }: { children: ReactNode }) {
   const [users, setUsers] = useState<User[]>([]);
+  const [activeUserCount, setActiveUserCount] = useState<number>(0);
+  const [totalUserCount, setTotalUserCount] = useState<number>(0);
   // Never synchronously hydrate unverified sessionStorage prior to verifying JWT + admins table
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
@@ -58,21 +60,29 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const refreshUsers = async (silent = false) => {
     try {
       if (!silent) setIsLoading(true);
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, name, email, status, phone_number, created_at')
-        .order('created_at', { ascending: false });
+      const [activeRes, totalRes] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'Active'),
+        supabase
+          .from('profiles')
+          .select('id', { count: 'exact', head: true }),
+      ]);
 
-      if (error) {
-        console.error('Error fetching profiles:', error.message);
+      if (activeRes.error) {
+        console.error('Error fetching active profile count:', activeRes.error.message);
         return;
       }
 
-      if (data) {
-        setUsers((data as any[]).map(toUser));
+      if (typeof activeRes.count === 'number') {
+        setActiveUserCount(activeRes.count);
+      }
+      if (!totalRes.error && typeof totalRes.count === 'number') {
+        setTotalUserCount(totalRes.count);
       }
     } catch (err) {
-      console.error('Unexpected error fetching profiles:', err);
+      console.error('Unexpected error fetching profile counts:', err);
     } finally {
       if (!silent) setIsLoading(false);
     }
@@ -195,12 +205,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id]);
 
-  const totalUserCount = users.filter((u) => u.id !== 0).length;
-  const activeUserCount = useMemo(
-    () => users.filter((u) => u.id !== 0 && u.status === 'Active').length,
-    [users],
-  );
-
   const addUser = (userData: Omit<User, 'id' | 'joined'>) => {
     const newUser: User = {
       ...userData,
@@ -273,6 +277,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
     sessionStorage.removeItem('rp_admin_current_user');
     setCurrentUser(null);
     setUsers([]);
+    setActiveUserCount(0);
+    setTotalUserCount(0);
   };
 
   return (

@@ -13,12 +13,19 @@ interface MetricCardsProps {
  * and outsourced rental equipment when active shortages exist.
  */
 export function MetricCards({ onNavigate }: MetricCardsProps = {}) {
-  const { bookings } = useBooking();
+  const { bookings, dashboardMetrics } = useBooking();
   const { activeUserCount } = useUser();
   const { items, getOutsourcedStock } = useInventory();
 
-  const confirmedCount = bookings.filter((b) => b.status === 'Confirmed' || b.status === 'Completed').length;
-  const pendingCount = bookings.filter((b) => b.status === 'Pending').length;
+  const confirmedCount = dashboardMetrics
+    ? dashboardMetrics.status_counts.confirmed_completed
+    : bookings.filter((b) => b.status === 'Confirmed' || b.status === 'Completed').length;
+  const pendingCount = dashboardMetrics
+    ? dashboardMetrics.status_counts.pending
+    : bookings.filter((b) => b.status === 'Pending').length;
+  const resolvedActiveUserCount = dashboardMetrics
+    ? dashboardMetrics.active_customer_count
+    : activeUserCount;
 
   const activeItems = items.filter((item) => item.status !== 'Archived' && item.status?.toLowerCase() !== 'archived');
   const totalOutsourced = activeItems.reduce((acc, i) => acc + getOutsourcedStock(i.id), 0);
@@ -55,7 +62,7 @@ export function MetricCards({ onNavigate }: MetricCardsProps = {}) {
       id: 'total-users',
       shortLabel: 'Active Users',
       label: 'Total Active Users',
-      value: activeUserCount.toString(),
+      value: resolvedActiveUserCount.toString(),
       change: 'Currently Active',
       icon: Users,
       badgeColor: 'text-natural-accent',

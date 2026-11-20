@@ -40,6 +40,8 @@ import {
   RotateCcw,
   Sliders,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   UtensilsCrossed,
   Download,
   Scale,
@@ -51,6 +53,7 @@ import { cn } from "../lib/utils";
 import { EventCalendar } from "../components/EventCalendar";
 import { supabase } from "../utils/supabase";
 import { useUser } from "../context/UserContext";
+import { useBooking } from "../context/BookingContext";
 import { useInventory } from "../context/InventoryContext";
 import { logAuditAction } from "../utils/auditLogger";
 import { subscribeCatalogBroadcast } from "../utils/liveBroadcast";
@@ -68,6 +71,46 @@ import {
 const MAX_LOGISTICS_FEE = 100_000;
 const MAX_EXCESS_FEE = 500_000;
 const MAX_CUSTOM_DISH_LENGTH = 60;
+const MAX_DAMAGE_QTY = 1000;
+const MAX_DAMAGE_UNIT_COST = 100_000;
+const MAX_DAMAGE_ITEM_NAME = 100;
+const MAX_DAMAGE_NOTE = 300;
+const PAGE_SIZE = 25;
+
+const BOOKING_SELECT_COLUMNS = `
+  id, user_id, package_id, event_type, event_date, event_time, event_location,
+  guest_count, additional_pax, food_allergies, selected_menu_items, selected_add_ons,
+  status, cancelled_by, cancellation_reason, payment_method, payment_scheme,
+  downpayment_amount, payment_status, receipt_url, reference_number, terms_accepted,
+  final_balance_amount, final_balance_status, final_balance_method,
+  final_balance_reference, final_balance_receipt, installment_schedule,
+  logistics_info, corkage_info, overtime_info, dish_substitutions,
+  modification_requests, created_at,
+  profiles (id, name, email, phone_number, status),
+  packages (id, name, type, price, pax, additional_pax_price, inclusions, category_limits)
+`;
+
+const splitVenueLocation = (rawLocation?: string | null): { venueName: string; venueAddress: string } => {
+  const clean = String(rawLocation || "").trim();
+  if (!clean) return { venueName: "", venueAddress: "" };
+  const sepIdx = clean.indexOf(" - ");
+  if (sepIdx === -1) return { venueName: clean, venueAddress: "" };
+  return {
+    venueName: clean.slice(0, sepIdx).trim(),
+    venueAddress: clean.slice(sepIdx + 3).trim(),
+  };
+};
+
+const getManilaDateOffsetYMD = (offsetDays = 0): string => {
+  const manilaNow = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "Asia/Manila" })
+  );
+  manilaNow.setDate(manilaNow.getDate() + offsetDays);
+  const y = manilaNow.getFullYear();
+  const m = String(manilaNow.getMonth() + 1).padStart(2, "0");
+  const d = String(manilaNow.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
 
 /** Strips non-digit characters, removes leading zeros unless value is single "0", and clamps to max */
 const formatNumericInput = (raw: string, max: number): string => {
@@ -542,6 +585,7 @@ const formatEventTime = (timeStr?: string) => {
 
 export function BookingPage() {
   const { currentUser } = useUser();
+  const { bookings: contextBookings, dashboardMetrics } = useBooking();
   const {
     items,
     deductionRecords,
@@ -550,7 +594,6 @@ export function BookingPage() {
     calculatePackageEquipment,
     checkInventoryAvailability,
     completeBookingAndReturnInventory,
-    reconcileCompletedEvents,
     isBookingDeducted,
     updateStock,
   } = useInventory();
@@ -564,13 +607,18 @@ export function BookingPage() {
 
   const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All Status");
+  const [page, setPage] = useState(0);
+  const [totalBookingsCount, setTotalBookingsCount] = useState(0);
   const [sortConfig, setSortConfig] = useState<SortConfig>({
     field: null,
     order: null,
   });
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [manualBookingError, setManualBookingError] = useState<string>("");
+  const [isValidatingManualBooking, setIsValidatingManualBooking] = useState<boolean>(false);
   const [selectedBooking, setSelectedBooking] = useState<any | null>(null);
   const [overviewTab, setOverviewTab] = useState<
     "payments" | "logistics" | "menu" | "equipment" | "complaints"
@@ -659,8 +707,7 @@ export function BookingPage() {
     amount?: number;
     title?: string;
   } | null>(null);
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [passwordError, setPasswordError] = useState<string | boolean>(false);
+  const [isConfirmSubmitting, setIsConfirmSubmitting] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelReasonError, setCancelReasonError] = useState<string | boolean>(
     false,
@@ -731,12 +778,12 @@ export function BookingPage() {
 
   useEffect(() => {
     if (confirmAction?.type === "complete" && confirmAction.bookingId) {
-      const b = bookings.find((bk) => bk.id === confirmAction.bookingId);
+      const b = findTargetBooking(confirmAction.bookingId);
       const guaranteed = (Number(b?.guest_count) || 50) + (Number(b?.additional_pax) || 0);
       const existingActual = b?.logistics_info?.post_event_billing?.actual_headcount_served;
       setCompleteActualHeadcount(String(existingActual || guaranteed));
     }
-  }, [confirmAction, bookings]);
+  }, [confirmAction, bookings, selectedBooking]);
 
   const [newBooking, setNewBooking] = useState<{
     user_id: string;
@@ -765,10 +812,9 @@ export function BookingPage() {
   });
 
   useEffect(() => {
-    setConfirmPassword("");
-    setPasswordError(false);
     setCancelReason("");
     setCancelReasonError(false);
+    setIsConfirmSubmitting(false);
   }, [confirmAction]);
 
   useEffect(() => {
@@ -802,108 +848,444 @@ export function BookingPage() {
     }
   }, [selectedBooking?.status]);
 
-  useEffect(() => {
-    if (selectedBooking && selectedBooking.status === "Confirmed") {
-      reconcileCompletedEvents();
+  const findTargetBooking = (bookingId: number | string | undefined) => {
+    if (bookingId === undefined || bookingId === null) return undefined;
+    return (
+      bookings.find((b) => String(b.id) === String(bookingId)) ||
+      (selectedBooking && String(selectedBooking.id) === String(bookingId)
+        ? selectedBooking
+        : undefined)
+    );
+  };
+
+  /**
+   * Preserves already-Verified payment milestones or settled final balances
+   * when admin applies or adjusts event-day surcharges, appending/updating
+   * a dedicated Unpaid surcharge row for only the remaining delta.
+   */
+  const buildPostVerificationSurchargeSchedule = (
+    targetBooking: any,
+    payment: BookingPaymentInfo,
+    newRemainingBalance: number,
+    surchargeLabel: string
+  ): { updatedSchedule: any[] | null; nextFinalBalanceStatus?: string } => {
+    const rawSchedule = Array.isArray(payment.installment_schedule)
+      ? payment.installment_schedule
+      : Array.isArray(targetBooking?.installment_schedule)
+        ? targetBooking.installment_schedule
+        : null;
+    const dueDate = targetBooking?.event_date || getManilaDateOffsetYMD(0);
+
+    if (rawSchedule && rawSchedule.length > 0) {
+      let schedule = rawSchedule.map((m: any) => ({ ...m }));
+      let paidTotal = 0;
+      const unpaidIndices: number[] = [];
+
+      schedule.forEach((m: any, idx: number) => {
+        if (m.status === "Verified" || m.status === "Paid") {
+          paidTotal += Number(m.amount) || 0;
+        } else {
+          unpaidIndices.push(idx);
+        }
+      });
+
+      const netNewDue = Math.max(0, Math.round(newRemainingBalance - paidTotal));
+
+      if (unpaidIndices.length > 0) {
+        if (netNewDue > 0) {
+          const perMilestone = Math.floor(netNewDue / unpaidIndices.length);
+          let acc = 0;
+          unpaidIndices.forEach((mIdx, i) => {
+            const isLast = i === unpaidIndices.length - 1;
+            const amt = isLast ? netNewDue - acc : perMilestone;
+            acc += amt;
+            schedule[mIdx] = { ...schedule[mIdx], amount: amt };
+          });
+          return {
+            updatedSchedule: schedule,
+            nextFinalBalanceStatus:
+              payment.final_balance_status === "Verified" || payment.final_balance_status === "Paid"
+                ? "Unpaid"
+                : undefined,
+          };
+        }
+
+        // Surcharge removed / reduced to <= paidTotal: drop empty auto surcharge rows & zero remaining unpaid rows
+        schedule = schedule
+          .filter((m: any) => !(m.kind === "surcharge_adjustment" && m.status !== "Verified" && m.status !== "Paid"))
+          .map((m: any) =>
+            m.status === "Verified" || m.status === "Paid" ? m : { ...m, amount: 0 }
+          );
+        const allSettled =
+          schedule.length > 0 &&
+          schedule.every((m: any) => m.status === "Verified" || m.status === "Paid");
+        return {
+          updatedSchedule: schedule,
+          nextFinalBalanceStatus: allSettled ? "Verified" : undefined,
+        };
+      }
+
+      // All milestones already Verified/Paid; append an Unpaid row ONLY for the surcharge delta
+      if (netNewDue > 0) {
+        schedule.push({
+          id: `surcharge-${Date.now()}`,
+          title: surchargeLabel,
+          kind: "surcharge_adjustment",
+          amount: netNewDue,
+          due_date: dueDate,
+          status: "Unpaid",
+        });
+        return { updatedSchedule: schedule, nextFinalBalanceStatus: "Unpaid" };
+      }
+
+      return { updatedSchedule: schedule };
     }
-  }, [
-    selectedBooking?.id,
-    selectedBooking?.status,
-    selectedBooking?.guest_count,
-    selectedBooking?.guestCount,
-    selectedBooking?.additional_pax,
-    selectedBooking?.additionalPax,
-  ]);
+
+    // No installment schedule (single final balance)
+    const wasSettled =
+      payment.final_balance_status === "Verified" || payment.final_balance_status === "Paid";
+    if (wasSettled) {
+      const alreadyPaid =
+        Number(targetBooking?.final_balance_amount ?? payment.final_balance_amount) || 0;
+      const surchargeDelta = Math.max(0, Math.round(newRemainingBalance - alreadyPaid));
+      if (surchargeDelta > 0) {
+        const createdSchedule = [
+          {
+            id: "settled-final-balance",
+            title: "Original Final Balance (Settled)",
+            amount: alreadyPaid,
+            due_date: dueDate,
+            status: "Verified",
+            payment_method: payment.final_balance_method || undefined,
+            reference_number: payment.final_balance_reference || undefined,
+            receipt_url: payment.final_balance_receipt || undefined,
+          },
+          {
+            id: `surcharge-${Date.now()}`,
+            title: surchargeLabel,
+            kind: "surcharge_adjustment",
+            amount: surchargeDelta,
+            due_date: dueDate,
+            status: "Unpaid",
+          },
+        ];
+        return {
+          updatedSchedule: createdSchedule,
+          nextFinalBalanceStatus: "Unpaid",
+        };
+      }
+    }
+
+    return { updatedSchedule: null };
+  };
 
   const pendingOpenBookingIdRef = React.useRef<string | number | null>(null);
   const pendingOpenTabRef = React.useRef<
     "payments" | "logistics" | "menu" | "equipment" | "complaints" | null
   >(null);
 
+  const fetchSingleBookingAndOpen = async (
+    targetId: string | number,
+    targetTab: "payments" | "logistics" | "menu" | "equipment" | "complaints" | null = null
+  ) => {
+    if (targetTab) {
+      pendingOpenTabRef.current = targetTab;
+    }
+    const existing = bookings.find((b) => String(b.id) === String(targetId));
+    if (existing) {
+      setSelectedBooking((prev: any) => {
+        if (prev && String(prev.id) === String(existing.id) && targetTab) {
+          setOverviewTab(targetTab);
+          pendingOpenTabRef.current = null;
+        }
+        return existing;
+      });
+      pendingOpenBookingIdRef.current = null;
+      return;
+    }
+
+    pendingOpenBookingIdRef.current = targetId;
+    const { data: singleBooking, error: singleErr } = await supabase
+      .from("bookings")
+      .select(BOOKING_SELECT_COLUMNS)
+      .eq("id", targetId)
+      .maybeSingle();
+
+    if (!singleErr && singleBooking) {
+      setSelectedBooking(singleBooking);
+      if (targetTab) {
+        setOverviewTab(targetTab);
+        pendingOpenTabRef.current = null;
+      }
+      pendingOpenBookingIdRef.current = null;
+    }
+  };
+
   useEffect(() => {
+    const rawPending = sessionStorage.getItem("rp_pending_admin_booking_overview");
+    if (rawPending) {
+      sessionStorage.removeItem("rp_pending_admin_booking_overview");
+      try {
+        const parsed = JSON.parse(rawPending);
+        if (parsed?.bookingId) {
+          fetchSingleBookingAndOpen(parsed.bookingId, parsed.tab || null);
+        }
+      } catch (e) {}
+    }
+
     const handleOpenOverview = (e: any) => {
       const targetId = e.detail?.bookingId;
       const targetTab = e.detail?.tab || null;
       if (!targetId) return;
-      pendingOpenTabRef.current = targetTab;
-      setBookings((currentList) => {
-        const match = currentList.find((b) => String(b.id) === String(targetId));
-        if (match) {
-          setSelectedBooking((prev: any) => {
-            if (prev && String(prev.id) === String(match.id) && targetTab) {
-              setOverviewTab(targetTab);
-              pendingOpenTabRef.current = null;
-            }
-            return match;
-          });
-          pendingOpenBookingIdRef.current = null;
-        } else {
-          pendingOpenBookingIdRef.current = targetId;
-        }
-        return currentList;
-      });
+      fetchSingleBookingAndOpen(targetId, targetTab);
     };
     window.addEventListener("openAdminBookingOverview", handleOpenOverview);
     return () => window.removeEventListener("openAdminBookingOverview", handleOpenOverview);
   }, []);
 
   const lastFullFetchRef = useRef(0);
-  const inFlightBookingsFetchRef = useRef(false);
+  const latestBookingsReqRef = useRef(0);
+  const fetchBookingsRef = useRef<(targetPage?: number, silent?: boolean) => Promise<void>>(
+    async () => {}
+  );
 
-  const fetchBookingsOnly = async () => {
-    if (inFlightBookingsFetchRef.current) return;
-    inFlightBookingsFetchRef.current = true;
+  const fetchBookingsOnly = async (targetPage = page, silent = true) => {
+    const reqId = ++latestBookingsReqRef.current;
+    lastFullFetchRef.current = Date.now();
     try {
-      const { data: bData, error: bError } = await supabase
-        .from("bookings")
-        .select(
-          `
-          *,
-          profiles (id, name, email, phone_number, status),
-          packages (id, name, price, pax, additional_pax_price, inclusions, category_limits)
-        `,
-        )
-        .order("created_at", { ascending: false });
+      if (!silent) setIsLoading(true);
+      const from = targetPage * PAGE_SIZE;
+      const cleanQ = debouncedSearch.trim().replace(/[,()\\]/g, "");
 
-      if (!bError && bData) {
-        setBookings(bData);
-        if (pendingOpenBookingIdRef.current) {
-          const targetMatch = bData.find(
-            (b: any) => String(b.id) === String(pendingOpenBookingIdRef.current)
-          );
-          if (targetMatch) {
-            setSelectedBooking(targetMatch);
-            pendingOpenBookingIdRef.current = null;
-          }
-        } else {
-          setSelectedBooking((prev: any) => {
-            if (!prev) return null;
-            return bData.find((b: any) => String(b.id) === String(prev.id)) || prev;
-          });
+      const serverSortColumn =
+        sortConfig.field === "date"
+          ? "event_date"
+          : sortConfig.field === "status"
+            ? "status"
+            : "created_at";
+      const serverSortAsc =
+        sortConfig.field === "date" ||
+        sortConfig.field === "status" ||
+        sortConfig.field === "created_at"
+          ? sortConfig.order === "asc"
+          : false;
+
+      if (statusFilter === "15-Day Billing Due") {
+        const todayYmd = getManilaDateOffsetYMD(0);
+        const plus30Ymd = getManilaDateOffsetYMD(30);
+
+        const { data: dueData, error: dueErr } = await supabase
+          .from("bookings")
+          .select(BOOKING_SELECT_COLUMNS)
+          .neq("status", "Cancelled")
+          .neq("status", "Archived")
+          .gte("event_date", todayYmd)
+          .lte("event_date", plus30Ymd)
+          .or("final_balance_status.is.null,final_balance_status.neq.Verified")
+          .order(serverSortColumn, { ascending: serverSortAsc })
+          .limit(200);
+
+        if (reqId !== latestBookingsReqRef.current) return;
+
+        if (dueErr) {
+          setFetchError(`Error fetching bookings: ${dueErr.message}`);
+          return;
         }
+
+        const qLower = cleanQ.toLowerCase();
+        const filteredDue = qLower
+          ? (dueData || []).filter((b: any) => {
+              const name = (b.profiles?.name || b.profiles?.full_name || "").toLowerCase();
+              return (
+                name.includes(qLower) ||
+                (b.event_type || "").toLowerCase().includes(qLower) ||
+                (b.event_location || "").toLowerCase().includes(qLower)
+              );
+            })
+          : dueData || [];
+
+        const sliced = filteredDue.slice(from, from + PAGE_SIZE);
+        setBookings(sliced);
+        setTotalBookingsCount(filteredDue.length);
+        setSelectedBooking((prev: any) => {
+          if (!prev) return null;
+          return (dueData || []).find((b: any) => String(b.id) === String(prev.id)) || prev;
+        });
         setFetchError(null);
+        return;
+      }
+
+      let matchingProfileIds: string[] = [];
+      if (cleanQ) {
+        const { data: profMatches } = await supabase
+          .from("profiles")
+          .select("id")
+          .ilike("name", `%${cleanQ}%`)
+          .limit(100);
+        if (profMatches && profMatches.length > 0) {
+          matchingProfileIds = profMatches.map((p: any) => p.id).filter(Boolean);
+        }
+      }
+
+      if (reqId !== latestBookingsReqRef.current) return;
+
+      let query = supabase
+        .from("bookings")
+        .select(BOOKING_SELECT_COLUMNS, { count: "exact" });
+
+      if (statusFilter === "All Status") {
+        query = query.neq("status", "Archived");
+      } else {
+        query = query.eq("status", statusFilter);
+      }
+
+      if (cleanQ) {
+        const orParts = [
+          `event_location.ilike.%${cleanQ}%`,
+          `event_type.ilike.%${cleanQ}%`,
+        ];
+        if (matchingProfileIds.length > 0) {
+          orParts.push(`user_id.in.(${matchingProfileIds.join(",")})`);
+        }
+        query = query.or(orParts.join(","));
+      }
+
+      const { data: bData, error: bError, count } = await query
+        .order(serverSortColumn, { ascending: serverSortAsc })
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (reqId !== latestBookingsReqRef.current) return;
+
+      if (bError) {
+        const errorMsg = `Error fetching bookings: ${bError.message}`;
+        setFetchError(errorMsg);
+        console.error(errorMsg);
+        return;
+      }
+
+      const rows = bData || [];
+      setBookings(rows);
+      setTotalBookingsCount(typeof count === "number" ? count : rows.length);
+
+      if (pendingOpenBookingIdRef.current) {
+        const targetMatch = rows.find(
+          (b: any) => String(b.id) === String(pendingOpenBookingIdRef.current)
+        );
+        if (targetMatch) {
+          setSelectedBooking(targetMatch);
+          pendingOpenBookingIdRef.current = null;
+        }
+      } else {
+        setSelectedBooking((prev: any) => {
+          if (!prev) return null;
+          return rows.find((b: any) => String(b.id) === String(prev.id)) || prev;
+        });
+      }
+      setFetchError(null);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Unknown error";
+      setFetchError(errorMsg);
+      console.error("Bookings fetch error:", err);
+    } finally {
+      if (reqId === latestBookingsReqRef.current) {
+        setIsLoading(false);
+      }
+    }
+  };
+
+  fetchBookingsRef.current = fetchBookingsOnly;
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  const filtersKey = `${statusFilter}|${debouncedSearch}|${sortConfig.field ?? ""}|${sortConfig.order ?? ""}`;
+  const prevFiltersKeyRef = useRef(filtersKey);
+  const hasFetchedInitialBookingsRef = useRef(false);
+
+  useEffect(() => {
+    if (prevFiltersKeyRef.current !== filtersKey) {
+      prevFiltersKeyRef.current = filtersKey;
+      if (page !== 0) {
+        setPage(0);
+        return;
+      }
+    }
+    const isInitial = !hasFetchedInitialBookingsRef.current;
+    hasFetchedInitialBookingsRef.current = true;
+    fetchBookingsOnly(page, !isInitial);
+  }, [page, filtersKey]);
+
+  const fetchCatalogData = async () => {
+    try {
+      const [pkgRes, menuRes, incRes] = await Promise.all([
+        supabase
+          .from("packages")
+          .select("id, name, pax, price, additional_pax_price, inclusions, status, tag")
+          .neq("status", "Archived"),
+        supabase
+          .from("menu_items")
+          .select("id, name, category, sub_category, status")
+          .neq("status", "Archived"),
+        supabase
+          .from("inclusions")
+          .select("id, category, items")
+          .not("category", "like", "__CMS_%"),
+      ]);
+
+      if (pkgRes.error) console.error("Error fetching packages:", pkgRes.error.message);
+      else if (pkgRes.data) setPackages(pkgRes.data);
+
+      if (menuRes.error) console.error("Error fetching menu items:", menuRes.error.message);
+      else if (menuRes.data) setMenuItems(menuRes.data);
+
+      if (incRes.error) {
+        console.error("Error fetching inclusions:", incRes.error.message);
+      } else if (incRes.data) {
+        const validServices = incRes.data
+          .filter((row: any) => row.items && row.items !== "-" && row.items.trim() !== "")
+          .map((row: any) => ({
+            id: row.id,
+            name: row.items,
+            category: row.category,
+            price: 0,
+          }));
+        setAdditionalServices(validServices);
       }
     } catch (err) {
-      console.error("Silent bookings refresh error:", err);
-    } finally {
-      inFlightBookingsFetchRef.current = false;
+      console.error("Error fetching catalog reference data:", err);
     }
   };
 
   useEffect(() => {
-    // Fetch initial data (bookings + static catalog reference data)
-    fetchAllData(false);
+    if (isModalOpen && customers.length === 0) {
+      supabase
+        .from("profiles")
+        .select("id, name, email, phone_number, status")
+        .neq("status", "Archived")
+        .order("name", { ascending: true })
+        .limit(500)
+        .then(({ data, error }) => {
+          if (error) console.error("Error fetching profiles for manual booking:", error.message);
+          else if (data) setCustomers(data);
+        });
+    }
+  }, [isModalOpen, customers.length]);
+
+  useEffect(() => {
+    fetchCatalogData();
 
     const FOCUS_COOLDOWN_MS = 60_000;
     let syncDebounce: ReturnType<typeof setTimeout> | null = null;
     let menuDebounce: ReturnType<typeof setTimeout> | null = null;
 
-    // BookingContext already maintains the Realtime channel on `bookings` and emits `bookingsRealtimeSync`.
-    // Only refresh `bookings` (1 query instead of 5 full-table queries!) when bookings change.
     const handleBookingsChange = () => {
       if (syncDebounce) clearTimeout(syncDebounce);
       syncDebounce = setTimeout(() => {
-        fetchBookingsOnly();
+        fetchBookingsRef.current(undefined, true);
       }, 200);
     };
 
@@ -913,7 +1295,7 @@ export function BookingPage() {
         Date.now() - lastFullFetchRef.current >= FOCUS_COOLDOWN_MS
       ) {
         lastFullFetchRef.current = Date.now();
-        fetchBookingsOnly();
+        fetchBookingsRef.current(undefined, true);
       }
     };
 
@@ -935,7 +1317,6 @@ export function BookingPage() {
     window.addEventListener("focus", handleVisibilityOrFocus);
     document.addEventListener("visibilitychange", handleVisibilityOrFocus);
 
-    // Listen to lightweight catalog Broadcast instead of a Postgres WAL channel
     const unsubscribeCatalog = subscribeCatalogBroadcast((key) => {
       if (key === "menu") {
         if (menuDebounce) clearTimeout(menuDebounce);
@@ -977,7 +1358,6 @@ export function BookingPage() {
       }
     });
 
-    // Cleanup subscription on unmount
     return () => {
       if (syncDebounce) clearTimeout(syncDebounce);
       if (menuDebounce) clearTimeout(menuDebounce);
@@ -994,97 +1374,6 @@ export function BookingPage() {
       document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
     };
   }, []);
-
-  const fetchAllData = async (silent = false) => {
-    lastFullFetchRef.current = Date.now();
-    try {
-      if (!silent) setIsLoading(true);
-      setFetchError(null);
-
-      const { data: bData, error: bError } = await supabase
-        .from("bookings")
-        .select(
-          `
-          *,
-          profiles (id, name, email, phone_number, status),
-          packages (id, name, price, pax, additional_pax_price, inclusions, category_limits)
-        `,
-        )
-        .order("created_at", { ascending: false });
-
-      if (bError) {
-        const errorMsg = `Error fetching bookings: ${bError.message}`;
-        setFetchError(errorMsg);
-        console.error(errorMsg);
-        setBookings([]);
-      } else {
-        setBookings(bData || []);
-        if (pendingOpenBookingIdRef.current) {
-          const targetMatch = (bData || []).find(
-            (b: any) => String(b.id) === String(pendingOpenBookingIdRef.current)
-          );
-          if (targetMatch) {
-            setSelectedBooking(targetMatch);
-            pendingOpenBookingIdRef.current = null;
-          }
-        } else {
-          setSelectedBooking((prev: any) => {
-            if (!prev) return null;
-            return (bData || []).find((b: any) => String(b.id) === String(prev.id)) || prev;
-          });
-        }
-        setFetchError(null);
-      }
-
-      const [pRes, pkgRes, menuRes, incRes] = await Promise.all([
-        supabase
-          .from("profiles")
-          .select("id, name, email, phone_number, status")
-          .neq("status", "Archived"),
-        supabase
-          .from("packages")
-          .select("id, name, pax, price, additional_pax_price, inclusions, status, tag")
-          .neq("status", "Archived"),
-        supabase.from("menu_items").select("id, name, category, sub_category, status").neq("status", "Archived"),
-        supabase
-          .from("inclusions")
-          .select("id, category, items")
-          .not("category", "like", "__CMS_%"),
-      ]);
-
-      if (pRes.error)
-        console.error("Error fetching profiles:", pRes.error.message);
-      else if (pRes.data) setCustomers(pRes.data);
-
-      if (pkgRes.error)
-        console.error("Error fetching packages:", pkgRes.error.message);
-      else if (pkgRes.data) setPackages(pkgRes.data);
-
-      if (menuRes.error)
-        console.error("Error fetching menu items:", menuRes.error.message);
-      else if (menuRes.data) setMenuItems(menuRes.data);
-
-      if (incRes.error) {
-        console.error("Error fetching inclusions:", incRes.error.message);
-      } else if (incRes.data) {
-        const validServices = incRes.data
-          .filter((row: any) => row.items && row.items !== "-" && row.items.trim() !== "")
-          .map((row: any) => ({
-            id: row.id,
-            name: row.items,
-            category: row.category,
-            price: 0,
-          }));
-        setAdditionalServices(validServices);
-      }
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : "Unknown error";
-      setFetchError(errorMsg);
-      console.error("Unexpected error in fetchAllData:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const handleSort = (field: SortField) => {
     let order: SortOrder = "asc";
@@ -1221,15 +1510,19 @@ export function BookingPage() {
     return Math.round(initialBase * (is50Percent ? 0.5 : 0.2));
   };
 
-  const filteredBookings = useMemo(() => {
-    return bookings.filter((booking) => {
-      const customerName =
-        booking.profiles?.name || booking.profiles?.full_name || "Unknown User";
-      const query = searchQuery.toLowerCase();
+  // Current server page is already filtered by statusFilter + debouncedSearch.
+  const filteredBookings = bookings;
+
+  const calendarBookings = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return contextBookings.filter((booking) => {
+      const customerName = booking.customerName || "Unknown User";
       const matchesSearch =
+        !query ||
         customerName.toLowerCase().includes(query) ||
-        (booking.event_type || "").toLowerCase().includes(query) ||
-        (booking.event_location || "").toLowerCase().includes(query);
+        (booking.eventType || "").toLowerCase().includes(query) ||
+        (booking.venueName || "").toLowerCase().includes(query) ||
+        (booking.venueAddress || "").toLowerCase().includes(query);
 
       const currentStatus = booking.status || "Pending";
       let matchesStatus = false;
@@ -1239,14 +1532,14 @@ export function BookingPage() {
         if (currentStatus === "Cancelled" || currentStatus === "Archived") {
           matchesStatus = false;
         } else {
-          const eventDateStr = booking.date || booking.event_date;
-          const eventDate = new Date(eventDateStr);
-          if (!isNaN(eventDate.getTime())) {
-            const diffDays = Math.ceil((eventDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-            const payment = getBookingPayment(booking);
-            // Booking occurring within next 30 days whose balance is not yet verified
-            matchesStatus = diffDays >= 0 && diffDays <= 30 && payment.final_balance_status !== "Verified";
-          }
+          const todayYmd = getManilaDateOffsetYMD(0);
+          const plus30Ymd = getManilaDateOffsetYMD(30);
+          const evYmd = String(booking.date || "").slice(0, 10);
+          matchesStatus =
+            Boolean(evYmd) &&
+            evYmd >= todayYmd &&
+            evYmd <= plus30Ymd &&
+            booking.final_balance_status !== "Verified";
         }
       } else {
         matchesStatus = currentStatus === statusFilter;
@@ -1254,10 +1547,18 @@ export function BookingPage() {
 
       return matchesSearch && matchesStatus;
     });
-  }, [searchQuery, statusFilter, bookings]);
+  }, [contextBookings, searchQuery, statusFilter]);
 
   const sortedBookings = useMemo(() => {
     if (!sortConfig.field || !sortConfig.order) return filteredBookings;
+    // date, status, and created_at are already sorted server-side across all pages
+    if (
+      sortConfig.field === "date" ||
+      sortConfig.field === "status" ||
+      sortConfig.field === "created_at"
+    ) {
+      return filteredBookings;
+    }
 
     return [...filteredBookings].sort((a, b) => {
       const { field, order } = sortConfig;
@@ -1277,21 +1578,6 @@ export function BookingPage() {
       if (field === "budget") {
         valA = calculateBudget(a);
         valB = calculateBudget(b);
-      } else if (field === "date") {
-        valA = new Date(a.event_date || 0).getTime();
-        valB = new Date(b.event_date || 0).getTime();
-      } else if (field === "created_at") {
-        valA = new Date(a.created_at || 0).getTime();
-        valB = new Date(b.created_at || 0).getTime();
-      } else if (field === "status") {
-        const statusOrder: Record<string, number> = {
-          Confirmed: 1,
-          Pending: 2,
-          Cancelled: 3,
-          Archived: 4,
-        };
-        valA = statusOrder[a.status || "Pending"] || 5;
-        valB = statusOrder[b.status || "Pending"] || 5;
       }
 
       if (valA === undefined || valA === null) valA = "";
@@ -1303,13 +1589,83 @@ export function BookingPage() {
     });
   }, [filteredBookings, sortConfig, packages, additionalServices]);
 
-  const handleCreateBooking = () => {
-    setIsModalOpen(false);
-    const selectedCustomer = customers.find((c) => c.id === newBooking.user_id);
-    setConfirmAction({
-      type: "create",
-      bookingName: selectedCustomer?.name || "New Client",
-    });
+  const handleCreateBooking = async () => {
+    setManualBookingError("");
+
+    const guestCountNum = Number(newBooking.guest_count);
+    const addPaxNum = Number(newBooking.additional_pax || 0);
+    const trimmedVenueName = newBooking.venueName.trim();
+
+    if (!newBooking.user_id) {
+      setManualBookingError("Please select a registered customer.");
+      return;
+    }
+    if (!newBooking.package_id) {
+      setManualBookingError("Please select a catering package.");
+      return;
+    }
+    if (!newBooking.date) {
+      setManualBookingError("Please choose an event date.");
+      return;
+    }
+    if (!newBooking.time || !newBooking.time.trim()) {
+      setManualBookingError("Please specify an event start time.");
+      return;
+    }
+    if (trimmedVenueName.length < 2) {
+      setManualBookingError("Venue name must be at least 2 characters.");
+      return;
+    }
+    if (!Number.isFinite(guestCountNum) || guestCountNum < 1 || guestCountNum > 2000) {
+      setManualBookingError("Guest count must be between 1 and 2,000 pax.");
+      return;
+    }
+    if (!Number.isFinite(addPaxNum) || addPaxNum < 0 || addPaxNum > 500) {
+      setManualBookingError("Additional pax must be between 0 and 500.");
+      return;
+    }
+
+    setIsValidatingManualBooking(true);
+    try {
+      const { data: bookedSlots, error: slotErr } = await supabase.rpc("get_booked_slots");
+      if (slotErr) {
+        setManualBookingError(`Could not verify event schedule availability: ${slotErr.message}`);
+        return;
+      }
+
+      const sameDaySlots = (Array.isArray(bookedSlots) ? bookedSlots : []).filter(
+        (s: any) => String(s?.event_date || "").slice(0, 10) === newBooking.date
+      );
+      if (sameDaySlots.length >= 2) {
+        setManualBookingError(
+          `Date ${newBooking.date} is already fully booked (maximum 2 active events per day).`
+        );
+        return;
+      }
+
+      const newMins = timeStringToMinutes(newBooking.time);
+      const conflictSlot = sameDaySlots.find((s: any) => {
+        const existingMins = timeStringToMinutes(s?.event_time);
+        return existingMins >= 0 && newMins >= 0 && Math.abs(existingMins - newMins) < 300;
+      });
+      if (conflictSlot) {
+        setManualBookingError(
+          `Schedule conflict with an existing booking at ${formatEventTime(conflictSlot.event_time)}. Events on the same date require at least a 5-hour gap.`
+        );
+        return;
+      }
+
+      setIsModalOpen(false);
+      const selectedCustomer = customers.find((c) => c.id === newBooking.user_id);
+      setConfirmAction({
+        type: "create",
+        bookingName: selectedCustomer?.name || "New Client",
+      });
+    } catch (err: any) {
+      setManualBookingError(err?.message || "Failed to validate manual booking details.");
+    } finally {
+      setIsValidatingManualBooking(false);
+    }
   };
 
   const resetNewBooking = () => {
@@ -1329,438 +1685,466 @@ export function BookingPage() {
   };
 
   const handleConfirmAction = async () => {
-    if (!confirmAction) return;
+    if (!confirmAction || isConfirmSubmitting) return;
     const { type, bookingId } = confirmAction;
 
-    if (type === "cancel" && !cancelReason.trim()) {
-      setCancelReasonError("Please provide a reason for cancellation.");
-      return;
-    }
-
-    if (["confirm", "cancel", "archive", "unarchive"].includes(type)) {
-      if (!confirmPassword) {
-        setPasswordError("Password is required to proceed.");
+    if (type === "cancel") {
+      const trimmedCancel = cancelReason.trim();
+      if (trimmedCancel.length < 5) {
+        setCancelReasonError("Please provide a cancellation reason of at least 5 characters.");
         return;
       }
-
-      let isPasswordValid = false;
-      if (currentUser?.email) {
-        const { error } = await supabase.auth.signInWithPassword({
-          email: currentUser.email,
-          password: confirmPassword,
-        });
-        isPasswordValid = !error;
-      }
-
-      if (!isPasswordValid) {
-        setPasswordError("Incorrect admin password.");
+      if (trimmedCancel.length > 500) {
+        setCancelReasonError("Cancellation reason cannot exceed 500 characters.");
         return;
       }
     }
 
-    if (type === "confirm" && bookingId) {
-      const targetBooking = bookings.find((b) => b.id === bookingId);
-      const pkgName = targetBooking?.packages?.name || (packages.find(p => p.id === targetBooking?.package_id)?.name) || targetBooking?.package || packages[0]?.name || "Event Package";
-      const totalPax = (Number(targetBooking?.guest_count) || 50) + (Number(targetBooking?.additional_pax) || 0);
+    setIsConfirmSubmitting(true);
+    try {
+      if (type === "confirm" && bookingId) {
+        const targetBooking = findTargetBooking(bookingId);
+        const pkgName = targetBooking?.packages?.name || (packages.find(p => p.id === targetBooking?.package_id)?.name) || targetBooking?.package || packages[0]?.name || "Event Package";
+        const totalPax = (Number(targetBooking?.guest_count) || 50) + (Number(targetBooking?.additional_pax) || 0);
 
-      const confirmedAt = new Date().toISOString();
-      const updatedLogisticsInfo = {
-        ...(targetBooking?.logistics_info || {}),
-        confirmed_at: confirmedAt,
-      };
+        const confirmedAt = new Date().toISOString();
+        const updatedLogisticsInfo = {
+          ...(targetBooking?.logistics_info || {}),
+          confirmed_at: confirmedAt,
+        };
 
-      // Prepare synced fallback metadata if present on legacy booking
-      let syncedAllergies: string | undefined;
-      if (targetBooking?.food_allergies?.includes("__PAYMENT_METADATA__:")) {
-        try {
-          const parts = targetBooking.food_allergies.split("__PAYMENT_METADATA__:");
-          const meta = JSON.parse(parts[1]);
-          meta.status = "Verified";
-          meta.logistics = { ...(meta.logistics || {}), confirmed_at: confirmedAt };
-          syncedAllergies = `${parts[0]}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
-        } catch (e) {}
-      }
+        // Prepare synced fallback metadata if present on legacy booking
+        let syncedAllergies: string | undefined;
+        if (targetBooking?.food_allergies?.includes("__PAYMENT_METADATA__:")) {
+          try {
+            const parts = targetBooking.food_allergies.split("__PAYMENT_METADATA__:");
+            const meta = JSON.parse(parts[1]);
+            meta.status = "Verified";
+            meta.logistics = { ...(meta.logistics || {}), confirmed_at: confirmedAt };
+            syncedAllergies = `${parts[0]}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+          } catch (e) {}
+        }
 
-      const primaryConfirmPayload: Record<string, any> = {
-        status: "Confirmed",
-        payment_status: "Verified",
-        logistics_info: updatedLogisticsInfo,
-      };
-      if (syncedAllergies !== undefined) {
-        primaryConfirmPayload.food_allergies = syncedAllergies;
-      }
-
-      // Single primary UPDATE query (syncs food_allergies metadata in the same round-trip when present)
-      let { error: updateErr } = await supabase
-        .from("bookings")
-        .update(primaryConfirmPayload)
-        .eq("id", bookingId);
-
-      if (updateErr) {
-        // Fallback if payment_status or logistics_info column does not exist yet
-        const fallbackConfirmPayload: Record<string, any> = { status: "Confirmed" };
+        const primaryConfirmPayload: Record<string, any> = {
+          status: "Confirmed",
+          payment_status: "Verified",
+          logistics_info: updatedLogisticsInfo,
+        };
         if (syncedAllergies !== undefined) {
-          fallbackConfirmPayload.food_allergies = syncedAllergies;
+          primaryConfirmPayload.food_allergies = syncedAllergies;
         }
-        const { error: fallbackErr } = await supabase
+
+        // Single primary UPDATE query (syncs food_allergies metadata in the same round-trip when present)
+        let { error: updateErr } = await supabase
           .from("bookings")
-          .update(fallbackConfirmPayload)
+          .update(primaryConfirmPayload)
           .eq("id", bookingId);
-        updateErr = fallbackErr;
-      }
 
-      if (updateErr) {
-        console.error("Error confirming booking:", updateErr.message);
-        setFetchError(`Failed to confirm booking: ${updateErr.message}`);
-        setConfirmAction(null);
-        return;
-      }
-
-      // Automatically deduct package equipment supplies from equipment monitoring
-      const corkageData = targetBooking?.corkage_info || targetBooking?.logistics_info?.corkage || null;
-      await deductBookingInventory(bookingId, confirmAction.bookingName, pkgName, totalPax, targetBooking?.packages?.inclusions || targetBooking?.inclusions, corkageData);
-
-      window.dispatchEvent(
-        new CustomEvent("markAdminNotifRead", {
-          detail: { id: bookingId, status: "Confirmed" },
-        }),
-      );
-      await logAuditAction({
-        action: "Confirmed Booking",
-        target: confirmAction.bookingName,
-        type: "Update",
-        details: `Approved booking for ${confirmAction.bookingName} and allocated ${totalPax} Pax equipment from equipment monitoring (${pkgName})`,
-      });
-    } else if (type === "cancel" && bookingId) {
-      const targetBooking = bookings.find((b) => b.id === bookingId);
-      const payment = targetBooking ? getBookingPayment(targetBooking) : null;
-      const totalBudget = targetBooking ? calculateBudget(targetBooking) : 0;
-      const downpaymentAmount =
-        payment?.downpayment_amount ||
-        (payment?.receipt_url
-          ? Math.round(totalBudget * (payment?.payment_scheme === "Standard 50%" ? 0.5 : 0.2))
-          : 0);
-
-      const { error: cancelErr } = await supabase
-        .from("bookings")
-        .update({
-          status: "Cancelled",
-          cancellation_reason: cancelReason.trim(),
-          cancelled_by: "Admin",
-        })
-        .eq("id", bookingId);
-
-      if (cancelErr) {
-        console.error("Error cancelling booking:", cancelErr.message);
-        setFetchError(`Failed to cancel booking: ${cancelErr.message}`);
-        setConfirmAction(null);
-        return;
-      }
-
-      // Automatically restore package equipment back to equipment monitoring
-      await restoreBookingInventory(bookingId, confirmAction.bookingName);
-
-      window.dispatchEvent(
-        new CustomEvent("markAdminNotifRead", {
-          detail: { id: bookingId, status: "Cancelled" },
-        }),
-      );
-      await logAuditAction({
-        action: "Cancelled Booking",
-        target: confirmAction.bookingName,
-        type: "Update",
-        details: `Cancelled booking for ${confirmAction.bookingName} and restored reserved equipment supplies. Reason: ${cancelReason.trim()}`,
-      });
-
-      // Automatically record retained/forfeited funds per Catering Contract Clauses 1 & 16
-      if (downpaymentAmount > 0) {
-        await logAuditAction({
-          action: "Forfeited Funds Accounting (Retained Revenue)",
-          target: confirmAction.bookingName,
-          type: "System",
-          details: `Booking #${bookingId} cancelled. Retained non-refundable downpayment/deposit of ₱${downpaymentAmount.toLocaleString()} as Forfeited Revenue per Catering Contract Clauses 1 & 16.`,
-        });
-      }
-    } else if (type === "complete" && bookingId) {
-      const targetBooking = bookings.find((b) => b.id === bookingId);
-      const payment = targetBooking ? getBookingPayment(targetBooking) : null;
-      if (payment && payment.final_balance_status !== "Verified") {
-        setFetchError("Cannot complete booking: The client's final balance payment has not been confirmed and verified yet.");
-        setConfirmAction(null);
-        return;
-      }
-
-      const guaranteedCount = (Number(targetBooking?.guest_count) || 50) + (Number(targetBooking?.additional_pax) || 0);
-      const actualCount = Math.max(1, parseInt(completeActualHeadcount, 10) || guaranteedCount);
-      const excessGuests = Math.max(0, actualCount - guaranteedCount);
-      const excessFee = excessGuests * 500;
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const dueDateStr = tomorrow.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-      const dueDateIso = tomorrow.toISOString().split("T")[0];
-
-      const nowIso = new Date().toISOString();
-      const postEventBilling: PostEventBillingInfo = {
-        actual_headcount_served: actualCount,
-        guaranteed_headcount: guaranteedCount,
-        excess_guests: excessGuests,
-        excess_guest_rate: 500,
-        excess_guest_fee: excessFee,
-        due_date: dueDateStr,
-        due_date_iso: dueDateIso,
-        billed_at: nowIso,
-        updated_at: nowIso,
-        last_action: excessGuests > 0 ? "charged" : "none",
-        last_action_at: nowIso,
-        payment_status: excessGuests > 0 ? "Unpaid" : "None",
-      };
-
-      const existingLogistics = targetBooking?.logistics_info || {};
-      const historyItem: ExcessHeadcountHistoryItem = {
-        id: `eh-${Date.now()}`,
-        action: excessGuests > 0 ? "charged" : "removed",
-        fee: excessFee,
-        actual_headcount: actualCount,
-        guaranteed_headcount: guaranteedCount,
-        excess_guests: excessGuests,
-        due_date: dueDateStr,
-        timestamp: nowIso,
-        appliedBy: currentUser?.name || "Admin",
-        note: excessGuests > 0
-          ? `Charged ₱${excessFee.toLocaleString()} excess headcount surcharge (${excessGuests} excess attendees).`
-          : "Completed with guaranteed headcount.",
-      };
-
-      const updatedHistory: ExcessHeadcountHistoryItem[] = [
-        ...(existingLogistics.excessHeadcountHistory || []),
-        historyItem,
-      ];
-
-      const updatedLogistics = {
-        ...existingLogistics,
-        completed_at: existingLogistics.completed_at || nowIso,
-        post_event_billing: postEventBilling,
-        excessHeadcountHistory: updatedHistory,
-        updated_at: nowIso,
-      };
-
-      let updatedAllergies = targetBooking?.food_allergies || "";
-      try {
-        if (typeof updatedAllergies === "string" && updatedAllergies.includes("__PAYMENT_METADATA__:")) {
-          const parts = updatedAllergies.split("__PAYMENT_METADATA__:");
-          const meta = JSON.parse(parts[1]);
-          meta.logistics = updatedLogistics;
-          updatedAllergies = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+        if (updateErr) {
+          // Fallback if payment_status or logistics_info column does not exist yet
+          const fallbackConfirmPayload: Record<string, any> = { status: "Confirmed" };
+          if (syncedAllergies !== undefined) {
+            fallbackConfirmPayload.food_allergies = syncedAllergies;
+          }
+          const { error: fallbackErr } = await supabase
+            .from("bookings")
+            .update(fallbackConfirmPayload)
+            .eq("id", bookingId);
+          updateErr = fallbackErr;
         }
-      } catch (e) {}
 
-      const completePayload: any = {
-        status: "Completed",
-        logistics_info: updatedLogistics,
-        user_id: targetBooking?.user_id,
-      };
-      if (updatedAllergies !== (targetBooking?.food_allergies || "")) {
-        completePayload.food_allergies = updatedAllergies;
-      }
+        if (updateErr) {
+          console.error("Error confirming booking:", updateErr.message);
+          setFetchError(`Failed to confirm booking: ${updateErr.message}`);
+          setConfirmAction(null);
+          return;
+        }
 
-      const { error: completeErr } = await supabase
-        .from("bookings")
-        .update(completePayload)
-        .eq("id", bookingId);
-
-      if (completeErr) {
-        console.error("Error completing booking:", completeErr.message);
-        setFetchError(`Failed to complete booking: ${completeErr.message}`);
-        setConfirmAction(null);
-        return;
-      }
-
-      try {
-        const bc = new BroadcastChannel("roxan_catering_events");
-        bc.postMessage({ type: "BOOKINGS_UPDATED", bookingId, action: "completed" });
-        bc.close();
-      } catch (e) {}
-      try {
-        localStorage.setItem("roxan_last_booking_update", String(Date.now()));
-      } catch (e) {}
-
-      // Update local state
-      setBookings((prev) =>
-        prev.map((b) =>
-          b.id === bookingId
-            ? { ...b, status: "Completed", logistics_info: updatedLogistics }
-            : b
-        )
-      );
-      setSelectedBooking((prev: any) =>
-        prev && prev.id === bookingId
-          ? { ...prev, status: "Completed", logistics_info: updatedLogistics }
-          : prev
-      );
-
-      // Automatically restore package equipment back to equipment monitoring
-      await restoreBookingInventory(
-        bookingId,
-        confirmAction.bookingName,
-        `Event Completed - All equipment returned to warehouse equipment monitoring (Booking #${bookingId})`
-      );
-
-      const excessDetails = excessGuests > 0
-        ? ` Auto-billed ${excessGuests} excess attendees served (+₱${excessFee.toLocaleString()} due ${dueDateStr}).`
-        : ` Actual headcount (${actualCount}) served matched guaranteed count.`;
-
-      await logAuditAction({
-        action: "Completed Booking",
-        target: confirmAction.bookingName,
-        type: "Update",
-        details: `Marked event as Completed for ${confirmAction.bookingName} and returned all allocated equipment.${excessDetails}`,
-      });
-    } else if (type === "archive" && bookingId) {
-      const currentBooking = bookings.find((b) => String(b.id) === String(bookingId));
-      const prevStatus = currentBooking?.status || "Pending";
-      const existingLogistics = currentBooking?.logistics_info || {};
-      const updatedLogistics = {
-        ...existingLogistics,
-        archived_from_status: prevStatus,
-      };
-
-      const { error: archiveErr } = await supabase
-        .from("bookings")
-        .update({
-          status: "Archived",
-          logistics_info: updatedLogistics,
-        })
-        .eq("id", bookingId);
-
-      if (archiveErr) {
-        console.error("Error archiving booking:", archiveErr.message);
-        setFetchError(`Failed to archive booking: ${archiveErr.message}`);
-        setConfirmAction(null);
-        return;
-      }
-
-      // If it was confirmed and deducted, restore inventory
-      await restoreBookingInventory(bookingId, confirmAction.bookingName);
-
-      await logAuditAction({
-        action: "Archived Booking",
-        target: confirmAction.bookingName,
-        type: "Delete",
-        details: `Moved booking for ${confirmAction.bookingName} to archives`,
-      });
-    } else if (type === "unarchive" && bookingId) {
-      const currentBooking = bookings.find((b) => String(b.id) === String(bookingId));
-      const targetStatus =
-        currentBooking?.logistics_info?.archived_from_status ||
-        (currentBooking?.cancellation_reason ? "Cancelled" : "Pending");
-
-      const existingLogistics = currentBooking?.logistics_info || {};
-      const { archived_from_status, ...cleanedLogistics } = existingLogistics;
-
-      const { error: unarchiveErr } = await supabase
-        .from("bookings")
-        .update({
-          status: targetStatus,
-          logistics_info: cleanedLogistics,
-        })
-        .eq("id", bookingId);
-
-      if (unarchiveErr) {
-        console.error("Error unarchiving booking:", unarchiveErr.message);
-        setFetchError(`Failed to restore booking: ${unarchiveErr.message}`);
-        setConfirmAction(null);
-        return;
-      }
-
-      // If restoring back to Confirmed, re-deduct equipment if appropriate
-      if (targetStatus === "Confirmed" && currentBooking) {
-        const pkg = packages.find((p) => p.id === currentBooking.package_id);
-        const pkgName = pkg?.name || currentBooking.package_name || "Event Package";
-        const totalPax = (Number(currentBooking.guest_count) || 50) + (Number(currentBooking.additional_pax) || 0);
-        await deductBookingInventory(
-          currentBooking.id,
-          currentBooking.customer_name || confirmAction.bookingName,
-          pkgName,
-          totalPax,
-          pkg?.inclusions,
-          currentBooking.corkage_data
-        );
-      }
-
-      await logAuditAction({
-        action: "Unarchived Booking",
-        target: confirmAction.bookingName,
-        type: "Update",
-        details: `Restored booking #${bookingId} to status: ${targetStatus}`,
-      });
-    } else if (type === "create") {
-      const locationString = `${newBooking.event_type || "Event"} - ${newBooking.venueName || "Venue"}, ${newBooking.venueAddress || "Address"}`;
-      const { data, error: insertErr } = await supabase
-        .from("bookings")
-        .insert([
-          {
-            user_id: newBooking.user_id,
-            package_id: newBooking.package_id,
-            event_date: newBooking.date,
-            event_time: newBooking.time || "08:00:00",
-            event_location: locationString,
-            guest_count: Number(newBooking.guest_count) || 50,
-            additional_pax: Number(newBooking.additional_pax) || 0,
-            selected_menu_items: newBooking.selected_menu_items || [],
-            food_allergies: "",
-            status: "Confirmed",
-          },
-        ])
-        .select();
-
-      if (insertErr) {
-        console.error("Error creating booking:", insertErr.message);
-        setFetchError(`Failed to create booking: ${insertErr.message}`);
-        setConfirmAction(null);
-        return;
-      }
-
-      if (data && data.length > 0) {
-        const selectedPkg = packages.find((p) => p.id === newBooking.package_id);
-        const pkgName = selectedPkg?.name || packages[0]?.name || "Event Package";
-        const totalPax = Number(newBooking.guest_count || 50) + Number(newBooking.additional_pax || 0);
-        // Auto-deduct equipment
-        await deductBookingInventory(data[0].id, confirmAction.bookingName, pkgName, totalPax, selectedPkg?.inclusions);
+        // Automatically deduct package equipment supplies from equipment monitoring
+        const corkageData = targetBooking?.corkage_info || targetBooking?.logistics_info?.corkage || null;
+        await deductBookingInventory(bookingId, confirmAction.bookingName, pkgName, totalPax, targetBooking?.packages?.inclusions || targetBooking?.inclusions, corkageData);
 
         window.dispatchEvent(
           new CustomEvent("markAdminNotifRead", {
-            detail: { id: data[0].id, status: "Confirmed" },
+            detail: { id: bookingId, status: "Confirmed" },
           }),
         );
-      }
-      await logAuditAction({
-        action: "Created Booking",
-        target: confirmAction.bookingName,
-        type: "Create",
-        details: `Manually created and confirmed a booking for ${confirmAction.bookingName}, automatically allocating equipment from equipment monitoring`,
-      });
-      resetNewBooking();
-    } else if (type === "verify_final_payment" && bookingId) {
-      await handleVerifyFinalBalance(bookingId);
-      setConfirmAction(null);
-      return;
-    } else if (type === "verify_excess_payment" && bookingId) {
-      await handleVerifyExcessPayment(bookingId);
-      setConfirmAction(null);
-      return;
-    } else if (type === "verify_damage_payment" && bookingId) {
-      await handleVerifyDamagePayment(bookingId);
-      setConfirmAction(null);
-      return;
-    }
+        await logAuditAction({
+          action: "Confirmed Booking",
+          target: confirmAction.bookingName,
+          type: "Update",
+          details: `Approved booking for ${confirmAction.bookingName} and allocated ${totalPax} Pax equipment from equipment monitoring (${pkgName})`,
+        });
+      } else if (type === "cancel" && bookingId) {
+        const targetBooking = findTargetBooking(bookingId);
+        const payment = targetBooking ? getBookingPayment(targetBooking) : null;
+        const totalBudget = targetBooking ? calculateBudget(targetBooking) : 0;
+        const downpaymentAmount =
+          payment?.downpayment_amount ||
+          (payment?.receipt_url
+            ? Math.round(totalBudget * (payment?.payment_scheme === "Standard 50%" ? 0.5 : 0.2))
+            : 0);
 
-    window.dispatchEvent(new CustomEvent("bookingsUpdated"));
-    setConfirmAction(null);
-    setSelectedBooking(null);
+        const { error: cancelErr } = await supabase
+          .from("bookings")
+          .update({
+            status: "Cancelled",
+            cancellation_reason: cancelReason.trim(),
+            cancelled_by: "Admin",
+          })
+          .eq("id", bookingId);
+
+        if (cancelErr) {
+          console.error("Error cancelling booking:", cancelErr.message);
+          setFetchError(`Failed to cancel booking: ${cancelErr.message}`);
+          setConfirmAction(null);
+          return;
+        }
+
+        // Automatically restore package equipment back to equipment monitoring
+        await restoreBookingInventory(bookingId, confirmAction.bookingName);
+
+        window.dispatchEvent(
+          new CustomEvent("markAdminNotifRead", {
+            detail: { id: bookingId, status: "Cancelled" },
+          }),
+        );
+        await logAuditAction({
+          action: "Cancelled Booking",
+          target: confirmAction.bookingName,
+          type: "Update",
+          details: `Cancelled booking for ${confirmAction.bookingName} and restored reserved equipment supplies. Reason: ${cancelReason.trim()}`,
+        });
+
+        // Automatically record retained/forfeited funds per Catering Contract Clauses 1 & 16
+        if (downpaymentAmount > 0) {
+          await logAuditAction({
+            action: "Forfeited Funds Accounting (Retained Revenue)",
+            target: confirmAction.bookingName,
+            type: "System",
+            details: `Booking #${bookingId} cancelled. Retained non-refundable downpayment/deposit of ₱${downpaymentAmount.toLocaleString()} as Forfeited Revenue per Catering Contract Clauses 1 & 16.`,
+          });
+        }
+      } else if (type === "complete" && bookingId) {
+        const targetBooking = findTargetBooking(bookingId);
+        const payment = targetBooking ? getBookingPayment(targetBooking) : null;
+        if (payment && payment.final_balance_status !== "Verified") {
+          setFetchError("Cannot complete booking: The client's final balance payment has not been confirmed and verified yet.");
+          setConfirmAction(null);
+          return;
+        }
+
+        const guaranteedCount = (Number(targetBooking?.guest_count) || 50) + (Number(targetBooking?.additional_pax) || 0);
+        const actualCount = Math.min(10000, Math.max(1, parseInt(completeActualHeadcount, 10) || guaranteedCount));
+        const excessGuests = Math.max(0, actualCount - guaranteedCount);
+        const excessFee = Math.min(MAX_EXCESS_FEE, Math.max(0, excessGuests * 500));
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const dueDateStr = tomorrow.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+        const dueDateIso = tomorrow.toISOString().split("T")[0];
+
+        const nowIso = new Date().toISOString();
+        const postEventBilling: PostEventBillingInfo = {
+          actual_headcount_served: actualCount,
+          guaranteed_headcount: guaranteedCount,
+          excess_guests: excessGuests,
+          excess_guest_rate: 500,
+          excess_guest_fee: excessFee,
+          due_date: dueDateStr,
+          due_date_iso: dueDateIso,
+          billed_at: nowIso,
+          updated_at: nowIso,
+          last_action: excessGuests > 0 ? "charged" : "none",
+          last_action_at: nowIso,
+          payment_status: excessGuests > 0 ? "Unpaid" : "None",
+        };
+
+        const existingLogistics = targetBooking?.logistics_info || {};
+        const historyItem: ExcessHeadcountHistoryItem = {
+          id: `eh-${Date.now()}`,
+          action: excessGuests > 0 ? "charged" : "removed",
+          fee: excessFee,
+          actual_headcount: actualCount,
+          guaranteed_headcount: guaranteedCount,
+          excess_guests: excessGuests,
+          due_date: dueDateStr,
+          timestamp: nowIso,
+          appliedBy: currentUser?.name || "Admin",
+          note: excessGuests > 0
+            ? `Charged ₱${excessFee.toLocaleString()} excess headcount surcharge (${excessGuests} excess attendees).`
+            : "Completed with guaranteed headcount.",
+        };
+
+        const updatedHistory: ExcessHeadcountHistoryItem[] = [
+          ...(existingLogistics.excessHeadcountHistory || []),
+          historyItem,
+        ];
+
+        const updatedLogistics = {
+          ...existingLogistics,
+          completed_at: existingLogistics.completed_at || nowIso,
+          post_event_billing: postEventBilling,
+          excessHeadcountHistory: updatedHistory,
+          updated_at: nowIso,
+        };
+
+        let updatedAllergies = targetBooking?.food_allergies || "";
+        try {
+          if (typeof updatedAllergies === "string" && updatedAllergies.includes("__PAYMENT_METADATA__:")) {
+            const parts = updatedAllergies.split("__PAYMENT_METADATA__:");
+            const meta = JSON.parse(parts[1]);
+            meta.logistics = updatedLogistics;
+            updatedAllergies = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
+          }
+        } catch (e) {}
+
+        const completePayload: any = {
+          status: "Completed",
+          logistics_info: updatedLogistics,
+          user_id: targetBooking?.user_id,
+        };
+        if (updatedAllergies !== (targetBooking?.food_allergies || "")) {
+          completePayload.food_allergies = updatedAllergies;
+        }
+
+        const { error: completeErr } = await supabase
+          .from("bookings")
+          .update(completePayload)
+          .eq("id", bookingId);
+
+        if (completeErr) {
+          console.error("Error completing booking:", completeErr.message);
+          setFetchError(`Failed to complete booking: ${completeErr.message}`);
+          setConfirmAction(null);
+          return;
+        }
+
+        try {
+          const bc = new BroadcastChannel("roxan_catering_events");
+          bc.postMessage({ type: "BOOKINGS_UPDATED", bookingId, action: "completed" });
+          bc.close();
+        } catch (e) {}
+        try {
+          localStorage.setItem("roxan_last_booking_update", String(Date.now()));
+        } catch (e) {}
+
+        // Update local state
+        setBookings((prev) =>
+          prev.map((b) =>
+            b.id === bookingId
+              ? { ...b, status: "Completed", logistics_info: updatedLogistics }
+              : b
+          )
+        );
+        setSelectedBooking((prev: any) =>
+          prev && prev.id === bookingId
+            ? { ...prev, status: "Completed", logistics_info: updatedLogistics }
+            : prev
+        );
+
+        // Automatically restore package equipment back to equipment monitoring
+        await restoreBookingInventory(
+          bookingId,
+          confirmAction.bookingName,
+          `Event Completed - All equipment returned to warehouse equipment monitoring (Booking #${bookingId})`
+        );
+
+        const excessDetails = excessGuests > 0
+          ? ` Auto-billed ${excessGuests} excess attendees served (+₱${excessFee.toLocaleString()} due ${dueDateStr}).`
+          : ` Actual headcount (${actualCount}) served matched guaranteed count.`;
+
+        await logAuditAction({
+          action: "Completed Booking",
+          target: confirmAction.bookingName,
+          type: "Update",
+          details: `Marked event as Completed for ${confirmAction.bookingName} and returned all allocated equipment.${excessDetails}`,
+        });
+      } else if (type === "archive" && bookingId) {
+        const currentBooking = findTargetBooking(bookingId);
+        const prevStatus = currentBooking?.status || "Pending";
+        const existingLogistics = currentBooking?.logistics_info || {};
+        const updatedLogistics = {
+          ...existingLogistics,
+          archived_from_status: prevStatus,
+        };
+
+        const { error: archiveErr } = await supabase
+          .from("bookings")
+          .update({
+            status: "Archived",
+            logistics_info: updatedLogistics,
+          })
+          .eq("id", bookingId);
+
+        if (archiveErr) {
+          console.error("Error archiving booking:", archiveErr.message);
+          setFetchError(`Failed to archive booking: ${archiveErr.message}`);
+          setConfirmAction(null);
+          return;
+        }
+
+        // If it was confirmed and deducted, restore inventory
+        await restoreBookingInventory(bookingId, confirmAction.bookingName);
+
+        await logAuditAction({
+          action: "Archived Booking",
+          target: confirmAction.bookingName,
+          type: "Delete",
+          details: `Moved booking for ${confirmAction.bookingName} to archives`,
+        });
+      } else if (type === "unarchive" && bookingId) {
+        const currentBooking = findTargetBooking(bookingId);
+        const targetStatus =
+          currentBooking?.logistics_info?.archived_from_status ||
+          (currentBooking?.cancellation_reason ? "Cancelled" : "Pending");
+
+        const existingLogistics = currentBooking?.logistics_info || {};
+        const { archived_from_status, ...cleanedLogistics } = existingLogistics;
+
+        const { error: unarchiveErr } = await supabase
+          .from("bookings")
+          .update({
+            status: targetStatus,
+            logistics_info: cleanedLogistics,
+          })
+          .eq("id", bookingId);
+
+        if (unarchiveErr) {
+          console.error("Error unarchiving booking:", unarchiveErr.message);
+          setFetchError(`Failed to restore booking: ${unarchiveErr.message}`);
+          setConfirmAction(null);
+          return;
+        }
+
+        // If restoring back to Confirmed, re-deduct equipment with canonical corkage_info & package metadata
+        if (targetStatus === "Confirmed" && currentBooking) {
+          const pkg = packages.find((p) => p.id === currentBooking.package_id);
+          const pkgName =
+            currentBooking.packages?.name ||
+            pkg?.name ||
+            "Event Package";
+          const clientName =
+            currentBooking.profiles?.name ||
+            currentBooking.profiles?.full_name ||
+            confirmAction.bookingName;
+          const totalPax =
+            (Number(currentBooking.guest_count) || 50) +
+            (Number(currentBooking.additional_pax) || 0);
+          const corkageData =
+            currentBooking.corkage_info ||
+            currentBooking.logistics_info?.corkage ||
+            null;
+          await deductBookingInventory(
+            currentBooking.id,
+            clientName,
+            pkgName,
+            totalPax,
+            currentBooking.packages?.inclusions || pkg?.inclusions,
+            corkageData
+          );
+        }
+
+        await logAuditAction({
+          action: "Unarchived Booking",
+          target: confirmAction.bookingName,
+          type: "Update",
+          details: `Restored booking #${bookingId} to status: ${targetStatus}`,
+        });
+      } else if (type === "create") {
+        const cleanVenueName = newBooking.venueName.trim().slice(0, 120);
+        const cleanVenueAddress = newBooking.venueAddress.trim().slice(0, 250);
+        const locationString = `${cleanVenueName}${cleanVenueAddress ? ` - ${cleanVenueAddress}` : ""}`;
+        const cleanEventType = newBooking.event_type.trim().slice(0, 100) || "Event";
+        const cleanGuestCount = Math.min(2000, Math.max(1, Number(newBooking.guest_count) || 50));
+        const cleanAdditionalPax = Math.min(500, Math.max(0, Number(newBooking.additional_pax) || 0));
+
+        const selectedPkg = packages.find((p) => p.id === newBooking.package_id);
+        const basePrice = parseFloat(String(selectedPkg?.price || 0).replace(/[^\d.-]/g, "")) || 0;
+        const addPaxRate =
+          parseFloat(String(selectedPkg?.additional_pax_price || 0).replace(/[^\d.-]/g, "")) || 0;
+        const servicesPrice = (newBooking.selected_add_ons || []).reduce((acc: number, name: string) => {
+          const svc = additionalServices.find((s) => s.name === name);
+          return acc + (svc ? parseFloat(String(svc.price).replace(/[^\d.-]/g, "")) || 0 : 0);
+        }, 0);
+        const totalBudget = Math.max(0, basePrice + cleanAdditionalPax * addPaxRate + servicesPrice);
+        const downpaymentAmount = Math.round(totalBudget * 0.5);
+        const finalBalanceAmount = Math.max(0, totalBudget - downpaymentAmount);
+
+        const { data, error: insertErr } = await supabase
+          .from("bookings")
+          .insert([
+            {
+              user_id: newBooking.user_id,
+              package_id: newBooking.package_id,
+              event_type: cleanEventType,
+              event_date: newBooking.date,
+              event_time: newBooking.time || "08:00:00",
+              event_location: locationString,
+              guest_count: cleanGuestCount,
+              additional_pax: cleanAdditionalPax,
+              selected_menu_items: newBooking.selected_menu_items || [],
+              selected_add_ons: newBooking.selected_add_ons || [],
+              food_allergies: "",
+              payment_scheme: "Standard 50%",
+              downpayment_amount: downpaymentAmount,
+              final_balance_amount: finalBalanceAmount,
+              payment_status: "Verified",
+              final_balance_status: "Unpaid",
+              terms_accepted: true,
+              status: "Confirmed",
+            },
+          ])
+          .select("id");
+
+        if (insertErr) {
+          console.error("Error creating booking:", insertErr.message);
+          setFetchError(`Failed to create booking: ${insertErr.message}`);
+          setConfirmAction(null);
+          return;
+        }
+
+        if (data && data.length > 0) {
+          const pkgName = selectedPkg?.name || packages[0]?.name || "Event Package";
+          const totalPax = cleanGuestCount + cleanAdditionalPax;
+          await deductBookingInventory(data[0].id, confirmAction.bookingName, pkgName, totalPax, selectedPkg?.inclusions);
+
+          window.dispatchEvent(
+            new CustomEvent("markAdminNotifRead", {
+              detail: { id: data[0].id, status: "Confirmed" },
+            }),
+          );
+        }
+        await logAuditAction({
+          action: "Created Booking",
+          target: confirmAction.bookingName,
+          type: "Create",
+          details: `Manually created and confirmed a booking for ${confirmAction.bookingName}, automatically allocating equipment from equipment monitoring`,
+        });
+        resetNewBooking();
+      } else if (type === "verify_final_payment" && bookingId) {
+        await handleVerifyFinalBalance(bookingId);
+        setConfirmAction(null);
+        return;
+      } else if (type === "verify_excess_payment" && bookingId) {
+        await handleVerifyExcessPayment(bookingId);
+        setConfirmAction(null);
+        return;
+      } else if (type === "verify_damage_payment" && bookingId) {
+        await handleVerifyDamagePayment(bookingId);
+        setConfirmAction(null);
+        return;
+      }
+
+      window.dispatchEvent(new CustomEvent("bookingsUpdated"));
+      setConfirmAction(null);
+      setSelectedBooking(null);
+    } finally {
+      setIsConfirmSubmitting(false);
+    }
   };
 
   const handleSaveExcessSurcharge = async (bookingId: number | string) => {
-    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId));
+    const targetBooking = findTargetBooking(bookingId);
     if (!targetBooking) return;
 
     // Strict guard: Admin may ONLY edit excess headcount surcharge after the event is Completed
@@ -1777,12 +2161,15 @@ export function BookingPage() {
         targetBooking.profiles?.name || targetBooking.profiles?.full_name || "Client";
       const guaranteedCount =
         (Number(targetBooking.guest_count) || 50) + (Number(targetBooking.additional_pax) || 0);
-      const parsedActual = Math.max(
-        1,
-        parseInt(editExcessActualHeadcount, 10) || guaranteedCount
+      const parsedActual = Math.min(
+        10000,
+        Math.max(1, parseInt(editExcessActualHeadcount, 10) || guaranteedCount)
       );
       const excessGuests = Math.max(0, parsedActual - guaranteedCount);
-      const parsedFee = Math.max(0, Math.round(Number(editExcessFeeInput) || 0));
+      const parsedFee = Math.min(
+        MAX_EXCESS_FEE,
+        Math.max(0, Math.round(Number(editExcessFeeInput) || 0))
+      );
 
       const existingLogistics = targetBooking.logistics_info || {};
       const existingBilling: PostEventBillingInfo | undefined =
@@ -1937,7 +2324,7 @@ export function BookingPage() {
   };
 
   const handleVerifyExcessPayment = async (bookingId: number | string) => {
-    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId));
+    const targetBooking = findTargetBooking(bookingId);
     if (!targetBooking) return;
     const clientName =
       targetBooking.profiles?.name || targetBooking.profiles?.full_name || "Client";
@@ -2116,7 +2503,7 @@ export function BookingPage() {
     clearAll = false
   ) => {
     e.preventDefault();
-    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId));
+    const targetBooking = findTargetBooking(bookingId);
     if (!targetBooking) return;
 
     if (String(targetBooking.status || "").trim().toLowerCase() !== "completed") {
@@ -2136,16 +2523,30 @@ export function BookingPage() {
         return;
       }
       for (const r of rowsToProcess) {
-        if (!r.item_name || !r.item_name.trim()) {
+        const cleanItemName = String(r.item_name || "").trim();
+        const qtyVal = Number(r.quantity_damaged) || 0;
+        const unitCostVal = Number(r.unit_cost) || 0;
+        const noteLen = String(r.notes || "").trim().length;
+        if (!cleanItemName) {
           setDamageFormError("Every row must specify an equipment item name.");
           return;
         }
-        if ((Number(r.quantity_damaged) || 0) <= 0) {
-          setDamageFormError(`Quantity for "${r.item_name}" must be at least 1.`);
+        if (cleanItemName.length > MAX_DAMAGE_ITEM_NAME) {
+          setDamageFormError(`Item name cannot exceed ${MAX_DAMAGE_ITEM_NAME} characters.`);
           return;
         }
-        if ((Number(r.unit_cost) || 0) <= 0) {
-          setDamageFormError(`Enter a valid appraisal unit cost (₱) for "${r.item_name}".`);
+        if (qtyVal < 1 || qtyVal > MAX_DAMAGE_QTY) {
+          setDamageFormError(`Quantity for "${cleanItemName}" must be between 1 and ${MAX_DAMAGE_QTY.toLocaleString()}.`);
+          return;
+        }
+        if (unitCostVal < 1 || unitCostVal > MAX_DAMAGE_UNIT_COST) {
+          setDamageFormError(
+            `Appraisal unit cost (₱) for "${cleanItemName}" must be between ₱1 and ₱${MAX_DAMAGE_UNIT_COST.toLocaleString()}.`
+          );
+          return;
+        }
+        if (noteLen > MAX_DAMAGE_NOTE) {
+          setDamageFormError(`Condition note for "${cleanItemName}" cannot exceed ${MAX_DAMAGE_NOTE} characters.`);
           return;
         }
       }
@@ -2168,18 +2569,21 @@ export function BookingPage() {
 
       // Normalize rows and match to warehouse inventory items
       const normalizedItems: DamageAppraisalItem[] = rowsToProcess.map((row) => {
-        const qty = Math.max(1, Math.round(Number(row.quantity_damaged) || 1));
-        const unitCost = Math.max(0, Math.round(Number(row.unit_cost) || 0));
+        const cleanName = row.item_name.trim().slice(0, MAX_DAMAGE_ITEM_NAME);
+        const qty = Math.min(MAX_DAMAGE_QTY, Math.max(1, Math.round(Number(row.quantity_damaged) || 1)));
+        const unitCost = Math.min(MAX_DAMAGE_UNIT_COST, Math.max(0, Math.round(Number(row.unit_cost) || 0)));
+        const cleanNote = row.notes ? String(row.notes).trim().slice(0, MAX_DAMAGE_NOTE) : undefined;
         const matchedInv = items.find(
           (inv) =>
             inv.status !== "Archived" &&
             (String(inv.id) === String(row.item_id) ||
-              inv.name.trim().toLowerCase() === row.item_name.trim().toLowerCase())
+              inv.name.trim().toLowerCase() === cleanName.toLowerCase())
         );
         return {
           ...row,
           item_id: matchedInv ? matchedInv.id : row.item_id,
-          item_name: row.item_name.trim(),
+          item_name: cleanName,
+          notes: cleanNote,
           unit: row.unit || matchedInv?.unit || "pcs",
           quantity_damaged: qty,
           unit_cost: unitCost,
@@ -2188,7 +2592,6 @@ export function BookingPage() {
         };
       });
 
-      // Reconcile warehouse stock deltas cleanly so edits never double-deduct
       const prevByInvId = new Map<string, number>();
       prevItems.forEach((p) => {
         const matchedInv = items.find(
@@ -2209,31 +2612,6 @@ export function BookingPage() {
           nextByInvId.set(k, (nextByInvId.get(k) || 0) + Number(n.warehouse_deducted_qty));
         }
       });
-
-      const allInvKeys = new Set([...prevByInvId.keys(), ...nextByInvId.keys()]);
-      for (const invKey of allInvKeys) {
-        const prevDeducted = prevByInvId.get(invKey) || 0;
-        const nextDeducted = nextByInvId.get(invKey) || 0;
-        const delta = nextDeducted - prevDeducted;
-        const invObj = items.find((inv) => String(inv.id) === invKey);
-        if (!invObj || delta === 0) continue;
-
-        if (delta > 0) {
-          await updateStock(
-            invObj.id,
-            -delta,
-            `Post-event equipment damage/loss appraisal (Booking #${bookingId} - ${clientName})`,
-            "Damaged/Loss"
-          );
-        } else {
-          await updateStock(
-            invObj.id,
-            Math.abs(delta),
-            `Restored adjusted/cleared post-event damage appraisal (Booking #${bookingId} - ${clientName})`,
-            "Restock"
-          );
-        }
-      }
 
       const totalFee = normalizedItems.reduce((sum, it) => sum + it.subtotal, 0);
       const prevFee = Number(existingAppraisal?.total_damage_fee) || 0;
@@ -2262,7 +2640,7 @@ export function BookingPage() {
         items: normalizedItems,
         total_damage_fee: totalFee,
         due_date: dueStr,
-        general_notes: damageGeneralNotes.trim(),
+        general_notes: damageGeneralNotes.trim().slice(0, 500),
         appraised_at: existingAppraisal?.appraised_at || nowIso,
         updated_at: nowIso,
         appraised_by: currentUser?.name || "Admin",
@@ -2328,11 +2706,37 @@ export function BookingPage() {
         updatePayload.food_allergies = updatedAllergies;
       }
 
+      // Persist booking appraisal BEFORE adjusting warehouse stock so failed DB updates never desync inventory
       const { error } = await supabase
         .from("bookings")
         .update(updatePayload)
         .eq("id", bookingId);
       if (error) throw error;
+
+      const allInvKeys = new Set([...prevByInvId.keys(), ...nextByInvId.keys()]);
+      for (const invKey of allInvKeys) {
+        const prevDeducted = prevByInvId.get(invKey) || 0;
+        const nextDeducted = nextByInvId.get(invKey) || 0;
+        const delta = nextDeducted - prevDeducted;
+        const invObj = items.find((inv) => String(inv.id) === invKey);
+        if (!invObj || delta === 0) continue;
+
+        if (delta > 0) {
+          await updateStock(
+            invObj.id,
+            -delta,
+            `Post-event equipment damage/loss appraisal (Booking #${bookingId} - ${clientName})`,
+            "Damaged/Loss"
+          );
+        } else {
+          await updateStock(
+            invObj.id,
+            Math.abs(delta),
+            `Restored adjusted/cleared post-event damage appraisal (Booking #${bookingId} - ${clientName})`,
+            "Restock"
+          );
+        }
+      }
 
       setDamageRows(normalizedItems);
       setBookings((prev) =>
@@ -2390,7 +2794,7 @@ export function BookingPage() {
   };
 
   const handleVerifyDamagePayment = async (bookingId: number | string) => {
-    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId));
+    const targetBooking = findTargetBooking(bookingId);
     if (!targetBooking) return;
     const clientName =
       targetBooking.profiles?.name || targetBooking.profiles?.full_name || "Client";
@@ -2491,7 +2895,7 @@ export function BookingPage() {
     complaint: PostEventComplaintItem
   ) => {
     e.preventDefault();
-    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId));
+    const targetBooking = findTargetBooking(bookingId);
     if (!targetBooking) return;
 
     const draft = complaintDrafts[complaint.id] || {
@@ -2730,7 +3134,7 @@ export function BookingPage() {
   };
 
   const handleVerifyFinalBalance = async (bookingId: number | string) => {
-    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId));
+    const targetBooking = findTargetBooking(bookingId);
     if (!targetBooking) return;
     const clientName = targetBooking.profiles?.name || targetBooking.profiles?.full_name || "Client";
     const payment = getBookingPayment(targetBooking);
@@ -2852,7 +3256,7 @@ export function BookingPage() {
   };
 
   const handleVerifyInstallment = async (bookingId: number | string, milestoneIndex: number) => {
-    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId));
+    const targetBooking = findTargetBooking(bookingId);
     if (!targetBooking) return;
     const clientName = targetBooking.profiles?.name || targetBooking.profiles?.full_name || "Client";
     const payment = getBookingPayment(targetBooking);
@@ -2899,10 +3303,16 @@ export function BookingPage() {
       updatePayload.food_allergies = updatedAllergies;
     }
 
-    await supabase
+    const { error: instErr } = await supabase
       .from("bookings")
       .update(updatePayload)
       .eq("id", bookingId);
+
+    if (instErr) {
+      console.error("Error verifying installment payment:", instErr.message);
+      setFetchError(`Failed to verify installment payment: ${instErr.message}`);
+      return;
+    }
 
     await logAuditAction({
       action: "Verified Installment Payment",
@@ -2937,7 +3347,7 @@ export function BookingPage() {
   };
 
   const handleSaveLogisticsSurcharge = async (bookingId: number | string) => {
-    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId));
+    const targetBooking = findTargetBooking(bookingId);
     if (!targetBooking) return;
 
     if ((targetBooking.status || "Pending") === "Cancelled") {
@@ -2975,36 +3385,13 @@ export function BookingPage() {
     const downpaymentDue = getInitialDownpaymentDue(tempBooking, payment, newTotalBudget);
     const newRemainingBalance = Math.max(0, newTotalBudget - downpaymentDue);
 
-    let updatedSchedule = payment.installment_schedule
-      ? [...payment.installment_schedule]
-      : null;
-
-    if (updatedSchedule && updatedSchedule.length > 0) {
-      let paidTotal = 0;
-      let unpaidIndices: number[] = [];
-      updatedSchedule.forEach((m: any, idx: number) => {
-        if (m.status === "Verified" || m.status === "Paid") {
-          paidTotal += Number(m.amount) || 0;
-        } else {
-          unpaidIndices.push(idx);
-        }
-      });
-
-      if (unpaidIndices.length > 0) {
-        const remainingToDistribute = Math.max(0, newRemainingBalance - paidTotal);
-        const perMilestone = Math.floor(remainingToDistribute / unpaidIndices.length);
-        let acc = 0;
-        unpaidIndices.forEach((mIdx, i) => {
-          const isLast = i === unpaidIndices.length - 1;
-          const amt = isLast ? remainingToDistribute - acc : perMilestone;
-          acc += amt;
-          updatedSchedule![mIdx] = {
-            ...updatedSchedule![mIdx],
-            amount: amt,
-          };
-        });
-      }
-    }
+    const { updatedSchedule, nextFinalBalanceStatus } =
+      buildPostVerificationSurchargeSchedule(
+        targetBooking,
+        payment,
+        newRemainingBalance,
+        "Logistics & Travel Surcharge Adjustment"
+      );
 
     let updatedAllergies = targetBooking.food_allergies || "";
     try {
@@ -3014,6 +3401,7 @@ export function BookingPage() {
         meta.logistics = updatedLogistics;
         meta.balance = newRemainingBalance;
         if (updatedSchedule) meta.installments = updatedSchedule;
+        if (nextFinalBalanceStatus) meta.finalBalanceStatus = nextFinalBalanceStatus;
         updatedAllergies = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
       }
     } catch (e) {}
@@ -3024,6 +3412,9 @@ export function BookingPage() {
     };
     if (updatedSchedule) {
       updatePayload.installment_schedule = updatedSchedule;
+    }
+    if (nextFinalBalanceStatus) {
+      updatePayload.final_balance_status = nextFinalBalanceStatus;
     }
     if (updatedAllergies !== (targetBooking.food_allergies || "")) {
       updatePayload.food_allergies = updatedAllergies;
@@ -3055,6 +3446,7 @@ export function BookingPage() {
               ...b,
               logistics_info: updatedLogistics,
               final_balance_amount: newRemainingBalance,
+              final_balance_status: nextFinalBalanceStatus || b.final_balance_status,
               installment_schedule: updatedSchedule || b.installment_schedule,
               food_allergies: updatedAllergies,
             }
@@ -3067,6 +3459,7 @@ export function BookingPage() {
         ...selectedBooking,
         logistics_info: updatedLogistics,
         final_balance_amount: newRemainingBalance,
+        final_balance_status: nextFinalBalanceStatus || selectedBooking.final_balance_status,
         installment_schedule: updatedSchedule || selectedBooking.installment_schedule,
         food_allergies: updatedAllergies,
       });
@@ -3078,7 +3471,7 @@ export function BookingPage() {
   };
 
   const handleToggleRainLaundryFee = async (bookingId: number | string) => {
-    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId)) || selectedBooking;
+    const targetBooking = findTargetBooking(bookingId);
     if (!targetBooking) return;
 
     const isCancelled = targetBooking.status === "Cancelled";
@@ -3136,36 +3529,13 @@ export function BookingPage() {
       const downpaymentDue = getInitialDownpaymentDue(tempBooking, payment, newTotalBudget);
       const newRemainingBalance = Math.max(0, newTotalBudget - downpaymentDue);
 
-      let updatedSchedule = payment.installment_schedule
-        ? [...payment.installment_schedule]
-        : null;
-
-      if (updatedSchedule && updatedSchedule.length > 0) {
-        let paidTotal = 0;
-        let unpaidIndices: number[] = [];
-        updatedSchedule.forEach((m: any, idx: number) => {
-          if (m.status === "Verified" || m.status === "Paid") {
-            paidTotal += Number(m.amount) || 0;
-          } else {
-            unpaidIndices.push(idx);
-          }
-        });
-
-        if (unpaidIndices.length > 0) {
-          const remainingToDistribute = Math.max(0, newRemainingBalance - paidTotal);
-          const perMilestone = Math.floor(remainingToDistribute / unpaidIndices.length);
-          let acc = 0;
-          unpaidIndices.forEach((mIdx, i) => {
-            const isLast = i === unpaidIndices.length - 1;
-            const amt = isLast ? remainingToDistribute - acc : perMilestone;
-            acc += amt;
-            updatedSchedule![mIdx] = {
-              ...updatedSchedule![mIdx],
-              amount: amt,
-            };
-          });
-        }
-      }
+      const { updatedSchedule, nextFinalBalanceStatus } =
+        buildPostVerificationSurchargeSchedule(
+          targetBooking,
+          payment,
+          newRemainingBalance,
+          "Outdoor Inclement Weather Rain Laundry Fee"
+        );
 
       let updatedAllergies = targetBooking.food_allergies || "";
       try {
@@ -3175,6 +3545,7 @@ export function BookingPage() {
           meta.logistics = updatedLogistics;
           meta.balance = newRemainingBalance;
           if (updatedSchedule) meta.installments = updatedSchedule;
+          if (nextFinalBalanceStatus) meta.finalBalanceStatus = nextFinalBalanceStatus;
           updatedAllergies = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
         }
       } catch (e) {}
@@ -3185,6 +3556,9 @@ export function BookingPage() {
       };
       if (updatedSchedule) {
         updatePayload.installment_schedule = updatedSchedule;
+      }
+      if (nextFinalBalanceStatus) {
+        updatePayload.final_balance_status = nextFinalBalanceStatus;
       }
       if (updatedAllergies !== (targetBooking.food_allergies || "")) {
         updatePayload.food_allergies = updatedAllergies;
@@ -3204,6 +3578,7 @@ export function BookingPage() {
                 ...b,
                 logistics_info: updatedLogistics,
                 final_balance_amount: newRemainingBalance,
+                final_balance_status: nextFinalBalanceStatus || b.final_balance_status,
                 installment_schedule: updatedSchedule || b.installment_schedule,
                 food_allergies: updatedAllergies,
               }
@@ -3216,6 +3591,7 @@ export function BookingPage() {
               ...prev,
               logistics_info: updatedLogistics,
               final_balance_amount: newRemainingBalance,
+              final_balance_status: nextFinalBalanceStatus || prev.final_balance_status,
               installment_schedule: updatedSchedule || prev.installment_schedule,
               food_allergies: updatedAllergies,
             }
@@ -3257,7 +3633,7 @@ export function BookingPage() {
   };
 
   const handleToggleVenueType = async (bookingId: number | string, newType: "Indoor" | "Outdoor") => {
-    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId)) || selectedBooking;
+    const targetBooking = findTargetBooking(bookingId);
     if (!targetBooking) return;
 
     if (targetBooking.status === "Cancelled" || targetBooking.status === "Completed") {
@@ -3300,7 +3676,7 @@ export function BookingPage() {
   };
 
   const handleApplyDayOfOvertime = async (bookingId: number | string) => {
-    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId)) || selectedBooking;
+    const targetBooking = findTargetBooking(bookingId);
     if (!targetBooking) return;
 
     const clientName =
@@ -3362,34 +3738,14 @@ export function BookingPage() {
       newTotalBudget
     );
     const updatedFinalBalance = Math.max(0, newTotalBudget - downpaymentPaid);
-    const prevDayOfFee = Number(targetBooking.overtime_info?.day_of?.total_day_of_fee) || 0;
-    const feeDiff = otResult.totalFee - prevDayOfFee;
 
-    // Recalculate installment schedule if present
-    const rawSchedule = targetBooking.installment_schedule || null;
-    let updatedSchedule = Array.isArray(rawSchedule) ? rawSchedule.map((m: any) => ({ ...m })) : null;
-    if (updatedSchedule && updatedSchedule.length > 0 && feeDiff !== 0) {
-      let paidTotal = 0;
-      let unpaidIndices: number[] = [];
-      updatedSchedule.forEach((m: any, idx: number) => {
-        if (m.status === "Verified" || m.status === "Paid") {
-          paidTotal += Number(m.amount) || 0;
-        } else {
-          unpaidIndices.push(idx);
-        }
-      });
-      if (unpaidIndices.length > 0) {
-        const remainingToDistribute = Math.max(0, updatedFinalBalance - paidTotal);
-        const perMilestone = Math.floor(remainingToDistribute / unpaidIndices.length);
-        let acc = 0;
-        unpaidIndices.forEach((mIdx, i) => {
-          const isLast = i === unpaidIndices.length - 1;
-          const amt = isLast ? remainingToDistribute - acc : perMilestone;
-          acc += amt;
-          updatedSchedule![mIdx] = { ...updatedSchedule![mIdx], amount: amt };
-        });
-      }
-    }
+    const { updatedSchedule, nextFinalBalanceStatus } =
+      buildPostVerificationSurchargeSchedule(
+        targetBooking,
+        existingPayment,
+        updatedFinalBalance,
+        `Day-Of Event Overtime (${otResult.billableOtHours}h)`
+      );
 
     const updatePayload: any = {
       overtime_info: updatedOvertimeInfo,
@@ -3397,6 +3753,9 @@ export function BookingPage() {
     };
     if (updatedSchedule) {
       updatePayload.installment_schedule = updatedSchedule;
+    }
+    if (nextFinalBalanceStatus) {
+      updatePayload.final_balance_status = nextFinalBalanceStatus;
     }
 
     let updatedAllergies = targetBooking.food_allergies || "";
@@ -3407,6 +3766,7 @@ export function BookingPage() {
         meta.overtime = updatedOvertimeInfo;
         meta.balance = updatedFinalBalance;
         if (updatedSchedule) meta.installments = updatedSchedule;
+        if (nextFinalBalanceStatus) meta.finalBalanceStatus = nextFinalBalanceStatus;
         updatedAllergies = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
         updatePayload.food_allergies = updatedAllergies;
       }
@@ -3441,6 +3801,7 @@ export function BookingPage() {
       ...targetBooking,
       overtime_info: updatedOvertimeInfo,
       final_balance_amount: updatedFinalBalance,
+      final_balance_status: nextFinalBalanceStatus || targetBooking.final_balance_status,
       installment_schedule: updatedSchedule || targetBooking.installment_schedule,
       food_allergies: updatePayload.food_allergies || targetBooking.food_allergies,
     };
@@ -3453,7 +3814,7 @@ export function BookingPage() {
   };
 
   const handleRevertDayOfOvertime = async (bookingId: number | string) => {
-    const targetBooking = bookings.find((b) => String(b.id) === String(bookingId)) || selectedBooking;
+    const targetBooking = findTargetBooking(bookingId);
     if (!targetBooking) return;
 
     const currentDayOf = targetBooking.overtime_info?.day_of;
@@ -3491,30 +3852,13 @@ export function BookingPage() {
     );
     const updatedFinalBalance = Math.max(0, newTotalBudget - downpaymentPaid);
 
-    const rawSchedule = targetBooking.installment_schedule || null;
-    let updatedSchedule = Array.isArray(rawSchedule) ? rawSchedule.map((m: any) => ({ ...m })) : null;
-    if (updatedSchedule && updatedSchedule.length > 0) {
-      let paidTotal = 0;
-      let unpaidIndices: number[] = [];
-      updatedSchedule.forEach((m: any, idx: number) => {
-        if (m.status === "Verified" || m.status === "Paid") {
-          paidTotal += Number(m.amount) || 0;
-        } else {
-          unpaidIndices.push(idx);
-        }
-      });
-      if (unpaidIndices.length > 0) {
-        const remainingToDistribute = Math.max(0, updatedFinalBalance - paidTotal);
-        const perMilestone = Math.floor(remainingToDistribute / unpaidIndices.length);
-        let acc = 0;
-        unpaidIndices.forEach((mIdx, i) => {
-          const isLast = i === unpaidIndices.length - 1;
-          const amt = isLast ? remainingToDistribute - acc : perMilestone;
-          acc += amt;
-          updatedSchedule![mIdx] = { ...updatedSchedule![mIdx], amount: amt };
-        });
-      }
-    }
+    const { updatedSchedule, nextFinalBalanceStatus } =
+      buildPostVerificationSurchargeSchedule(
+        targetBooking,
+        existingPayment,
+        updatedFinalBalance,
+        "Day-Of Event Overtime"
+      );
 
     const updatePayload: any = {
       overtime_info: updatedOvertimeInfo,
@@ -3522,6 +3866,9 @@ export function BookingPage() {
     };
     if (updatedSchedule) {
       updatePayload.installment_schedule = updatedSchedule;
+    }
+    if (nextFinalBalanceStatus) {
+      updatePayload.final_balance_status = nextFinalBalanceStatus;
     }
 
     let updatedAllergies = targetBooking.food_allergies || "";
@@ -3532,6 +3879,7 @@ export function BookingPage() {
         meta.overtime = updatedOvertimeInfo;
         meta.balance = updatedFinalBalance;
         if (updatedSchedule) meta.installments = updatedSchedule;
+        if (nextFinalBalanceStatus) meta.finalBalanceStatus = nextFinalBalanceStatus;
         updatedAllergies = `${parts[0].trim() ? parts[0].trim() + "\n" : ""}__PAYMENT_METADATA__:${JSON.stringify(meta)}`;
         updatePayload.food_allergies = updatedAllergies;
       }
@@ -3564,6 +3912,7 @@ export function BookingPage() {
       ...targetBooking,
       overtime_info: updatedOvertimeInfo,
       final_balance_amount: updatedFinalBalance,
+      final_balance_status: nextFinalBalanceStatus || targetBooking.final_balance_status,
       installment_schedule: updatedSchedule || targetBooking.installment_schedule,
       food_allergies: updatePayload.food_allergies || targetBooking.food_allergies,
     };
@@ -3821,8 +4170,13 @@ export function BookingPage() {
         setSubMessage(`Custom dish name cannot exceed ${MAX_CUSTOM_DISH_LENGTH} characters.`);
         return;
       }
-      if (!/^[a-zA-ZÀ-ÿ\sñÑ\-']+$/.test(finalReplacement)) {
-        setSubMessage("Custom dish name can only contain letters, spaces, hyphens, and apostrophes.");
+      if (
+        !/^[a-zA-Z0-9À-ÿ\sñÑ&/().,\-']+$/.test(finalReplacement) ||
+        !/[a-zA-Z0-9À-ÿñÑ]/.test(finalReplacement)
+      ) {
+        setSubMessage(
+          "Custom dish name can only contain letters, numbers, spaces, and standard punctuation (& / ( ) . , - ').",
+        );
         return;
       }
     }
@@ -4315,35 +4669,42 @@ export function BookingPage() {
         {[
           {
             label: "Total Bookings",
-            value: bookings
-              .filter((b) => (b.status || "Pending") !== "Archived")
-              .length.toString(),
+            value: (dashboardMetrics
+              ? dashboardMetrics.status_counts.total - dashboardMetrics.status_counts.archived
+              : contextBookings.filter((b) => (b.status || "Pending") !== "Archived").length
+            ).toString(),
             sub: "Overall",
           },
           {
             label: "Confirmed",
-            value: bookings
-              .filter((b) => (b.status || "Pending") === "Confirmed")
-              .length.toString(),
+            value: (dashboardMetrics
+              ? dashboardMetrics.status_counts.confirmed_completed
+              : contextBookings.filter(
+                  (b) => (b.status || "Pending") === "Confirmed" || b.status === "Completed"
+                ).length
+            ).toString(),
             sub: "Paid/Ready",
           },
           {
             label: "Pending",
-            value: bookings
-              .filter((b) => (b.status || "Pending") === "Pending")
-              .length.toString(),
+            value: (dashboardMetrics
+              ? dashboardMetrics.status_counts.pending
+              : contextBookings.filter((b) => (b.status || "Pending") === "Pending").length
+            ).toString(),
             sub: "Needs Review",
           },
           {
             label: "Est. Revenue",
             value: `₱${(
-              bookings
-                .filter(
-                  (b) =>
-                    (b.status || "Pending") !== "Archived" &&
-                    (b.status || "Pending") !== "Cancelled",
-                )
-                .reduce((acc, b) => acc + calculateBudget(b), 0) / 1000
+              (dashboardMetrics
+                ? dashboardMetrics.monthly_series.reduce((acc, m) => acc + (Number(m.revenue) || 0), 0)
+                : contextBookings
+                    .filter(
+                      (b) =>
+                        (b.status || "Pending") !== "Archived" &&
+                        (b.status || "Pending") !== "Cancelled",
+                    )
+                    .reduce((acc, b) => acc + (Number(b.budget) || 0), 0)) / 1000
             ).toFixed(0)}k`,
             sub: "Projected",
           },
@@ -4840,8 +5201,6 @@ export function BookingPage() {
                           </button>
                           <button
                             onClick={() => {
-                              setConfirmPassword("");
-                              setPasswordError(false);
                               setConfirmAction({
                                 type: "unarchive",
                                 bookingId: booking.id,
@@ -5417,8 +5776,6 @@ export function BookingPage() {
                             </button>
                             <button
                               onClick={() => {
-                                setConfirmPassword("");
-                                setPasswordError(false);
                                 setConfirmAction({
                                   type: "unarchive",
                                   bookingId: booking.id,
@@ -5442,27 +5799,62 @@ export function BookingPage() {
                 )))}
               </tbody>
             </table>
+            {totalBookingsCount > 0 && (() => {
+              const totalPages = Math.max(1, Math.ceil(totalBookingsCount / PAGE_SIZE));
+              const startIdx = page * PAGE_SIZE + 1;
+              const endIdx = Math.min((page + 1) * PAGE_SIZE, totalBookingsCount);
+              return (
+                <div className="px-4 sm:px-6 py-3.5 border-t border-natural-border flex flex-col sm:flex-row items-center justify-between gap-3 bg-natural-bg/20">
+                  <p className="text-xs text-natural-text-light font-medium">
+                    Showing <span className="font-bold text-natural-text-main">{startIdx}–{endIdx}</span> of{" "}
+                    <span className="font-bold text-natural-text-main">{totalBookingsCount}</span> bookings
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={page === 0 || isLoading}
+                      onClick={() => setPage((p) => Math.max(0, p - 1))}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold border border-natural-border rounded-lg bg-white text-natural-text-main hover:bg-natural-bg disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                      Prev
+                    </button>
+                    <span className="text-xs font-bold text-natural-text-main px-2">
+                      Page {page + 1} of {totalPages}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={page + 1 >= totalPages || isLoading}
+                      onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold border border-natural-border rounded-lg bg-white text-natural-text-main hover:bg-natural-bg disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    >
+                      Next
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
             </>
           ) : (
             <div className="p-3 sm:p-6">
               <EventCalendar
-                bookings={filteredBookings.map((b) => ({
+                bookings={calendarBookings.map((b) => ({
                   id: b.id,
-                  customerName:
-                    b.profiles?.name || b.profiles?.full_name || "Unknown User",
-                  email: b.profiles?.email || "",
-                  phone: b.profiles?.phone_number || b.profiles?.phone || "",
-                  eventType: b.event_type || "",
-                  package: b.packages?.name || "",
-                  date: b.event_date || "",
-                  time: formatEventTime(b.event_time),
-                  guestCount: b.guest_count || 0,
-                  additionalPax: b.additional_pax || 0,
-                  venueName: (b.event_location || "").split(" - ")[0] || "",
-                  venueAddress: (b.event_location || "").split(" - ")[1] || "",
+                  customerName: b.customerName || "Unknown User",
+                  email: b.email || "",
+                  phone: b.phone || "",
+                  eventType: b.eventType || "",
+                  package: b.package || "",
+                  date: b.date || "",
+                  time: formatEventTime(b.time),
+                  guestCount: b.guestCount || 0,
+                  additionalPax: b.additionalPax || 0,
+                  venueName: b.venueName || "",
+                  venueAddress: b.venueAddress || "",
                   menu: b.selected_menu_items || [],
-                  additionalServices: b.selected_add_ons || [],
-                  budget: calculateBudget(b),
+                  additionalServices: b.additionalServices || [],
+                  budget: b.budget || 0,
                   status: b.status || "Pending",
                 }))}
                 detailedView={true}
@@ -5485,7 +5877,10 @@ export function BookingPage() {
                 </p>
               </div>
               <button
-                onClick={() => setIsModalOpen(false)}
+                onClick={() => {
+                  setIsModalOpen(false);
+                  setManualBookingError("");
+                }}
                 className="p-2 hover:bg-natural-bg rounded-full transition-colors"
               >
                 <X className="w-6 h-6 text-natural-text-light" />
@@ -5493,6 +5888,12 @@ export function BookingPage() {
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 sm:p-8 space-y-6 sm:space-y-8">
+              {manualBookingError && (
+                <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl text-xs font-semibold text-red-700 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{manualBookingError}</span>
+                </div>
+              )}
               <section className="space-y-4">
                 <h4 className="text-xs font-bold text-natural-accent uppercase tracking-wider border-b border-natural-accent/20 pb-2">
                   Registered Customer Link
@@ -5504,12 +5905,13 @@ export function BookingPage() {
                     </label>
                     <select
                       value={newBooking.user_id}
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        setManualBookingError("");
                         setNewBooking({
                           ...newBooking,
                           user_id: e.target.value,
-                        })
-                      }
+                        });
+                      }}
                       className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-natural-accent/20 transition-all"
                     >
                       <option value="">-- Choose registered client --</option>
@@ -5543,7 +5945,7 @@ export function BookingPage() {
                       readOnly
                       value={
                         customers.find((c) => c.id === newBooking.user_id)
-                          ?.phone || ""
+                          ?.phone_number || ""
                       }
                       className="w-full px-4 py-2.5 bg-gray-100 border border-natural-border rounded-xl text-sm"
                     />
@@ -5562,6 +5964,7 @@ export function BookingPage() {
                     </label>
                     <input
                       type="text"
+                      maxLength={100}
                       value={newBooking.event_type}
                       onChange={(e) =>
                         setNewBooking({
@@ -5602,7 +6005,7 @@ export function BookingPage() {
                     <input
                       type="number"
                       min="1"
-                      max="100000"
+                      max="2000"
                       value={newBooking.guest_count}
                       onChange={(e) => {
                         const val = e.target.value;
@@ -5610,7 +6013,7 @@ export function BookingPage() {
                           setNewBooking({ ...newBooking, guest_count: "" });
                           return;
                         }
-                        const num = Math.min(100000, Math.max(0, Number(val)));
+                        const num = Math.min(2000, Math.max(1, Number(val)));
                         setNewBooking({ ...newBooking, guest_count: num });
                       }}
                       onKeyDown={(e) => {
@@ -5628,7 +6031,7 @@ export function BookingPage() {
                     <input
                       type="number"
                       min="0"
-                      max="100000"
+                      max="500"
                       value={newBooking.additional_pax}
                       onChange={(e) => {
                         const val = e.target.value;
@@ -5636,7 +6039,7 @@ export function BookingPage() {
                           setNewBooking({ ...newBooking, additional_pax: "" });
                           return;
                         }
-                        const num = Math.min(100000, Math.max(0, Number(val)));
+                        const num = Math.min(500, Math.max(0, Number(val)));
                         setNewBooking({ ...newBooking, additional_pax: num });
                       }}
                       onKeyDown={(e) => {
@@ -5657,9 +6060,10 @@ export function BookingPage() {
                     <input
                       type="date"
                       value={newBooking.date}
-                      onChange={(e) =>
-                        setNewBooking({ ...newBooking, date: e.target.value })
-                      }
+                      onChange={(e) => {
+                        setManualBookingError("");
+                        setNewBooking({ ...newBooking, date: e.target.value });
+                      }}
                       className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-natural-accent/20 transition-all"
                     />
                   </div>
@@ -5670,9 +6074,10 @@ export function BookingPage() {
                     <input
                       type="time"
                       value={newBooking.time}
-                      onChange={(e) =>
-                        setNewBooking({ ...newBooking, time: e.target.value })
-                      }
+                      onChange={(e) => {
+                        setManualBookingError("");
+                        setNewBooking({ ...newBooking, time: e.target.value });
+                      }}
                       className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-natural-accent/20 transition-all"
                     />
                   </div>
@@ -5682,6 +6087,7 @@ export function BookingPage() {
                     </label>
                     <input
                       type="text"
+                      maxLength={120}
                       value={newBooking.venueName}
                       onChange={(e) =>
                         setNewBooking({
@@ -5700,6 +6106,7 @@ export function BookingPage() {
                   </label>
                   <input
                     type="text"
+                    maxLength={250}
                     value={newBooking.venueAddress}
                     onChange={(e) =>
                       setNewBooking({
@@ -5824,7 +6231,10 @@ export function BookingPage() {
 
             <div className="p-6 bg-natural-bg/30 border-t border-natural-border flex items-center justify-end gap-4 shrink-0">
               <button
-                onClick={() => setIsModalOpen(false)}
+                onClick={() => {
+                  setIsModalOpen(false);
+                  setManualBookingError("");
+                }}
                 className="px-6 py-2.5 text-xs font-bold text-natural-text-light uppercase tracking-widest hover:text-natural-text-main transition-colors"
               >
                 Cancel Information
@@ -5832,13 +6242,16 @@ export function BookingPage() {
               <button
                 onClick={handleCreateBooking}
                 disabled={
+                  isValidatingManualBooking ||
                   !newBooking.user_id ||
                   !newBooking.package_id ||
-                  !newBooking.date
+                  !newBooking.date ||
+                  !newBooking.time.trim() ||
+                  !newBooking.venueName.trim()
                 }
                 className="bg-natural-accent text-white px-10 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-natural-accent/90 transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Save & Create Booking
+                {isValidatingManualBooking ? "Checking Availability..." : "Save & Create Booking"}
               </button>
             </div>
           </div>
@@ -6224,7 +6637,7 @@ export function BookingPage() {
                         className="font-semibold text-natural-text-main truncate"
                         title={selectedBooking.event_location || ""}
                       >
-                        {(selectedBooking.event_location || "N/A").split(" - ")[0]}
+                        {splitVenueLocation(selectedBooking.event_location).venueName || "N/A"}
                       </p>
                     </div>
                   </div>
@@ -9521,10 +9934,11 @@ export function BookingPage() {
                                           {!isKnownOption && (
                                             <input
                                               type="text"
+                                              maxLength={MAX_DAMAGE_ITEM_NAME}
                                               placeholder="Enter custom item (e.g., Glass Pitcher)"
                                               value={dRow.item_name}
                                               onChange={(e) => {
-                                                const val = e.target.value;
+                                                const val = e.target.value.slice(0, MAX_DAMAGE_ITEM_NAME);
                                                 setDamageRows((prev) =>
                                                   prev.map((r) =>
                                                     r.id === dRow.id ? { ...r, item_name: val } : r
@@ -9578,9 +9992,13 @@ export function BookingPage() {
                                             id={`dmg-qty-${dRow.id}`}
                                             type="number"
                                             min="1"
+                                            max={MAX_DAMAGE_QTY}
                                             value={dRow.quantity_damaged}
                                             onChange={(e) => {
-                                              const q = Math.max(1, parseInt(e.target.value, 10) || 1);
+                                              const q = Math.min(
+                                                MAX_DAMAGE_QTY,
+                                                Math.max(1, parseInt(e.target.value, 10) || 1)
+                                              );
                                               setDamageRows((prev) =>
                                                 prev.map((r) =>
                                                   r.id === dRow.id
@@ -9609,10 +10027,14 @@ export function BookingPage() {
                                             id={`dmg-cost-${dRow.id}`}
                                             type="number"
                                             min="0"
+                                            max={MAX_DAMAGE_UNIT_COST}
                                             step="50"
                                             value={dRow.unit_cost}
                                             onChange={(e) => {
-                                              const c = Math.max(0, Number(e.target.value) || 0);
+                                              const c = Math.min(
+                                                MAX_DAMAGE_UNIT_COST,
+                                                Math.max(0, Number(e.target.value) || 0)
+                                              );
                                               setDamageRows((prev) =>
                                                 prev.map((r) =>
                                                   r.id === dRow.id
@@ -9658,13 +10080,14 @@ export function BookingPage() {
                                           <input
                                             id={`dmg-note-${dRow.id}`}
                                             type="text"
+                                            maxLength={MAX_DAMAGE_NOTE}
                                             placeholder="Condition note (e.g., Cracked porcelain rim, missing lid)"
                                             value={dRow.notes || ""}
                                             onChange={(e) =>
                                               setDamageRows((prev) =>
                                                 prev.map((r) =>
                                                   r.id === dRow.id
-                                                    ? { ...r, notes: e.target.value }
+                                                    ? { ...r, notes: e.target.value.slice(0, MAX_DAMAGE_NOTE) }
                                                     : r
                                                 )
                                               )
@@ -10346,8 +10769,6 @@ export function BookingPage() {
                         <button
                           type="button"
                           onClick={() => {
-                            setConfirmPassword("");
-                            setPasswordError(false);
                             setConfirmAction({
                               type: "unarchive",
                               bookingId: selectedBooking.id,
@@ -10379,7 +10800,7 @@ export function BookingPage() {
       {confirmAction && (() => {
         const confirmTargetBooking =
           confirmAction.type === "confirm"
-            ? bookings.find((b) => b.id === confirmAction.bookingId)
+            ? findTargetBooking(confirmAction.bookingId)
             : null;
         const confirmPkgName =
           confirmTargetBooking?.packages?.name ||
@@ -10420,8 +10841,9 @@ export function BookingPage() {
             >
               <button
                 type="button"
+                disabled={isConfirmSubmitting}
                 onClick={() => setConfirmAction(null)}
-                className="absolute top-4 right-4 p-1 rounded-lg text-natural-text-light hover:text-natural-text-main hover:bg-natural-bg/80 transition-colors cursor-pointer z-10"
+                className="absolute top-4 right-4 p-1 rounded-lg text-natural-text-light hover:text-natural-text-main hover:bg-natural-bg/80 transition-colors cursor-pointer z-10 disabled:opacity-40 disabled:cursor-not-allowed"
                 aria-label="Close"
               >
                 <X className="w-5 h-5" />
@@ -10499,7 +10921,7 @@ export function BookingPage() {
                 </p>
 
                 {confirmAction.type === "verify_damage_payment" && (() => {
-                  const targetBooking = bookings.find((b) => b.id === confirmAction.bookingId);
+                  const targetBooking = findTargetBooking(confirmAction.bookingId);
                   const dmg = targetBooking ? getDamageAppraisalSummary(targetBooking) : null;
 
                   return (
@@ -10567,7 +10989,7 @@ export function BookingPage() {
                 })()}
 
                 {confirmAction.type === "verify_excess_payment" && (() => {
-                  const targetBooking = bookings.find((b) => b.id === confirmAction.bookingId);
+                  const targetBooking = findTargetBooking(confirmAction.bookingId);
                   const ex = targetBooking ? getExcessHeadcountBilling(targetBooking) : null;
 
                   return (
@@ -10635,7 +11057,7 @@ export function BookingPage() {
                 })()}
 
                 {confirmAction.type === "verify_final_payment" && (() => {
-                  const targetBooking = bookings.find((b) => b.id === confirmAction.bookingId);
+                  const targetBooking = findTargetBooking(confirmAction.bookingId);
                   const payment = targetBooking ? getBookingPayment(targetBooking) : null;
                   const totalBudget = targetBooking ? calculateBudget(targetBooking) : 0;
                   const is50Percent = payment?.payment_scheme === "Standard 50%";
@@ -10714,16 +11136,16 @@ export function BookingPage() {
                 })()}
 
                 {confirmAction.type === "complete" && (() => {
-                  const targetBooking = bookings.find((b) => b.id === confirmAction.bookingId);
+                  const targetBooking = findTargetBooking(confirmAction.bookingId);
                   const payment = targetBooking ? getBookingPayment(targetBooking) : null;
                   const totalBudget = targetBooking ? calculateBudget(targetBooking) : 0;
                   const is50Percent = payment?.payment_scheme === "Standard 50%";
                   const downpaymentDue = payment ? getInitialDownpaymentDue(targetBooking, payment, totalBudget) : 0;
                   const finalBalanceAmount = Math.max(0, totalBudget - downpaymentDue);
                   const guaranteedCount = (Number(targetBooking?.guest_count) || 50) + (Number(targetBooking?.additional_pax) || 0);
-                  const actualCount = Math.max(1, parseInt(completeActualHeadcount, 10) || guaranteedCount);
+                  const actualCount = Math.min(10000, Math.max(1, parseInt(completeActualHeadcount, 10) || guaranteedCount));
                   const excessPax = Math.max(0, actualCount - guaranteedCount);
-                  const excessFee = excessPax * 500;
+                  const excessFee = Math.min(MAX_EXCESS_FEE, Math.max(0, excessPax * 500));
                   const tomorrow = new Date();
                   tomorrow.setDate(tomorrow.getDate() + 1);
                   const dueDateStr = tomorrow.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -11153,63 +11575,38 @@ export function BookingPage() {
                   );
                 })()}
 
-                {["confirm", "cancel", "archive", "unarchive"].includes(
-                  confirmAction.type,
-                ) && (
+                {confirmAction.type === "cancel" && (
                   <div className="mb-4 space-y-3 text-left animate-in slide-in-from-bottom-2 duration-300">
-                    {confirmAction.type === "cancel" && (
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider pl-1">
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between pl-1">
+                        <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider">
                           Reason for Cancellation{" "}
                           <span className="text-red-500">*</span>
                         </label>
-                        <textarea
-                          value={cancelReason}
-                          onChange={(e) => {
-                            setCancelReason(e.target.value);
-                            setCancelReasonError(false);
-                          }}
-                          placeholder="Enter the reason for cancelling..."
-                          className={cn(
-                            "w-full px-4 py-2.5 bg-natural-bg/50 border rounded-xl text-sm transition-all focus:outline-none focus:bg-white focus:ring-2 resize-none min-h-[80px]",
-                            cancelReasonError
-                              ? "border-red-300 focus:ring-red-100"
-                              : "border-natural-border focus:ring-natural-accent/10",
-                          )}
-                        />
-                        {cancelReasonError && (
-                          <p className="text-xs font-bold text-red-500 uppercase tracking-wider pl-1">
-                            {typeof cancelReasonError === "string"
-                              ? cancelReasonError
-                              : "Reason is required."}
-                          </p>
-                        )}
+                        <span className="text-[11px] font-medium text-natural-text-light">
+                          {cancelReason.length}/500
+                        </span>
                       </div>
-                    )}
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-natural-text-light uppercase tracking-wider pl-1">
-                        Security Verification
-                      </label>
-                      <input
-                        type="password"
-                        value={confirmPassword}
+                      <textarea
+                        maxLength={500}
+                        value={cancelReason}
                         onChange={(e) => {
-                          setConfirmPassword(e.target.value);
-                          setPasswordError(false);
+                          setCancelReason(e.target.value.slice(0, 500));
+                          setCancelReasonError(false);
                         }}
-                        placeholder="Enter admin password to proceed"
+                        placeholder="Enter the reason for cancelling (min 5 characters)..."
                         className={cn(
-                          "w-full px-4 py-2 bg-natural-bg/50 border rounded-xl text-sm transition-all focus:outline-none focus:bg-white focus:ring-2",
-                          passwordError
+                          "w-full px-4 py-2.5 bg-natural-bg/50 border rounded-xl text-sm transition-all focus:outline-none focus:bg-white focus:ring-2 resize-none min-h-[80px]",
+                          cancelReasonError
                             ? "border-red-300 focus:ring-red-100"
                             : "border-natural-border focus:ring-natural-accent/10",
                         )}
                       />
-                      {passwordError && (
+                      {cancelReasonError && (
                         <p className="text-xs font-bold text-red-500 uppercase tracking-wider pl-1">
-                          {typeof passwordError === "string"
-                              ? passwordError
-                              : "Password is required to proceed."}
+                          {typeof cancelReasonError === "string"
+                            ? cancelReasonError
+                            : "Reason is required."}
                         </p>
                       )}
                     </div>
@@ -11218,9 +11615,11 @@ export function BookingPage() {
 
                 <div className={cn("flex gap-2", hasShortage ? "flex-row-reverse" : "flex-col")}>
                   <button
+                    type="button"
+                    disabled={isConfirmSubmitting}
                     onClick={handleConfirmAction}
                     className={cn(
-                      "w-full py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest text-white transition-all shadow-sm cursor-pointer",
+                      "w-full py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest text-white transition-all shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed",
                       confirmAction.type === "confirm"
                         ? "bg-green-600 hover:bg-green-700"
                         : confirmAction.type === "complete"
@@ -11236,24 +11635,29 @@ export function BookingPage() {
                                   : "bg-blue-600 hover:bg-blue-700",
                     )}
                   >
-                    Yes,{" "}
-                    {confirmAction.type === "create"
-                      ? "Create"
-                      : confirmAction.type === "complete"
-                        ? "Complete Event"
-                        : confirmAction.type === "verify_final_payment"
-                          ? "Confirm Final Payment"
-                          : confirmAction.type === "verify_excess_payment"
-                            ? "Confirm Excess Payment"
-                            : confirmAction.type === "verify_damage_payment"
-                              ? "Confirm Damage Payment"
-                              : confirmAction.type === "unarchive"
-                            ? "Restore Booking"
-                            : confirmAction.type}
+                    {isConfirmSubmitting
+                      ? "Processing..."
+                      : `Yes, ${
+                          confirmAction.type === "create"
+                            ? "Create"
+                            : confirmAction.type === "complete"
+                              ? "Complete Event"
+                              : confirmAction.type === "verify_final_payment"
+                                ? "Confirm Final Payment"
+                                : confirmAction.type === "verify_excess_payment"
+                                  ? "Confirm Excess Payment"
+                                  : confirmAction.type === "verify_damage_payment"
+                                    ? "Confirm Damage Payment"
+                                    : confirmAction.type === "unarchive"
+                                      ? "Restore Booking"
+                                      : confirmAction.type
+                        }`}
                   </button>
                   <button
+                    type="button"
+                    disabled={isConfirmSubmitting}
                     onClick={() => setConfirmAction(null)}
-                    className="w-full py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest text-natural-text-light border border-natural-border hover:bg-natural-bg transition-all cursor-pointer"
+                    className="w-full py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest text-natural-text-light border border-natural-border hover:bg-natural-bg transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Cancel
                   </button>
@@ -11437,10 +11841,10 @@ export function BookingPage() {
                         value={subCustomReplacement}
                         onChange={(e) => {
                           const raw = e.target.value;
-                          const hasInvalidChars = /[^a-zA-ZÀ-ÿ\sñÑ\-']/.test(raw);
+                          const hasInvalidChars = /[^a-zA-Z0-9À-ÿ\sñÑ&/().,\-']/.test(raw);
                           if (hasInvalidChars) {
                             setSubCustomDishError(
-                              "Dish name can only contain letters, spaces, hyphens, and apostrophes."
+                              "Dish name can only contain letters, numbers, spaces, and standard punctuation (& / ( ) . , - ').",
                             );
                           } else if (raw.length > MAX_CUSTOM_DISH_LENGTH) {
                             setSubCustomDishError(
@@ -11450,7 +11854,7 @@ export function BookingPage() {
                             setSubCustomDishError("");
                           }
                           const filtered = raw
-                            .replace(/[^a-zA-ZÀ-ÿ\sñÑ\-']/g, "")
+                            .replace(/[^a-zA-Z0-9À-ÿ\sñÑ&/().,\-']/g, "")
                             .slice(0, MAX_CUSTOM_DISH_LENGTH);
                           setSubCustomReplacement(filtered);
                           setSubReplacementDish(filtered);
@@ -11458,7 +11862,7 @@ export function BookingPage() {
                             `Due to fresh ingredient availability in the local market, "${subOriginalDish}" has been substituted with "${filtered.trim()}" of equivalent quality.`
                           );
                         }}
-                        placeholder="e.g. Beef Caldereta Especial"
+                        placeholder="e.g. 3-Cheese Baked Penne"
                         className={cn(
                           "w-full bg-natural-bg border px-3 py-2 rounded-lg text-xs font-medium text-natural-text-main focus:outline-none transition-colors",
                           subCustomDishError
@@ -11472,7 +11876,7 @@ export function BookingPage() {
                         </p>
                       ) : (
                         <p className="text-[10px] text-natural-text-light">
-                          Letters, spaces, hyphens, and apostrophes only (max {MAX_CUSTOM_DISH_LENGTH} chars).
+                          Letters, numbers, spaces, and standard punctuation (&amp; / ( ) . , - &apos;) up to {MAX_CUSTOM_DISH_LENGTH} chars.
                         </p>
                       )}
                     </div>

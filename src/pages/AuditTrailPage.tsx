@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   Search,
   Filter,
@@ -24,22 +24,159 @@ export function AuditTrailPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
-  const [page, setPage] = useState(0);
+  const [totalCount, setTotalCount] = useState<number>(0);
   const PAGE_SIZE = 40;
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedModule, setSelectedModule] = useState<string>("all");
   const [selectedType, setSelectedType] = useState<string>("all");
 
+  const maxLoadedIdRef = useRef<number>(0);
+  const oldestLoadedIdRef = useRef<number | null>(null);
+
   useEffect(() => {
-    fetchLogs(0, false);
+    const t = setTimeout(() => {
+      setDebouncedSearch(searchQuery.trim());
+    }, 250);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  const applyServerFilters = useCallback(
+    (query: any) => {
+      let q = query;
+      if (selectedType !== "all") {
+        q = q.ilike("type", selectedType);
+      }
+      if (selectedModule === "equipment") {
+        q = q.or(
+          "action.ilike.%equipment%,details.ilike.%equipment%,target.ilike.%equipment%,action.ilike.%restock%,details.ilike.%restock:%,details.ilike.%allocated supplies%,details.ilike.%reserved equipment%,action.ilike.%inventory%,details.ilike.%inventory%"
+        );
+      } else if (selectedModule === "booking") {
+        q = q.or("action.ilike.%booking%,details.ilike.%booking%");
+      } else if (selectedModule === "package") {
+        q = q.or(
+          "action.ilike.%package%,action.ilike.%inclusion%,details.ilike.%package%,details.ilike.%inclusion%"
+        );
+      } else if (selectedModule === "menu") {
+        q = q.or(
+          "action.ilike.%menu%,action.ilike.%dish%,details.ilike.%menu%,details.ilike.%dish%"
+        );
+      } else if (selectedModule === "system") {
+        q = q.or(
+          "action.ilike.%user%,action.ilike.%profile%,action.ilike.%cms%,action.ilike.%setting%"
+        );
+      }
+      const cleanTerm = debouncedSearch.replace(/[,()]/g, " ").trim();
+      if (cleanTerm) {
+        const numericClause = /^\d+$/.test(cleanTerm) ? `,id.eq.${cleanTerm}` : "";
+        q = q.or(
+          `user_name.ilike.%${cleanTerm}%,action.ilike.%${cleanTerm}%,target.ilike.%${cleanTerm}%,type.ilike.%${cleanTerm}%,details.ilike.%${cleanTerm}%${numericClause}`
+        );
+      }
+      return q;
+    },
+    [selectedType, selectedModule, debouncedSearch]
+  );
+
+  const fetchLogs = useCallback(
+    async (cursorId: number | null = null, append = false) => {
+      if (!append) setIsLoading(true);
+      else setIsLoadingMore(true);
+
+      try {
+        let query = supabase
+          .from("audit_logs")
+          .select("id, action, target, type, details, user_name, created_at", {
+            count: "exact",
+          })
+          .order("id", { ascending: false })
+          .limit(PAGE_SIZE);
+
+        query = applyServerFilters(query);
+
+        if (append && cursorId !== null) {
+          query = query.lt("id", cursorId);
+        }
+
+        const { data, count, error } = await query;
+
+        if (error) {
+          console.error("Error fetching audit logs:", error);
+          return;
+        }
+
+        if (typeof count === "number") {
+          setTotalCount(count);
+        }
+
+        const rows = data || [];
+        setHasMore(rows.length === PAGE_SIZE);
+
+        setLogs((prev) => {
+          const next = append
+            ? (() => {
+                const seen = new Set(prev.map((l) => l.id));
+                return [...prev, ...rows.filter((r) => !seen.has(r.id))];
+              })()
+            : rows;
+          if (next.length > 0) {
+            maxLoadedIdRef.current = Math.max(...next.map((l) => Number(l.id) || 0));
+            oldestLoadedIdRef.current = Number(next[next.length - 1].id);
+          } else if (!append) {
+            maxLoadedIdRef.current = 0;
+            oldestLoadedIdRef.current = null;
+          }
+          return next;
+        });
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setIsLoading(false);
+        setIsLoadingMore(false);
+      }
+    },
+    [applyServerFilters]
+  );
+
+  const fetchNewInsertedLogs = useCallback(async () => {
+    if (maxLoadedIdRef.current <= 0) {
+      fetchLogs(null, false);
+      return;
+    }
+    try {
+      let query = supabase
+        .from("audit_logs")
+        .select("id, action, target, type, details, user_name, created_at")
+        .gt("id", maxLoadedIdRef.current)
+        .order("id", { ascending: false })
+        .limit(20);
+
+      query = applyServerFilters(query);
+      const { data, error } = await query;
+      if (error || !data || data.length === 0) return;
+
+      setLogs((prev) => {
+        const seen = new Set(prev.map((l) => l.id));
+        const fresh = data.filter((r) => !seen.has(r.id));
+        if (fresh.length === 0) return prev;
+        const merged = [...fresh, ...prev];
+        maxLoadedIdRef.current = Math.max(...merged.map((l) => Number(l.id) || 0));
+        setTotalCount((c) => c + fresh.length);
+        return merged;
+      });
+    } catch {}
+  }, [applyServerFilters, fetchLogs]);
+
+  useEffect(() => {
+    fetchLogs(null, false);
 
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const unsubscribe = subscribeAuditBroadcast((payload) => {
       if (payload.action === "insert") {
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
-          fetchLogs(0, false);
+          fetchNewInsertedLogs();
         }, 300);
       }
     });
@@ -48,44 +185,11 @@ export function AuditTrailPage() {
       if (debounceTimer) clearTimeout(debounceTimer);
       unsubscribe();
     };
-  }, []);
-
-  const fetchLogs = async (pageNumber = 0, append = false) => {
-    if (pageNumber === 0) setIsLoading(true);
-    else setIsLoadingMore(true);
-
-    try {
-      const from = pageNumber * PAGE_SIZE;
-      const to = from + PAGE_SIZE - 1;
-
-      const { data, error } = await supabase
-        .from("audit_logs")
-        .select("id, action, target, type, details, user_name, created_at")
-        .order("created_at", { ascending: false })
-        .range(from, to);
-
-      if (error) {
-        console.error("Error fetching audit logs:", error);
-      } else if (data) {
-        if (data.length < PAGE_SIZE) {
-          setHasMore(false);
-        } else {
-          setHasMore(true);
-        }
-        setLogs((prev) => (append ? [...prev, ...data] : data));
-        setPage(pageNumber);
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setIsLoading(false);
-      setIsLoadingMore(false);
-    }
-  };
+  }, [fetchLogs, fetchNewInsertedLogs]);
 
   const handleLoadMore = () => {
-    if (!isLoadingMore && hasMore) {
-      fetchLogs(page + 1, true);
+    if (!isLoadingMore && hasMore && oldestLoadedIdRef.current !== null) {
+      fetchLogs(oldestLoadedIdRef.current, true);
     }
   };
 
@@ -283,17 +387,18 @@ export function AuditTrailPage() {
                 <option value="create">Create</option>
                 <option value="update">Update</option>
                 <option value="delete">Delete</option>
+                <option value="system">System</option>
               </select>
             </div>
 
             <span className="text-xs font-semibold text-natural-text-light whitespace-nowrap">
-              Showing {filteredLogs.length} record{filteredLogs.length !== 1 ? "s" : ""}
+              Showing {filteredLogs.length}{totalCount > filteredLogs.length ? ` of ${totalCount}` : ""} record{filteredLogs.length !== 1 ? "s" : ""}
             </span>
           </div>
 
           <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 w-full xl:w-auto xl:justify-end">
             <button
-              onClick={() => fetchLogs(0, false)}
+              onClick={() => fetchLogs(null, false)}
               disabled={isLoading}
               className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-3.5 py-2 border border-natural-border rounded-lg text-xs font-bold text-natural-text-main hover:bg-natural-bg transition-all uppercase tracking-widest cursor-pointer"
               title="Refresh logs"
@@ -335,7 +440,7 @@ export function AuditTrailPage() {
 
               return (
                 <div
-                  key={log.id || Math.random()}
+                  key={log.id}
                   className="p-4 sm:p-6 hover:bg-natural-bg/10 transition-colors flex flex-col md:flex-row md:items-start gap-4"
                 >
                   <div className="flex items-center gap-4 shrink-0 w-full md:w-64">

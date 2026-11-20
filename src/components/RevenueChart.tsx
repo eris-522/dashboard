@@ -32,22 +32,19 @@ const getEventDate = (b: any): Date => {
  * Allows filtering by year.
  */
 export function RevenueChart() {
-  const { bookings } = useBooking();
+  const { bookings, dashboardMetrics } = useBooking();
   const { resolvedTheme } = useTheme();
   const currentYear = new Date().getFullYear();
   const [selectedYear, setSelectedYear] = useState(currentYear.toString());
 
   const availableYears = useMemo(() => {
-    const years = bookings.map((b) => getEventDate(b).getFullYear());
+    const years = dashboardMetrics?.available_years?.length
+      ? dashboardMetrics.available_years
+      : bookings.map((b) => getEventDate(b).getFullYear());
     return Array.from(new Set([currentYear, ...years])).sort((a, b) => b - a);
-  }, [bookings, currentYear]);
+  }, [dashboardMetrics, bookings, currentYear]);
 
   const data = useMemo(() => {
-    const confirmedBookings = bookings.filter((b) => b.status === "Confirmed" || b.status === "Completed");
-    const yearBookings = confirmedBookings.filter((b) => {
-      return getEventDate(b).getFullYear().toString() === selectedYear;
-    });
-
     const months = [
       "Jan",
       "Feb",
@@ -62,6 +59,33 @@ export function RevenueChart() {
       "Nov",
       "Dec",
     ];
+
+    if (dashboardMetrics?.monthly_series) {
+      const byMonth = new Map<number, { revenue: number; events: number }>();
+      dashboardMetrics.monthly_series.forEach((row) => {
+        if (String(row.year) === selectedYear) {
+          const cur = byMonth.get(row.month_idx) || { revenue: 0, events: 0 };
+          byMonth.set(row.month_idx, {
+            revenue: cur.revenue + (Number(row.revenue) || 0),
+            events: cur.events + (Number(row.events) || 0),
+          });
+        }
+      });
+      return months.map((month, index) => {
+        const entry = byMonth.get(index);
+        return {
+          name: month,
+          value: entry?.revenue || 0,
+          count: entry?.events || 0,
+        };
+      });
+    }
+
+    const confirmedBookings = bookings.filter((b) => b.status === "Confirmed" || b.status === "Completed");
+    const yearBookings = confirmedBookings.filter((b) => {
+      return getEventDate(b).getFullYear().toString() === selectedYear;
+    });
+
     return months.map((month, index) => {
       const monthBookings = yearBookings.filter((b) => {
         return getEventDate(b).getMonth() === index;
@@ -72,7 +96,7 @@ export function RevenueChart() {
         count: monthBookings.length,
       };
     });
-  }, [bookings, selectedYear]);
+  }, [dashboardMetrics, bookings, selectedYear]);
 
   const hasData = data.some((d) => d.value > 0);
   const accentColorHex = resolvedTheme === "dark" ? "#c4a96e" : "#a68a56";

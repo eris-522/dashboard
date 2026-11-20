@@ -231,10 +231,12 @@ export function MenuPage() {
       return;
     }
 
-    // Prevent names with numbers or special characters (allows letters, spaces, hyphens, apostrophes, and ñ)
-    const nameRegex = /^[a-zA-ZÀ-ÿ\sñÑ\-']+$/;
-    if (!nameRegex.test(trimmed)) {
-      setFormError("Dish name can only contain letters, spaces, hyphens, and apostrophes.");
+    // Permit standard culinary catalog characters while requiring at least one letter or digit
+    const nameRegex = /^[a-zA-Z0-9À-ÿ\sñÑ&/().,\-']+$/;
+    if (!nameRegex.test(trimmed) || !/[a-zA-Z0-9À-ÿñÑ]/.test(trimmed)) {
+      setFormError(
+        "Dish name can only contain letters, numbers, spaces, and standard punctuation (& / ( ) . , - ').",
+      );
       return;
     }
 
@@ -809,20 +811,22 @@ export function MenuPage() {
                   value={formData.name}
                   onChange={(e) => {
                     const raw = e.target.value;
-                    const hasInvalid = /[^a-zA-ZÀ-ÿ\sñÑ\-']/.test(raw);
+                    const hasInvalid = /[^a-zA-Z0-9À-ÿ\sñÑ&/().,\-']/.test(raw);
                     if (hasInvalid) {
-                      setFormError("Dish name can only contain letters, spaces, hyphens, and apostrophes.");
+                      setFormError(
+                        "Dish name can only contain letters, numbers, spaces, and standard punctuation (& / ( ) . , - ').",
+                      );
                     } else if (raw.length > MAX_DISH_NAME_LENGTH) {
                       setFormError(`Dish name cannot exceed ${MAX_DISH_NAME_LENGTH} characters.`);
                     } else {
                       setFormError(null);
                     }
                     const sanitized = raw
-                      .replace(/[^a-zA-ZÀ-ÿ\sñÑ\-']/g, "")
+                      .replace(/[^a-zA-Z0-9À-ÿ\sñÑ&/().,\-']/g, "")
                       .slice(0, MAX_DISH_NAME_LENGTH);
                     setFormData({ ...formData, name: sanitized });
                   }}
-                  placeholder="e.g. Adobo Special"
+                  placeholder="e.g. 3-Cheese Baked Penne"
                   className={cn(
                     "w-full px-4 py-2.5 bg-natural-bg border rounded-xl text-sm focus:outline-none focus:ring-2 transition-all font-medium",
                     formError && formError.includes("Dish name")
@@ -831,7 +835,7 @@ export function MenuPage() {
                   )}
                 />
                 <p className="text-[10px] text-natural-text-light">
-                  Letters, spaces, hyphens, and apostrophes only (max {MAX_DISH_NAME_LENGTH} characters).
+                  Letters, numbers, spaces, and standard punctuation (&amp; / ( ) . , - &apos;) up to {MAX_DISH_NAME_LENGTH} characters.
                 </p>
               </div>
 

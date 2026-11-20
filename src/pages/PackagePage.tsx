@@ -283,10 +283,11 @@ export function PackagePage() {
 
     if (
       trimmedName.length < 2 ||
-      !/^[a-zA-ZÀ-ÿ\sñÑ&\-']+$/.test(trimmedName)
+      !/^[a-zA-Z0-9À-ÿ\sñÑ&/().,\-']+$/.test(trimmedName) ||
+      !/[a-zA-Z0-9À-ÿñÑ]/.test(trimmedName)
     ) {
       setFormError(
-        "Inclusion item name must be 2–60 characters and contain only letters, spaces, ampersands, hyphens, or apostrophes.",
+        "Inclusion item name must be 2–60 characters and contain only letters, numbers, spaces, and standard punctuation (& / ( ) . , - ').",
       );
       return;
     }
@@ -316,6 +317,11 @@ export function PackagePage() {
 
     if (error) {
       console.error("Error adding inclusion item:", error);
+      // Roll back optimistic insertion
+      setDynamicInclusionCategories((prev) => ({
+        ...prev,
+        [category]: (prev[category] || []).filter((item) => item !== trimmedName),
+      }));
       setFormError(`Failed to save item: ${error.message}`);
       return;
     }
@@ -348,10 +354,11 @@ export function PackagePage() {
 
     if (
       trimmedCategoryName.length < 2 ||
-      !/^[a-zA-ZÀ-ÿ\sñÑ&\-']+$/.test(trimmedCategoryName)
+      !/^[a-zA-Z0-9À-ÿ\sñÑ&/().,\-']+$/.test(trimmedCategoryName) ||
+      !/[a-zA-Z0-9À-ÿñÑ]/.test(trimmedCategoryName)
     ) {
       setFormError(
-        "Category name must be 2–40 characters and contain only letters, spaces, ampersands, hyphens, or apostrophes.",
+        "Category name must be 2–40 characters and contain only letters, numbers, spaces, and standard punctuation (& / ( ) . , - ').",
       );
       return;
     }
@@ -365,13 +372,15 @@ export function PackagePage() {
       return;
     }
 
+    const wasSectionAlreadyOpen = openInclusionSections.includes(trimmedCategoryName);
+
     // Optimistic UI Update
     setDynamicInclusionCategories((prev) => ({
       ...prev,
       [trimmedCategoryName]: [],
     }));
 
-    if (!openInclusionSections.includes(trimmedCategoryName)) {
+    if (!wasSectionAlreadyOpen) {
       toggleInclusionSection(trimmedCategoryName);
     }
     setNewCategoryName("");
@@ -387,16 +396,28 @@ export function PackagePage() {
 
     if (error) {
       console.error("Error adding inclusion category:", error);
-      setFormError(`Failed to save category to database: ${error.message}`);
-    } else {
-      await logAuditAction({
-        action: "Added Inclusion Category",
-        target: trimmedCategoryName,
-        type: "Create",
-        details: `Created new inclusion category`,
+      // Roll back optimistic category state
+      setDynamicInclusionCategories((prev) => {
+        const updated = { ...prev };
+        delete updated[trimmedCategoryName];
+        return updated;
       });
-      broadcastCatalogChange("inclusions");
+      if (!wasSectionAlreadyOpen) {
+        setOpenInclusionSections((prev) =>
+          prev.filter((c) => c !== trimmedCategoryName),
+        );
+      }
+      setFormError(`Failed to save category to database: ${error.message}`);
+      return;
     }
+
+    await logAuditAction({
+      action: "Added Inclusion Category",
+      target: trimmedCategoryName,
+      type: "Create",
+      details: `Created new inclusion category`,
+    });
+    broadcastCatalogChange("inclusions");
   };
 
   const confirmDeleteCategory = (e: React.MouseEvent, category: string) => {
@@ -434,10 +455,10 @@ export function PackagePage() {
       );
       return;
     }
-    const nameRegex = /^[a-zA-ZÀ-ÿ\sñÑ\-']+$/;
-    if (!nameRegex.test(trimmedName)) {
+    const nameRegex = /^[a-zA-Z0-9À-ÿ\sñÑ&/().,\-']+$/;
+    if (!nameRegex.test(trimmedName) || !/[a-zA-Z0-9À-ÿñÑ]/.test(trimmedName)) {
       setFormError(
-        "Package name can only contain letters, spaces, hyphens, and apostrophes.",
+        "Package name can only contain letters, numbers, spaces, and standard punctuation (& / ( ) . , - ').",
       );
       return;
     }
@@ -540,7 +561,17 @@ export function PackagePage() {
         const category = confirmAction.itemName;
         const itemsInCategory = dynamicInclusionCategories[category] || [];
 
-        await supabase.from("inclusions").delete().eq("category", category);
+        const { error: delCatErr } = await supabase
+          .from("inclusions")
+          .delete()
+          .eq("category", category);
+
+        if (delCatErr) {
+          console.error("Error deleting inclusion category:", delCatErr);
+          setFormError(`Failed to delete category: ${delCatErr.message}`);
+          setConfirmAction(null);
+          return;
+        }
 
         setDynamicInclusionCategories((prev) => {
           const updated = { ...prev };
@@ -555,21 +586,32 @@ export function PackagePage() {
           setEditingPackage({ ...editingPackage, inclusions: newInclusions });
         }
 
-        // Remove these deleted items from all existing packages in the DB to reflect on client side
+        // Remove these deleted items from all existing packages in the DB in parallel
         const affectedPackages = packages.filter(
           (pkg) =>
             pkg.inclusions &&
             pkg.inclusions.some((inc) => itemsInCategory.includes(inc)),
         );
-        for (const pkg of affectedPackages) {
-          const updatedInclusions = pkg.inclusions.filter(
-            (inc) => !itemsInCategory.includes(inc),
+        if (affectedPackages.length > 0) {
+          const pkgResults = await Promise.all(
+            affectedPackages.map((pkg) => {
+              const updatedInclusions = pkg.inclusions.filter(
+                (inc) => !itemsInCategory.includes(inc),
+              );
+              return supabase
+                .from("packages")
+                .update({ inclusions: updatedInclusions })
+                .eq("id", pkg.id);
+            }),
           );
-          await supabase
-            .from("packages")
-            .update({ inclusions: updatedInclusions })
-            .eq("id", pkg.id);
-          packagesWereUpdated = true;
+          const failedPkg = pkgResults.find((r) => r.error);
+          if (failedPkg?.error) {
+            console.error("Error updating affected packages after category delete:", failedPkg.error);
+            setFormError(
+              `Category removed, but some packages failed to sync: ${failedPkg.error.message}`,
+            );
+          }
+          packagesWereUpdated = pkgResults.some((r) => !r.error);
         }
 
         await logAuditAction({
@@ -585,34 +627,52 @@ export function PackagePage() {
         const category = confirmAction.parentCategory;
         const item = confirmAction.itemName;
 
-        await supabase
+        const { error: delItemErr } = await supabase
           .from("inclusions")
           .delete()
           .eq("category", category)
           .eq("items", item);
 
+        if (delItemErr) {
+          console.error("Error deleting inclusion item:", delItemErr);
+          setFormError(`Failed to delete item: ${delItemErr.message}`);
+          setConfirmAction(null);
+          return;
+        }
+
         setDynamicInclusionCategories((prev) => ({
           ...prev,
-          [category]: prev[category].filter((i) => i !== item),
+          [category]: (prev[category] || []).filter((i) => i !== item),
         }));
 
         if (editingPackage && editingPackage.inclusions?.includes(item)) {
           handleInclusionChange(item, false);
         }
 
-        // Remove the deleted item from all existing packages in the DB to reflect on client side
+        // Remove the deleted item from all existing packages in the DB in parallel
         const affectedPackages = packages.filter(
           (pkg) => pkg.inclusions && pkg.inclusions.includes(item),
         );
-        for (const pkg of affectedPackages) {
-          const updatedInclusions = pkg.inclusions.filter(
-            (inc) => inc !== item,
+        if (affectedPackages.length > 0) {
+          const pkgResults = await Promise.all(
+            affectedPackages.map((pkg) => {
+              const updatedInclusions = pkg.inclusions.filter(
+                (inc) => inc !== item,
+              );
+              return supabase
+                .from("packages")
+                .update({ inclusions: updatedInclusions })
+                .eq("id", pkg.id);
+            }),
           );
-          await supabase
-            .from("packages")
-            .update({ inclusions: updatedInclusions })
-            .eq("id", pkg.id);
-          packagesWereUpdated = true;
+          const failedPkg = pkgResults.find((r) => r.error);
+          if (failedPkg?.error) {
+            console.error("Error updating affected packages after item delete:", failedPkg.error);
+            setFormError(
+              `Item removed, but some packages failed to sync: ${failedPkg.error.message}`,
+            );
+          }
+          packagesWereUpdated = pkgResults.some((r) => !r.error);
         }
 
         await logAuditAction({
@@ -1071,9 +1131,9 @@ export function PackagePage() {
                           value={editingPackage.name || ""}
                           onChange={(e) => {
                             const raw = e.target.value;
-                            if (/[^a-zA-ZÀ-ÿ\sñÑ\-']/.test(raw)) {
+                            if (/[^a-zA-Z0-9À-ÿ\sñÑ&/().,\-']/.test(raw)) {
                               setFormError(
-                                "Package name can only contain letters, spaces, hyphens, and apostrophes.",
+                                "Package name can only contain letters, numbers, spaces, and standard punctuation (& / ( ) . , - ').",
                               );
                             } else if (raw.length > MAX_PACKAGE_NAME_LENGTH) {
                               setFormError(
@@ -1083,14 +1143,14 @@ export function PackagePage() {
                               setFormError(null);
                             }
                             const sanitized = raw
-                              .replace(/[^a-zA-ZÀ-ÿ\sñÑ\-']/g, "")
+                              .replace(/[^a-zA-Z0-9À-ÿ\sñÑ&/().,\-']/g, "")
                               .slice(0, MAX_PACKAGE_NAME_LENGTH);
                             setEditingPackage({
                               ...editingPackage,
                               name: sanitized,
                             });
                           }}
-                          placeholder="e.g. Grand Wedding Package"
+                          placeholder="e.g. Grand Wedding Package (Set A)"
                           className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/20 sm:col-span-2"
                         />
                       </div>
@@ -1430,16 +1490,16 @@ export function PackagePage() {
                                         value={newItemName}
                                         onChange={(e) => {
                                           const raw = e.target.value;
-                                          if (/[^a-zA-ZÀ-ÿ\sñÑ&\-']/.test(raw)) {
+                                          if (/[^a-zA-Z0-9À-ÿ\sñÑ&/().,\-']/.test(raw)) {
                                             setFormError(
-                                              "Inclusion item can only contain letters, spaces, ampersands, hyphens, and apostrophes.",
+                                              "Inclusion item can only contain letters, numbers, spaces, and standard punctuation (& / ( ) . , - ').",
                                             );
                                           } else {
                                             setFormError(null);
                                           }
                                           setNewItemName(
                                             raw
-                                              .replace(/[^a-zA-ZÀ-ÿ\sñÑ&\-']/g, "")
+                                              .replace(/[^a-zA-Z0-9À-ÿ\sñÑ&/().,\-']/g, "")
                                               .slice(0, MAX_INCLUSION_ITEM_LENGTH),
                                           );
                                         }}
@@ -1447,7 +1507,7 @@ export function PackagePage() {
                                           e.key === "Enter" &&
                                           handleAddNewItemToCategory(category)
                                         }
-                                        placeholder="New item (letters only, max 60)"
+                                        placeholder="New inclusion item (max 60)"
                                         className="w-full px-2 py-1 bg-natural-bg border border-natural-border rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-natural-accent/20"
                                         autoFocus
                                       />
@@ -1500,23 +1560,23 @@ export function PackagePage() {
                               value={newCategoryName}
                               onChange={(e) => {
                                 const raw = e.target.value;
-                                if (/[^a-zA-ZÀ-ÿ\sñÑ&\-']/.test(raw)) {
+                                if (/[^a-zA-Z0-9À-ÿ\sñÑ&/().,\-']/.test(raw)) {
                                   setFormError(
-                                    "Category name can only contain letters, spaces, ampersands, hyphens, and apostrophes.",
+                                    "Category name can only contain letters, numbers, spaces, and standard punctuation (& / ( ) . , - ').",
                                   );
                                 } else {
                                   setFormError(null);
                                 }
                                 setNewCategoryName(
                                   raw
-                                    .replace(/[^a-zA-ZÀ-ÿ\sñÑ&\-']/g, "")
+                                    .replace(/[^a-zA-Z0-9À-ÿ\sñÑ&/().,\-']/g, "")
                                     .slice(0, MAX_INCLUSION_CATEGORY_LENGTH),
                                 );
                               }}
                               onKeyDown={(e) =>
                                 e.key === "Enter" && handleAddNewCategory()
                               }
-                              placeholder="New category (letters only, max 40)"
+                              placeholder="New category (max 40)"
                               className="w-full px-3 py-2 bg-natural-bg border border-natural-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-natural-accent/20"
                               autoFocus
                             />

@@ -30,6 +30,24 @@ type SortField = "name" | "created_at" | "status";
 type SortOrder = "asc" | "desc" | null;
 
 const MAX_NAME_LENGTH = 70;
+const PAGE_SIZE = 25;
+const CUSTOMER_NAME_REGEX = /^[a-zA-ZÀ-ÿ\sñÑ.'-]+$/;
+
+const validateCustomerName = (raw: string): string => {
+  const trimmed = raw.trim();
+  if (!trimmed) return "Full name is required.";
+  if (trimmed.length < 2) return "Full name must be at least 2 characters long.";
+  if (trimmed.length > MAX_NAME_LENGTH) {
+    return `Full name must not exceed ${MAX_NAME_LENGTH} characters.`;
+  }
+  if (!CUSTOMER_NAME_REGEX.test(trimmed)) {
+    return "Full name may only contain letters, spaces, ñ, periods, hyphens, and apostrophes.";
+  }
+  if (!/[a-zA-ZÀ-ÿñÑ]/.test(trimmed)) {
+    return "Full name must contain at least one letter.";
+  }
+  return "";
+};
 
 interface SortConfig {
   field: SortField | null;
@@ -50,7 +68,11 @@ export function UserPage() {
   const { currentUser } = useUser();
   const [users, setUsers] = useState<User[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All Status");
+  const [page, setPage] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
   const [sortConfig, setSortConfig] = useState<SortConfig>({
     field: null,
     order: null,
@@ -59,6 +81,7 @@ export function UserPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [formData, setFormData] = useState<Partial<User>>({});
+  const [nameError, setNameError] = useState("");
   const [visibleEmails, setVisibleEmails] = useState<Record<string, boolean>>(
     {},
   );
@@ -69,52 +92,96 @@ export function UserPage() {
   } | null>(null);
 
   useEffect(() => {
-    fetchUsers();
-  }, []);
+    const t = setTimeout(() => {
+      setDebouncedSearch(searchQuery.trim());
+      setPage(0);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
 
   const fetchUsers = async () => {
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("id, name, email, role, status, phone_number, created_at");
+    setIsLoading(true);
+    try {
+      const from = page * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
 
-    if (error) {
-      console.error("Error fetching users:", error.message);
-      return;
+      let query = supabase
+        .from("profiles")
+        .select("id, name, email, role, status, phone_number, created_at", {
+          count: "exact",
+        })
+        .neq("id", "7dddf9d1-4b55-49df-8c77-61192afb2fd9")
+        .neq("email", "roxanpolicarpio.events@gmail.com");
+
+      if (currentUser?.id) {
+        query = query.neq("id", String(currentUser.id));
+      }
+
+      if (statusFilter === "All Status") {
+        query = query.neq("status", "Archived");
+      } else {
+        query = query.eq("status", statusFilter);
+      }
+
+      const cleanSearch = debouncedSearch.replace(/[,()]/g, " ").trim();
+      if (cleanSearch) {
+        query = query.or(
+          `name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%`
+        );
+      }
+
+      if (sortConfig.field && sortConfig.order) {
+        query = query.order(sortConfig.field, {
+          ascending: sortConfig.order === "asc",
+        });
+      } else {
+        query = query.order("created_at", { ascending: false });
+      }
+
+      const { data, count, error } = await query.range(from, to);
+
+      if (error) {
+        console.error("Error fetching users:", error.message);
+        return;
+      }
+
+      if (typeof count === "number") {
+        setTotalCount(count);
+      }
+
+      const normalized = ((data || []) as any[])
+        .map((row) => {
+          const idRaw = row?.id ?? row?.user_id ?? row?.userId ?? null;
+          const id =
+            typeof idRaw === "string" ? idRaw : idRaw ? String(idRaw) : "";
+          if (!id) return null;
+
+          const nameStr = typeof row?.name === "string" ? row.name.trim() : "";
+          const fullNameStrs = [
+            row?.full_name,
+            row?.fullName,
+            row?.fullname,
+          ].filter((v) => typeof v === "string") as string[];
+          const fullNameStr = fullNameStrs.length ? fullNameStrs[0].trim() : "";
+          const displayName = nameStr || fullNameStr;
+
+          return {
+            ...(row as Record<string, unknown>),
+            id,
+            name: displayName,
+          };
+        })
+        .filter(Boolean) as User[];
+
+      setUsers(normalized);
+    } finally {
+      setIsLoading(false);
     }
-
-    if (!data) return;
-
-    const normalized = (data as any[])
-      .map((row) => {
-        const idRaw = row?.id ?? row?.user_id ?? row?.userId ?? null;
-
-        const id =
-          typeof idRaw === "string" ? idRaw : idRaw ? String(idRaw) : "";
-
-        if (!id) return null;
-
-        const nameStr = typeof row?.name === "string" ? row.name.trim() : "";
-
-        const fullNameStrs = [
-          row?.full_name,
-          row?.fullName,
-          row?.fullname,
-        ].filter((v) => typeof v === "string") as string[];
-
-        const fullNameStr = fullNameStrs.length ? fullNameStrs[0].trim() : "";
-
-        const displayName = nameStr || fullNameStr;
-
-        return {
-          ...(row as Record<string, unknown>),
-          id,
-          name: displayName,
-        };
-      })
-      .filter(Boolean) as User[];
-
-    setUsers(normalized);
   };
+
+  useEffect(() => {
+    fetchUsers();
+  }, [page, statusFilter, debouncedSearch, sortConfig.field, sortConfig.order, currentUser?.id]);
 
   const toggleEmailVisibility = (id: string) => {
     setVisibleEmails((prev) => ({
@@ -138,56 +205,11 @@ export function UserPage() {
     } else if (sortConfig.field === field && sortConfig.order === "desc") {
       order = null;
     }
+    setPage(0);
     setSortConfig({ field: order ? field : null, order });
   };
 
-  const filteredUsers = useMemo(() => {
-    return users.filter((user) => {
-      // Hide the currently logged-in user, the fallback admin ("0"), and root admin
-      if (
-        String(user.id) === String(currentUser?.id) ||
-        String(user.id) === "0" ||
-        String(user.id) === "7dddf9d1-4b55-49df-8c77-61192afb2fd9" ||
-        user.email === "roxanpolicarpio.events@gmail.com"
-      )
-        return false;
-
-      const query = searchQuery.toLowerCase();
-      const matchesSearch =
-        (user.name || "").toLowerCase().includes(query) ||
-        (user.email || "").toLowerCase().includes(query);
-
-      const matchesStatus =
-        statusFilter === "All Status"
-          ? user.status !== "Archived"
-          : user.status === statusFilter;
-
-      return matchesSearch && matchesStatus;
-    });
-  }, [users, searchQuery, statusFilter, currentUser?.id]);
-
-  const sortedUsers = useMemo(() => {
-    if (!sortConfig.field || !sortConfig.order) return filteredUsers;
-
-    return [...filteredUsers].sort((a, b) => {
-      const { field, order } = sortConfig;
-      let valA = a[field as keyof User];
-      let valB = b[field as keyof User];
-
-      if (field === "created_at") {
-        const dateA = new Date(a.created_at || 0).getTime();
-        const dateB = new Date(b.created_at || 0).getTime();
-        return order === "asc" ? dateA - dateB : dateB - dateA;
-      }
-
-      const stringA = String(valA || "").toLowerCase();
-      const stringB = String(valB || "").toLowerCase();
-
-      if (stringA < stringB) return order === "asc" ? -1 : 1;
-      if (stringA > stringB) return order === "asc" ? 1 : -1;
-      return 0;
-    });
-  }, [filteredUsers, sortConfig]);
+  const sortedUsers = users;
 
   const handleArchiveClick = (id: string, name: string) => {
     if (id === "7dddf9d1-4b55-49df-8c77-61192afb2fd9" || name.toLowerCase().includes("roxan policarpio")) {
@@ -211,12 +233,18 @@ export function UserPage() {
   const handleEditClick = (user: User) => {
     setEditingUser(user);
     setFormData(user);
+    setNameError("");
     setIsModalOpen(true);
   };
 
   const handleConfirmSave = () => {
+    const err = validateCustomerName(formData.name || "");
+    if (err) {
+      setNameError(err);
+      return;
+    }
     const trimmed = (formData.name || "").trim().slice(0, MAX_NAME_LENGTH);
-    if (!trimmed) return;
+    setNameError("");
     setIsModalOpen(false);
     setConfirmAction({
       type: "edit",
@@ -317,7 +345,10 @@ export function UserPage() {
           <div className="flex items-center gap-3 w-full md:w-auto">
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setPage(0);
+              }}
               className="w-full md:w-auto px-4 py-2 border border-natural-border rounded-lg text-xs font-bold text-natural-text-main bg-white outline-none cursor-pointer uppercase tracking-wider shadow-xs"
             >
               <option>All Status</option>
@@ -641,6 +672,32 @@ export function UserPage() {
             </div>
           )}
         </div>
+
+        {totalCount > PAGE_SIZE && (
+          <div className="px-4 py-3 border-t border-natural-border flex items-center justify-between bg-natural-bg/10">
+            <span className="text-xs font-medium text-natural-text-light">
+              Page {page + 1} of {Math.max(1, Math.ceil(totalCount / PAGE_SIZE))} ({totalCount} total)
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={page === 0 || isLoading}
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                className="px-3 py-1.5 rounded-lg border border-natural-border text-xs font-bold text-natural-text-main hover:bg-natural-bg disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                disabled={(page + 1) * PAGE_SIZE >= totalCount || isLoading}
+                onClick={() => setPage((p) => p + 1)}
+                className="px-3 py-1.5 rounded-lg border border-natural-border text-xs font-bold text-natural-text-main hover:bg-natural-bg disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {isModalOpen && (
@@ -672,15 +729,25 @@ export function UserPage() {
                   type="text"
                   maxLength={MAX_NAME_LENGTH}
                   value={formData.name || ""}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const next = e.target.value.slice(0, MAX_NAME_LENGTH);
                     setFormData({
                       ...formData,
-                      name: e.target.value.slice(0, MAX_NAME_LENGTH),
-                    })
-                  }
-                  className="w-full px-4 py-2.5 bg-natural-bg/50 border border-natural-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-natural-accent/10 focus:bg-white transition-all shadow-xs"
+                      name: next,
+                    });
+                    if (nameError) setNameError(validateCustomerName(next));
+                  }}
+                  className={cn(
+                    "w-full px-4 py-2.5 bg-natural-bg/50 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:bg-white transition-all shadow-xs",
+                    nameError
+                      ? "border-red-400 focus:ring-red-200"
+                      : "border-natural-border focus:ring-natural-accent/10"
+                  )}
                   placeholder="e.g. Juan Luna"
                 />
+                {nameError && (
+                  <p className="text-xs text-red-600 font-medium pl-1">{nameError}</p>
+                )}
               </div>
 
               <div className="space-y-1.5">

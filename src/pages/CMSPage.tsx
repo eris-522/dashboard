@@ -55,6 +55,7 @@ import {
   DEFAULT_CMS_DATA,
   fetchCMSContent,
   saveCMSSection,
+  saveCMSSectionsBatch,
   mergeSectionWithDefaults,
   PillarItem,
   TestimonialItem,
@@ -593,58 +594,74 @@ export function CMSPage() {
 
     try {
       if (activeTab === "home") {
-        const heroRes = await saveCMSSection("hero", heroForm, userName);
-        const annRes = await saveCMSSection("announcement", announcementForm, userName);
-        const procRes = await saveCMSSection("process", processForm, userName);
-        const testRes = await saveCMSSection("testimonials", testimonialsForm, userName);
-        const pkgRes = await saveCMSSection("packages", packagesForm, userName);
-        const menuRes = await saveCMSSection("menu", menuForm, userName);
-        const faqRes = await saveCMSSection("faqs", faqsForm, userName);
-        const contactRes = await saveCMSSection("contact", contactForm, userName);
+        const batchRes = await saveCMSSectionsBatch(
+          {
+            hero: heroForm,
+            announcement: announcementForm,
+            process: processForm,
+            testimonials: testimonialsForm,
+            packages: packagesForm,
+            menu: menuForm,
+            faqs: faqsForm,
+            contact: contactForm,
+          },
+          userName,
+        );
 
-        setHeroForm(heroRes.data);
-        setAnnouncementForm(annRes.data);
-        setProcessForm(procRes.data);
-        setTestimonialsForm(testRes.data);
-        setPackagesForm(pkgRes.data);
-        setMenuForm(menuRes.data);
-        setFaqsForm(faqRes.data);
-        setContactForm(contactRes.data);
+        setHeroForm(batchRes.data.hero);
+        setAnnouncementForm(batchRes.data.announcement);
+        setProcessForm(batchRes.data.process);
+        setTestimonialsForm(batchRes.data.testimonials);
+        setPackagesForm(batchRes.data.packages);
+        setMenuForm(batchRes.data.menu);
+        setFaqsForm(batchRes.data.faqs);
+        setContactForm(batchRes.data.contact);
 
         setCmsData((prev) => ({
           ...prev,
-          hero: heroRes.data,
-          announcement: annRes.data,
-          process: procRes.data,
-          testimonials: testRes.data,
-          packages: pkgRes.data,
-          menu: menuRes.data,
-          faqs: faqRes.data,
-          contact: contactRes.data,
+          ...batchRes.data,
         }));
       } else if (activeTab === "packages") {
         const pkgRes = await saveCMSSection("packages", packagesForm, userName);
         setPackagesForm(pkgRes.data);
         try {
-          const updatedDbPkgs = [...dbPackages];
-          for (let i = 0; i < updatedDbPkgs.length; i++) {
-            const pkg = updatedDbPkgs[i];
-            const targetImg =
-              pkgRes.data.packageImages?.[pkg.id] ||
-              pkgRes.data.packageImages?.[pkg.name] ||
-              DEFAULT_CMS_DATA.packages.packageImages[pkg.name] ||
-              pkg.image_url ||
-              null;
-            if (pkg.id && targetImg !== pkg.image_url) {
-              await supabase
-                .from("packages")
-                .update({ image_url: targetImg })
-                .eq("id", pkg.id);
-              updatedDbPkgs[i] = { ...pkg, image_url: targetImg };
+          const updates = dbPackages
+            .map((pkg, idx) => {
+              const targetImg =
+                pkgRes.data.packageImages?.[pkg.id] ||
+                pkgRes.data.packageImages?.[pkg.name] ||
+                DEFAULT_CMS_DATA.packages.packageImages[pkg.name] ||
+                pkg.image_url ||
+                null;
+              return pkg.id && targetImg !== pkg.image_url
+                ? { idx, id: pkg.id, targetImg }
+                : null;
+            })
+            .filter((u): u is { idx: number; id: any; targetImg: string | null } => Boolean(u));
+
+          if (updates.length > 0) {
+            const results = await Promise.all(
+              updates.map(async (u) => {
+                const { error } = await supabase
+                  .from("packages")
+                  .update({ image_url: u.targetImg })
+                  .eq("id", u.id);
+                return { ...u, error };
+              }),
+            );
+            const updatedDbPkgs = [...dbPackages];
+            results.forEach((r) => {
+              if (r.error) {
+                console.warn(`Failed syncing image_url for package ${r.id}:`, r.error.message);
+              } else {
+                updatedDbPkgs[r.idx] = { ...updatedDbPkgs[r.idx], image_url: r.targetImg };
+              }
+            });
+            if (results.some((r) => !r.error)) {
+              setDbPackages(updatedDbPkgs);
+              broadcastCatalogChange("packages");
             }
           }
-          setDbPackages(updatedDbPkgs);
-          broadcastCatalogChange("packages");
         } catch (e) {
           console.warn("Could not sync image_url to packages:", e);
         }
@@ -653,24 +670,42 @@ export function CMSPage() {
         const menuRes = await saveCMSSection("menu", menuForm, userName);
         setMenuForm(menuRes.data);
         try {
-          const updatedDbDishes = [...dbMenuItems];
-          for (let i = 0; i < updatedDbDishes.length; i++) {
-            const dish = updatedDbDishes[i];
-            const customImg =
-              menuRes.data.menuImages?.[dish.id] ||
-              menuRes.data.menuImages?.[dish.name] ||
-              DEFAULT_CMS_DATA.menu.menuImages[dish.name] ||
-              null;
-            if (dish.id && customImg !== dish.image_url) {
-              await supabase
-                .from("menu_items")
-                .update({ image_url: customImg })
-                .eq("id", dish.id);
-              updatedDbDishes[i] = { ...dish, image_url: customImg };
+          const updates = dbMenuItems
+            .map((dish, idx) => {
+              const customImg =
+                menuRes.data.menuImages?.[dish.id] ||
+                menuRes.data.menuImages?.[dish.name] ||
+                DEFAULT_CMS_DATA.menu.menuImages[dish.name] ||
+                null;
+              return dish.id && customImg !== dish.image_url
+                ? { idx, id: dish.id, customImg }
+                : null;
+            })
+            .filter((u): u is { idx: number; id: any; customImg: string | null } => Boolean(u));
+
+          if (updates.length > 0) {
+            const results = await Promise.all(
+              updates.map(async (u) => {
+                const { error } = await supabase
+                  .from("menu_items")
+                  .update({ image_url: u.customImg })
+                  .eq("id", u.id);
+                return { ...u, error };
+              }),
+            );
+            const updatedDbDishes = [...dbMenuItems];
+            results.forEach((r) => {
+              if (r.error) {
+                console.warn(`Failed syncing image_url for dish ${r.id}:`, r.error.message);
+              } else {
+                updatedDbDishes[r.idx] = { ...updatedDbDishes[r.idx], image_url: r.customImg };
+              }
+            });
+            if (results.some((r) => !r.error)) {
+              setDbMenuItems(updatedDbDishes);
+              broadcastCatalogChange("menu");
             }
           }
-          setDbMenuItems(updatedDbDishes);
-          broadcastCatalogChange("menu");
         } catch (e) {
           console.warn("Could not sync image_url to menu_items:", e);
         }
@@ -715,22 +750,24 @@ export function CMSPage() {
         const defProc = JSON.parse(JSON.stringify(DEFAULT_CMS_DATA.process));
         const defTest = JSON.parse(JSON.stringify(DEFAULT_CMS_DATA.testimonials));
 
-        await saveCMSSection("hero", defHero, userName);
-        await saveCMSSection("announcement", defAnn, userName);
-        await saveCMSSection("process", defProc, userName);
-        await saveCMSSection("testimonials", defTest, userName);
+        const resetRes = await saveCMSSectionsBatch(
+          {
+            hero: defHero,
+            announcement: defAnn,
+            process: defProc,
+            testimonials: defTest,
+          },
+          userName,
+        );
 
-        setHeroForm(defHero);
-        setAnnouncementForm(defAnn);
-        setProcessForm(defProc);
-        setTestimonialsForm(defTest);
+        setHeroForm(resetRes.data.hero);
+        setAnnouncementForm(resetRes.data.announcement);
+        setProcessForm(resetRes.data.process);
+        setTestimonialsForm(resetRes.data.testimonials);
 
         setCmsData((prev) => ({
           ...prev,
-          hero: defHero,
-          announcement: defAnn,
-          process: defProc,
-          testimonials: defTest,
+          ...resetRes.data,
         }));
       } else if (activeTab === "packages") {
         const defPkgs = JSON.parse(JSON.stringify(DEFAULT_CMS_DATA.packages));

@@ -31,7 +31,6 @@ import {
 import { cn } from "../lib/utils";
 import { useBooking } from "../context/BookingContext";
 import { useInventory, normalizeStockStatus } from "../context/InventoryContext";
-import { useUser } from "../context/UserContext";
 import { useTheme } from "../context/ThemeContext";
 
 const getEventDate = (b: any): Date => {
@@ -52,21 +51,37 @@ const getEventDate = (b: any): Date => {
 
 const PACKAGE_COLORS = ["#a68a56", "#6b8e23", "#3b82f6", "#f59e0b", "#8b5cf6", "#ec4899"];
 
+const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
 export function AnalyticsPage() {
-  const { bookings } = useBooking();
-  const { items, getAllocatedStock, calculatePackageEquipment } = useInventory();
-  const { users, activeUserCount } = useUser();
+  const { bookings, dashboardMetrics } = useBooking();
+  const { items, getAllocatedStock } = useInventory();
   const { resolvedTheme } = useTheme();
 
   const currentYear = new Date().getFullYear();
   const [timeRange, setTimeRange] = useState(currentYear.toString());
 
   const availableYears = useMemo(() => {
-    const years = bookings.map((b) => getEventDate(b).getFullYear());
+    const years = dashboardMetrics?.available_years?.length
+      ? dashboardMetrics.available_years
+      : bookings.map((b) => getEventDate(b).getFullYear());
     return Array.from(new Set([currentYear, ...years])).sort((a, b) => b - a);
-  }, [bookings, currentYear]);
+  }, [dashboardMetrics, bookings, currentYear]);
 
-  // Filter Bookings by Time Range
+  // Filter Bookings by Time Range (fallback when metrics RPC is unavailable)
   const filteredBookings = useMemo(() => {
     return bookings.filter((b) => {
       if (timeRange === "all") return true;
@@ -78,39 +93,22 @@ export function AnalyticsPage() {
     return filteredBookings.filter((b) => b.status === "Confirmed" || b.status === "Completed");
   }, [filteredBookings]);
 
-  const totalRevenue = useMemo(() => {
-    return confirmedBookings.reduce((sum, b) => sum + (Number(b.budget) || 0), 0);
-  }, [confirmedBookings]);
-
-  const avgEventValue = useMemo(() => {
-    return confirmedBookings.length > 0 ? totalRevenue / confirmedBookings.length : 0;
-  }, [confirmedBookings, totalRevenue]);
-
-  const totalPaxServed = useMemo(() => {
-    return confirmedBookings.reduce((sum, b) => {
-      const pax = (Number(b.guestCount) || 50) + (Number(b.additionalPax) || 0);
-      return sum + pax;
-    }, 0);
-  }, [confirmedBookings]);
-
-  // Monthly Revenue & Event Volume Data
-  const months = [
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-  ];
-
   const monthlyData = useMemo(() => {
-    return months.map((month, index) => {
+    if (dashboardMetrics?.monthly_series) {
+      const buckets = MONTHS.map((name) => ({ name, revenue: 0, events: 0, guests: 0 }));
+      dashboardMetrics.monthly_series.forEach((row) => {
+        if (timeRange !== "all" && String(row.year) !== timeRange) return;
+        const idx = Number(row.month_idx);
+        if (idx >= 0 && idx < 12) {
+          buckets[idx].revenue += Number(row.revenue) || 0;
+          buckets[idx].events += Number(row.events) || 0;
+          buckets[idx].guests += Number(row.guests) || 0;
+        }
+      });
+      return buckets;
+    }
+
+    return MONTHS.map((month, index) => {
       const monthBookings = confirmedBookings.filter((b) => {
         return getEventDate(b).getMonth() === index;
       });
@@ -119,25 +117,65 @@ export function AnalyticsPage() {
         revenue: monthBookings.reduce((sum, b) => sum + (Number(b.budget) || 0), 0),
         events: monthBookings.length,
         guests: monthBookings.reduce(
-          (sum, b) => sum + (Number(b.guestCount) || 50) + (Number(b.additionalPax) || 0),
+          (sum, b) => sum + (Number(b.guestCount) || 0) + (Number(b.additionalPax) || 0),
           0
         ),
       };
     });
-  }, [confirmedBookings]);
+  }, [dashboardMetrics, timeRange, confirmedBookings]);
+
+  const confirmedEventsCount = useMemo(() => {
+    if (dashboardMetrics?.monthly_series) {
+      return monthlyData.reduce((sum, m) => sum + m.events, 0);
+    }
+    return confirmedBookings.length;
+  }, [dashboardMetrics, monthlyData, confirmedBookings]);
+
+  const totalRevenue = useMemo(() => {
+    if (dashboardMetrics?.monthly_series) {
+      return monthlyData.reduce((sum, m) => sum + m.revenue, 0);
+    }
+    return confirmedBookings.reduce((sum, b) => sum + (Number(b.budget) || 0), 0);
+  }, [dashboardMetrics, monthlyData, confirmedBookings]);
+
+  const avgEventValue = useMemo(() => {
+    return confirmedEventsCount > 0 ? totalRevenue / confirmedEventsCount : 0;
+  }, [confirmedEventsCount, totalRevenue]);
+
+  const totalPaxServed = useMemo(() => {
+    if (dashboardMetrics?.monthly_series) {
+      return monthlyData.reduce((sum, m) => sum + m.guests, 0);
+    }
+    return confirmedBookings.reduce((sum, b) => {
+      const pax = (Number(b.guestCount) || 0) + (Number(b.additionalPax) || 0);
+      return sum + pax;
+    }, 0);
+  }, [dashboardMetrics, monthlyData, confirmedBookings]);
 
   // Package Breakdown
   const packageAnalytics = useMemo(() => {
     const map: Record<string, { name: string; count: number; revenue: number }> = {};
 
-    confirmedBookings.forEach((b) => {
-      const pkg = b.package || "Custom Package";
-      if (!map[pkg]) {
-        map[pkg] = { name: pkg, count: 0, revenue: 0 };
-      }
-      map[pkg].count += 1;
-      map[pkg].revenue += Number(b.budget) || 0;
-    });
+    if (dashboardMetrics?.package_by_year) {
+      dashboardMetrics.package_by_year.forEach((row) => {
+        if (timeRange !== "all" && String(row.year) !== timeRange) return;
+        const pkg = row.name || "Custom Package";
+        if (!map[pkg]) {
+          map[pkg] = { name: pkg, count: 0, revenue: 0 };
+        }
+        map[pkg].count += Number(row.count) || 0;
+        map[pkg].revenue += Number(row.revenue) || 0;
+      });
+    } else {
+      confirmedBookings.forEach((b) => {
+        const pkg = b.package || "Custom Package";
+        if (!map[pkg]) {
+          map[pkg] = { name: pkg, count: 0, revenue: 0 };
+        }
+        map[pkg].count += 1;
+        map[pkg].revenue += Number(b.budget) || 0;
+      });
+    }
 
     const list = Object.values(map).sort((a, b) => b.revenue - a.revenue);
     return list.map((item, idx) => ({
@@ -145,23 +183,35 @@ export function AnalyticsPage() {
       color: PACKAGE_COLORS[idx % PACKAGE_COLORS.length],
       percent: totalRevenue > 0 ? (item.revenue / totalRevenue) * 100 : 0,
     }));
-  }, [confirmedBookings, totalRevenue]);
+  }, [dashboardMetrics, timeRange, confirmedBookings, totalRevenue]);
 
   // Event Type Breakdown
   const eventTypeAnalytics = useMemo(() => {
     const map: Record<string, { type: string; count: number; revenue: number }> = {};
 
-    confirmedBookings.forEach((b) => {
-      const type = b.eventType || "Wedding";
-      if (!map[type]) {
-        map[type] = { type, count: 0, revenue: 0 };
-      }
-      map[type].count += 1;
-      map[type].revenue += Number(b.budget) || 0;
-    });
+    if (dashboardMetrics?.event_type_by_year) {
+      dashboardMetrics.event_type_by_year.forEach((row) => {
+        if (timeRange !== "all" && String(row.year) !== timeRange) return;
+        const type = row.type || "General";
+        if (!map[type]) {
+          map[type] = { type, count: 0, revenue: 0 };
+        }
+        map[type].count += Number(row.count) || 0;
+        map[type].revenue += Number(row.revenue) || 0;
+      });
+    } else {
+      confirmedBookings.forEach((b) => {
+        const type = b.eventType || "General";
+        if (!map[type]) {
+          map[type] = { type, count: 0, revenue: 0 };
+        }
+        map[type].count += 1;
+        map[type].revenue += Number(b.budget) || 0;
+      });
+    }
 
     return Object.values(map).sort((a, b) => b.count - a.count);
-  }, [confirmedBookings]);
+  }, [dashboardMetrics, timeRange, confirmedBookings]);
 
   // Equipment Monitoring Health Data
   const activeItems = useMemo(() => {
@@ -175,26 +225,6 @@ export function AnalyticsPage() {
   const totalAllocatedEquipment = useMemo(() => {
     return activeItems.reduce((sum, i) => sum + getAllocatedStock(i.id), 0);
   }, [activeItems, getAllocatedStock]);
-
-  const inventoryPieData = useMemo(() => {
-    return [
-      {
-        name: "High",
-        value: activeItems.filter((i) => normalizeStockStatus(i.status) === "High").length,
-        color: "#6b8e23",
-      },
-      {
-        name: "Normal",
-        value: activeItems.filter((i) => normalizeStockStatus(i.status) === "Normal").length,
-        color: "#f59e0b",
-      },
-      {
-        name: "Low",
-        value: activeItems.filter((i) => normalizeStockStatus(i.status) === "Low").length,
-        color: "#ef4444",
-      },
-    ].filter((d) => d.value > 0);
-  }, [activeItems]);
 
   // CSV Report Generator (formula-injection safe & RFC-4180 quoted)
   const csvCell = (raw: unknown): string => {
@@ -212,7 +242,7 @@ export function AnalyticsPage() {
       "",
       csvCell("--- EXECUTIVE SUMMARY ---"),
       `${csvCell("Total Confirmed Revenue")},${csvCell(`PHP ${totalRevenue.toLocaleString()}`)}`,
-      `${csvCell("Total Confirmed Events")},${csvCell(confirmedBookings.length)}`,
+      `${csvCell("Total Confirmed Events")},${csvCell(confirmedEventsCount)}`,
       `${csvCell("Total Guests Served")},${csvCell(`${totalPaxServed.toLocaleString()} Pax`)}`,
       `${csvCell("Average Event Value")},${csvCell(`PHP ${Math.round(avgEventValue).toLocaleString()}`)}`,
       `${csvCell("Equipment Units Allocated")},${csvCell(`${totalAllocatedEquipment} Units`)}`,
@@ -284,7 +314,7 @@ export function AnalyticsPage() {
             ₱{totalRevenue.toLocaleString()}
           </h4>
           <span className="text-xs font-bold text-natural-accent block mt-1">
-            {confirmedBookings.length} Confirmed Events
+            {confirmedEventsCount} Confirmed Events
           </span>
         </div>
 

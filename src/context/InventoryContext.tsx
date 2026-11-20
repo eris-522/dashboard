@@ -429,11 +429,15 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   const customPackageRulesRef = useRef<Record<string, PackageEquipmentRule[]>>({});
   customPackageRulesRef.current = customPackageRules;
 
+  const INVENTORY_COLUMNS = 'id, name, category, stock, min_stock, unit, status';
+  const DEDUCTION_COLUMNS = 'booking_id, booking_name, package_name, guest_count, deducted_at, items, updated_at';
+
   const fetchDeductionsFromDb = async (): Promise<BookingDeductionRecord[]> => {
     const { data, error: err } = await supabase
       .from('inventory_deductions')
-      .select('*')
-      .order('deducted_at', { ascending: false });
+      .select(DEDUCTION_COLUMNS)
+      .order('deducted_at', { ascending: false })
+      .limit(500);
 
     if (err) {
       console.error('Error fetching inventory_deductions from Supabase:', err.message);
@@ -478,22 +482,10 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const fetchMovementsFromDb = async (): Promise<void> => {
-    const { data, error: err } = await supabase
-      .from('inventory_stock_movements')
-      .select('*')
-      .order('timestamp', { ascending: false })
-      .limit(50);
-
-    if (!err && data) {
-      setStockMovements(data.map(mapDbRowToStockMovement));
-    }
-  };
-
   const fetchPackageRulesFromDb = async (): Promise<void> => {
     const { data, error: err } = await supabase
       .from('inventory_package_rules')
-      .select('*');
+      .select('package_name, rules, updated_at');
 
     if (!err && data) {
       const rulesMap: Record<string, PackageEquipmentRule[]> = {};
@@ -509,8 +501,9 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   const refreshInventoryItemsOnly = async () => {
     const { data, error: err } = await supabase
       .from('inventory')
-      .select('*')
-      .order('name', { ascending: true });
+      .select(INVENTORY_COLUMNS)
+      .order('name', { ascending: true })
+      .limit(500);
     if (!err && data) {
       const mapped: InventoryItem[] = data.map((item: any) => ({
         id: item.id,
@@ -528,11 +521,10 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   const refreshItems = async (silent = false) => {
     try {
       if (!silent) setIsLoading(true);
-      const [invRes, dedRes, movRes, rulesRes] = await Promise.all([
-        supabase.from('inventory').select('*').order('name', { ascending: true }),
-        supabase.from('inventory_deductions').select('*').order('deducted_at', { ascending: false }),
-        supabase.from('inventory_stock_movements').select('*').order('timestamp', { ascending: false }).limit(50),
-        supabase.from('inventory_package_rules').select('*')
+      const [invRes, dedRes, rulesRes] = await Promise.all([
+        supabase.from('inventory').select(INVENTORY_COLUMNS).order('name', { ascending: true }).limit(500),
+        supabase.from('inventory_deductions').select(DEDUCTION_COLUMNS).order('deducted_at', { ascending: false }).limit(500),
+        supabase.from('inventory_package_rules').select('package_name, rules, updated_at')
       ]);
 
       if (invRes.error) {
@@ -554,10 +546,6 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
 
       if (!dedRes.error && dedRes.data) {
         setDeductionRecords(dedRes.data.map(mapDbRowToDeductionRecord));
-      }
-
-      if (!movRes.error && movRes.data) {
-        setStockMovements(movRes.data.map(mapDbRowToStockMovement));
       }
 
       if (!rulesRes.error && rulesRes.data) {
@@ -608,11 +596,9 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
           refreshInventoryItemsOnly();
         } else if (scope === "deductions") {
           fetchDeductionsFromDb();
-        } else if (scope === "movements") {
-          fetchMovementsFromDb();
         } else if (scope === "rules") {
           fetchPackageRulesFromDb();
-        } else {
+        } else if (scope !== "movements") {
           refreshItems(true);
         }
       }, 250);
@@ -834,7 +820,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   ): Promise<boolean> => {
     const idStr = String(bookingId);
 
-    // Prevent concurrent double-deductions
+    // Prevent concurrent double-deductions in this tab
     if (pendingDeductions.current.has(idStr)) {
       return true;
     }
@@ -842,23 +828,11 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     pendingDeductions.current.add(idStr);
 
     try {
-      // 1. Check directly in Supabase `inventory_deductions` to guarantee single source of truth across all origins/devices
-      const { data: existingRow, error: checkErr } = await supabase
-        .from('inventory_deductions')
-        .select('*')
-        .eq('booking_id', idStr)
-        .maybeSingle();
-
-      if (!checkErr && existingRow) {
-        await fetchDeductionsFromDb();
-        return true;
-      }
-
-      // 2. Fetch fresh inventory items from Supabase so we never deduct from stale state
       const { data: freshInvData, error: invErr } = await supabase
         .from('inventory')
-        .select('*')
-        .order('name', { ascending: true });
+        .select(INVENTORY_COLUMNS)
+        .order('name', { ascending: true })
+        .limit(500);
 
       if (invErr || !freshInvData || freshInvData.length === 0) {
         return false;
@@ -875,94 +849,37 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       }));
 
       const requirements = calculatePackageEquipment(packageName, guestCount, inclusions, freshItems, corkageData);
-      const deductedItemsList: BookingDeductionRecord['items'] = [];
+      const requiredPayload = requirements
+        .map((req) => {
+          const matched = freshItems.find(
+            (i) => i.status !== 'Archived' && i.name.toLowerCase() === req.itemName.toLowerCase()
+          );
+          return matched && req.quantity > 0
+            ? {
+                itemId: String(matched.id),
+                itemName: matched.name,
+                quantity: req.quantity,
+                unit: req.unit || matched.unit || 'pcs',
+              }
+            : null;
+        })
+        .filter(Boolean);
 
-      // Prepare deduction record and reserve in Supabase `inventory_deductions`
-      for (const req of requirements) {
-        const inventoryItem = freshItems.find(i => 
-          i.status !== 'Archived' && 
-          i.name.toLowerCase() === req.itemName.toLowerCase()
-        );
+      const { error: rpcErr } = await supabase.rpc('admin_deduct_booking_inventory', {
+        p_booking_id: idStr,
+        p_booking_name: bookingName || 'Client',
+        p_package_name: packageName || 'Event Package',
+        p_guest_count: guestCount,
+        p_required_items: requiredPayload,
+      });
 
-        if (inventoryItem) {
-          const prevStock = inventoryItem.stock;
-          const inHouseQty = Math.min(Math.max(0, prevStock), req.quantity);
-          const outsourcedQty = req.quantity - inHouseQty;
-
-          deductedItemsList.push({
-            itemId: inventoryItem.id,
-            itemName: inventoryItem.name,
-            quantity: inHouseQty,
-            outsourcedQuantity: outsourcedQty,
-            unit: req.unit
-          });
-        }
+      if (rpcErr) {
+        console.error('Atomic admin_deduct_booking_inventory failed:', rpcErr.message);
+        return false;
       }
 
-      const record: BookingDeductionRecord = {
-        bookingId: idStr,
-        bookingName,
-        packageName,
-        guestCount,
-        deductedAt: new Date().toISOString(),
-        items: deductedItemsList
-      };
-
-      // 3. Persist the deduction record in Supabase FIRST so no other tab/device can double-deduct
-      await upsertDeductionInDb(record);
-
-      // 4. Perform stock updates in Supabase
-      for (const deducted of deductedItemsList) {
-        const inventoryItem = freshItems.find(i => String(i.id) === String(deducted.itemId));
-        if (!inventoryItem) continue;
-
-        const prevStock = inventoryItem.stock;
-        const inHouseQty = deducted.quantity;
-        const outsourcedQty = deducted.outsourcedQuantity || 0;
-        const newStock = Math.max(0, prevStock - inHouseQty);
-        const newStatus = inventoryItem.status === 'Archived' ? 'Archived' : getStatus(newStock, inventoryItem.minStock);
-
-        inventoryItem.stock = newStock;
-        inventoryItem.status = newStatus;
-
-        if (inHouseQty > 0) {
-          await supabase
-            .from('inventory')
-            .update({ stock: newStock, status: newStatus })
-            .eq('id', inventoryItem.id);
-
-          recordStockMovement({
-            itemId: inventoryItem.id,
-            itemName: inventoryItem.name,
-            change: -inHouseQty,
-            previousStock: prevStock,
-            newStock: newStock,
-            type: 'Booking Deduction',
-            reason: `Auto-deducted for Booking #${bookingId} (${packageName} - ${guestCount} Pax)`,
-            bookingId,
-            bookingName,
-            user: 'System (Booking Engine)'
-          });
-        }
-
-        if (outsourcedQty > 0) {
-          recordStockMovement({
-            itemId: inventoryItem.id,
-            itemName: inventoryItem.name,
-            change: 0,
-            previousStock: newStock,
-            newStock: newStock,
-            type: 'Outsourced',
-            reason: `Outsourced ${outsourcedQty} ${deducted.unit} (shortage) for Booking #${bookingId} — needed ${inHouseQty + outsourcedQty}, in-house ${inHouseQty}`,
-            bookingId,
-            bookingName,
-            user: 'System (Booking Engine)'
-          });
-        }
-      }
-
-      setItems(freshItems);
-      await fetchDeductionsFromDb();
+      await Promise.all([refreshInventoryItemsOnly(), fetchDeductionsFromDb()]);
+      broadcastInventoryChange('all');
       return true;
     } finally {
       pendingDeductions.current.delete(idStr);
@@ -970,260 +887,65 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   };
 
   /**
-   * Reallocates available warehouse stock to ongoing Confirmed bookings
-   * that currently have outsourced (rented) equipment requirements.
-   * Priority is given chronologically to the earliest upcoming event.
+   * Atomically reallocates available warehouse stock to ongoing Confirmed bookings
+   * that currently have outsourced (rented) equipment requirements, chronologically.
    */
   const reallocateReturnedStockToConfirmedBookings = async (
-    bookingsList?: any[],
-    overrideRecords?: BookingDeductionRecord[],
-    existingInvItems?: InventoryItem[]
+    _bookingsList?: any[],
+    _overrideRecords?: BookingDeductionRecord[],
+    _existingInvItems?: InventoryItem[]
   ): Promise<boolean> => {
-    const recordsSource: BookingDeductionRecord[] = overrideRecords || await fetchDeductionsFromDb();
-    const hasAnyOutsourced = recordsSource.some((rec) =>
-      rec.items.some((it) => (it.outsourcedQuantity || 0) > 0)
-    );
-    if (!hasAnyOutsourced) return false;
-
-    let currentBookings = bookingsList;
-    if (!currentBookings || currentBookings.length === 0) {
-      const { data } = await supabase
-        .from('bookings')
-        .select('id, status, event_date');
-      currentBookings = data || [];
+    const { data, error: rpcErr } = await supabase.rpc('admin_reallocate_inventory');
+    if (rpcErr) {
+      console.error('Atomic admin_reallocate_inventory failed:', rpcErr.message);
+      return false;
     }
-
-    const confirmedBookings = (currentBookings || [])
-      .filter((b: any) => (b.status || 'Pending') === 'Confirmed')
-      .sort((a: any, b: any) => {
-        const dateA = a.event_date || a.date;
-        const dateB = b.event_date || b.date;
-        const timeA = dateA ? new Date(dateA).getTime() : Infinity;
-        const timeB = dateB ? new Date(dateB).getTime() : Infinity;
-        return timeA - timeB;
-      });
-
-    if (confirmedBookings.length === 0) return false;
-
-    let workingItems: InventoryItem[];
-    if (existingInvItems && existingInvItems.length > 0) {
-      workingItems = existingInvItems.map((it) => ({ ...it }));
-    } else {
-      const { data: dbItems, error: invFetchErr } = await supabase
-        .from('inventory')
-        .select('*')
-        .order('name', { ascending: true });
-
-      if (invFetchErr || !dbItems) {
-        return false;
-      }
-
-      workingItems = dbItems.map((item: any) => ({
-        id: item.id,
-        name: item.name,
-        category: item.category,
-        stock: Number(item.stock) || 0,
-        minStock: Number(item.min_stock) || 0,
-        unit: item.unit || 'pcs',
-        status: computeItemStatus(Number(item.stock) || 0, Number(item.min_stock) || 0, item.status)
-      }));
+    const units = Number((data as any)?.reallocated_units) || 0;
+    if (units > 0) {
+      await Promise.all([refreshInventoryItemsOnly(), fetchDeductionsFromDb()]);
+      broadcastInventoryChange('all');
+      return true;
     }
-
-    const workingRecords: BookingDeductionRecord[] = recordsSource.map(rec => ({
-      ...rec,
-      items: rec.items.map(it => ({ ...it }))
-    }));
-
-    let didReallocate = false;
-    const itemsToUpdateInDb = new Map<string | number, InventoryItem>();
-    const recordsToUpdateInDb = new Map<string, BookingDeductionRecord>();
-
-    for (const b of confirmedBookings) {
-      const rec = workingRecords.find(r => String(r.bookingId) === String(b.id));
-      if (!rec) continue;
-
-      for (let i = 0; i < rec.items.length; i++) {
-        const recItem = rec.items[i];
-        const outsourced = recItem.outsourcedQuantity || 0;
-        if (outsourced <= 0) continue;
-
-        const invItem = workingItems.find(it =>
-          String(it.id) === String(recItem.itemId) ||
-          it.name.toLowerCase().trim() === recItem.itemName.toLowerCase().trim()
-        );
-
-        if (!invItem || invItem.stock <= 0) continue;
-
-        const shiftQty = Math.min(invItem.stock, outsourced);
-        if (shiftQty <= 0) continue;
-
-        const prevStock = invItem.stock;
-        const newStock = prevStock - shiftQty;
-        invItem.stock = newStock;
-        invItem.status = invItem.status === 'Archived' ? 'Archived' : getStatus(newStock, invItem.minStock);
-
-        recItem.quantity += shiftQty;
-        recItem.outsourcedQuantity = outsourced - shiftQty;
-
-        itemsToUpdateInDb.set(invItem.id, invItem);
-        recordsToUpdateInDb.set(String(rec.bookingId), rec);
-        didReallocate = true;
-
-        recordStockMovement({
-          itemId: invItem.id,
-          itemName: invItem.name,
-          change: -shiftQty,
-          previousStock: prevStock,
-          newStock: newStock,
-          type: 'Booking Deduction',
-          reason: `Auto-reallocated from warehouse supplies to ongoing Confirmed Booking #${rec.bookingId} (${rec.bookingName}) — converted ${shiftQty} outsourced units to in-house`,
-          bookingId: rec.bookingId,
-          bookingName: rec.bookingName,
-          user: 'System (Equipment Monitoring Reconciler)'
-        });
-
-        recordStockMovement({
-          itemId: invItem.id,
-          itemName: invItem.name,
-          change: 0,
-          previousStock: newStock,
-          newStock: newStock,
-          type: 'Outsourced Return',
-          reason: `Outsourced rental reduced by ${shiftQty} ${recItem.unit} for Booking #${rec.bookingId} as warehouse supplies became available`,
-          bookingId: rec.bookingId,
-          bookingName: rec.bookingName,
-          user: 'System (Equipment Monitoring Reconciler)'
-        });
-      }
-    }
-
-    if (didReallocate) {
-      for (const invItem of itemsToUpdateInDb.values()) {
-        await supabase
-          .from('inventory')
-          .update({ stock: invItem.stock, status: invItem.status })
-          .eq('id', invItem.id);
-      }
-
-      for (const rec of recordsToUpdateInDb.values()) {
-        await upsertDeductionInDb(rec);
-      }
-
-      setItems(workingItems);
-      setDeductionRecords(workingRecords);
-    }
-
-    return didReallocate;
+    return false;
   };
 
   /**
-   * Automatically returns/restores previously deducted inventory when a booking is completed, cancelled, or archived,
-   * and automatically reallocates returned supplies to ongoing Confirmed bookings to reduce outsourced shortages.
+   * Atomically returns/restores previously deducted inventory when a booking is completed,
+   * cancelled, or archived, and reallocates freed stock to outsourced Confirmed bookings.
    */
   const restoreBookingInventory = async (
     bookingId: string | number,
-    bookingName?: string,
+    _bookingName?: string,
     reason?: string
   ): Promise<boolean> => {
     const idStr = String(bookingId);
+    const { data, error: rpcErr } = await supabase.rpc('admin_restore_booking_inventory', {
+      p_booking_id: idStr,
+      p_reason: reason || null,
+      p_user_name: null,
+      p_reallocate: true,
+    });
 
-    // 1. Read directly from Supabase `inventory_deductions`
-    const { data: dbRow, error: fetchErr } = await supabase
-      .from('inventory_deductions')
-      .select('*')
-      .eq('booking_id', idStr)
-      .maybeSingle();
-
-    if (fetchErr || !dbRow) {
+    if (rpcErr) {
+      console.error('Atomic admin_restore_booking_inventory failed:', rpcErr.message);
       return false;
     }
 
-    const record = mapDbRowToDeductionRecord(dbRow);
-
-    // 2. Delete the deduction record from Supabase FIRST so no other tab/device can double-restore
-    await deleteDeductionFromDb(idStr);
-
-    // 3. Fetch fresh inventory items from Supabase
-    const { data: freshInvData } = await supabase
-      .from('inventory')
-      .select('*')
-      .order('name', { ascending: true });
-
-    const updatedItems: InventoryItem[] = (freshInvData || []).map((item: any) => ({
-      id: item.id,
-      name: item.name,
-      category: item.category,
-      stock: Number(item.stock) || 0,
-      minStock: Number(item.min_stock) || 0,
-      unit: item.unit || 'pcs',
-      status: computeItemStatus(Number(item.stock) || 0, Number(item.min_stock) || 0, item.status)
-    }));
-
-    for (const item of record.items) {
-      const inventoryItem = updatedItems.find(
-        i => String(i.id) === String(item.itemId) || i.name.toLowerCase() === item.itemName.toLowerCase()
-      );
-      if (!inventoryItem) continue;
-
-      if (item.quantity > 0) {
-        const prevStock = inventoryItem.stock;
-        const newStock = prevStock + item.quantity;
-        const newStatus = inventoryItem.status === 'Archived' ? 'Archived' : getStatus(newStock, inventoryItem.minStock);
-
-        inventoryItem.stock = newStock;
-        inventoryItem.status = newStatus;
-
-        await supabase
-          .from('inventory')
-          .update({ stock: newStock, status: newStatus })
-          .eq('id', inventoryItem.id);
-
-        recordStockMovement({
-          itemId: inventoryItem.id,
-          itemName: inventoryItem.name,
-          change: item.quantity,
-          previousStock: prevStock,
-          newStock: newStock,
-          type: 'Booking Return',
-          reason: reason || `Restored from Concluded Booking #${bookingId} (${record.packageName})`,
-          bookingId,
-          bookingName: bookingName || record.bookingName,
-          user: 'System (Equipment Monitoring Reconciler)'
-        });
-      }
-
-      if ((item.outsourcedQuantity || 0) > 0) {
-        recordStockMovement({
-          itemId: inventoryItem.id,
-          itemName: inventoryItem.name,
-          change: 0,
-          previousStock: inventoryItem.stock,
-          newStock: inventoryItem.stock,
-          type: 'Outsourced Return',
-          reason: `${item.outsourcedQuantity} ${item.unit} returned to external supplier (Booking #${bookingId}) — not added to warehouse stock`,
-          bookingId,
-          bookingName: bookingName || record.bookingName,
-          user: 'System (Equipment Monitoring Reconciler)'
-        });
-      }
+    const restored = Boolean((data as any)?.restored);
+    if (restored) {
+      await Promise.all([refreshInventoryItemsOnly(), fetchDeductionsFromDb()]);
+      broadcastInventoryChange('all');
     }
-
-    setItems(updatedItems);
-    const updatedRecords = await fetchDeductionsFromDb();
-
-    // Reallocate returned warehouse supplies to any ongoing Confirmed bookings that have outsourced items
-    await reallocateReturnedStockToConfirmedBookings(undefined, updatedRecords);
-
-    return true;
+    return restored;
   };
 
   /**
-   * Automatically checks all deducted bookings in Supabase `inventory_deductions`,
-   * restores items from concluded or deleted bookings, and synchronizes active Confirmed bookings.
+   * Automatically reconciles deductions against bookings: restores concluded/deleted
+   * bookings, deducts un-deducted Confirmed bookings, syncs guest-count changes
+   * atomically (returning surplus stock on pax reduction), and reallocates shortages.
    */
   const reconcileCompletedEvents = async (_bookingsList?: any[]): Promise<number> => {
     if (isReconcilingRef.current) {
-      // Run once more after the current pass instead of silently dropping the request
       reconcileQueuedRef.current = true;
       return 0;
     }
@@ -1234,12 +956,13 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         ? Promise.resolve({ data: _bookingsList, error: null })
         : supabase
             .from('bookings')
-            .select('id, status, event_date, guest_count, additional_pax, corkage_info, packages(name, inclusions), profiles(name)');
+            .select('id, status, event_date, guest_count, additional_pax, corkage_info, logistics_info, packages(name, inclusions), profiles(name)')
+            .limit(500);
 
       const [bookingsRes, deductionsRes, invRes] = await Promise.all([
         fetchBookingsPromise,
-        supabase.from('inventory_deductions').select('*').order('deducted_at', { ascending: false }),
-        supabase.from('inventory').select('*').order('name', { ascending: true })
+        supabase.from('inventory_deductions').select(DEDUCTION_COLUMNS).order('deducted_at', { ascending: false }).limit(500),
+        supabase.from('inventory').select(INVENTORY_COLUMNS).order('name', { ascending: true }).limit(500)
       ]);
 
       if (bookingsRes.error || deductionsRes.error || invRes.error) {
@@ -1263,13 +986,13 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       }
 
       let restoredCount = 0;
+      let anyMutated = false;
 
-      // 1. Restore completed/cancelled/archived bookings, and purge orphaned deleted bookings
+      // 1. Atomically restore completed/cancelled/archived or deleted bookings (defer reallocation until pass finishes)
       for (const record of currentRecords) {
         let matchedBooking = currentBookings.find((b: any) => String(b.id) === String(record.bookingId));
 
         if (!matchedBooking) {
-          // Never trust a single list for deletions: confirm directly that the booking is really gone
           const { data: verifyRow, error: verifyErr } = await supabase
             .from('bookings')
             .select('id, status')
@@ -1282,12 +1005,16 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         }
 
         if (!matchedBooking) {
-          const success = await restoreBookingInventory(
-            record.bookingId,
-            record.bookingName,
-            `Booking #${record.bookingId} removed from database - Equipment returned to equipment monitoring`
-          );
-          if (success) restoredCount++;
+          const { data: res } = await supabase.rpc('admin_restore_booking_inventory', {
+            p_booking_id: String(record.bookingId),
+            p_reason: `Booking #${record.bookingId} removed from database - Equipment returned to equipment monitoring`,
+            p_user_name: null,
+            p_reallocate: false,
+          });
+          if ((res as any)?.restored) {
+            restoredCount++;
+            anyMutated = true;
+          }
           continue;
         }
 
@@ -1295,23 +1022,25 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         const isDone = bookingStatus === 'Completed' || bookingStatus === 'Cancelled' || bookingStatus === 'Archived';
 
         if (isDone) {
-          const success = await restoreBookingInventory(
-            record.bookingId,
-            record.bookingName,
-            `Booking marked ${bookingStatus} - Equipment returned to equipment monitoring`
-          );
-          if (success) restoredCount++;
+          const { data: res } = await supabase.rpc('admin_restore_booking_inventory', {
+            p_booking_id: String(record.bookingId),
+            p_reason: `Booking marked ${bookingStatus} - Equipment returned to equipment monitoring`,
+            p_user_name: null,
+            p_reallocate: false,
+          });
+          if ((res as any)?.restored) {
+            restoredCount++;
+            anyMutated = true;
+          }
         }
       }
 
-      // Refresh records from Supabase only if any restorations occurred
       if (restoredCount > 0) {
         currentRecords = await fetchDeductionsFromDb();
       }
 
-      // 2. Ensure every Confirmed booking has an active deduction record in Supabase
+      // 2. Ensure every Confirmed booking has an active atomic deduction record in Supabase
       const confirmedBookings = currentBookings.filter((b: any) => (b.status || 'Pending') === 'Confirmed');
-      let anyNewDeduction = false;
       for (const b of confirmedBookings) {
         const alreadyHas = currentRecords.some((d) => String(d.bookingId) === String(b.id));
         if (!alreadyHas) {
@@ -1321,66 +1050,73 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
           const totalPax = guestCount + additionalPax;
           const inclusions = b.packages?.inclusions || b.inclusions || [];
           const corkage = (b as any).corkage_info || (b as any).logistics_info?.corkage || null;
-          await deductBookingInventory(
-            b.id,
-            b.profiles?.name || b.profiles?.full_name || b.customerName || 'Client',
-            pkgName,
-            totalPax,
-            inclusions,
-            corkage
-          );
-          anyNewDeduction = true;
+
+          const reqs = calculatePackageEquipment(pkgName, totalPax, inclusions, currentInvItems, corkage)
+            .map((req) => {
+              const matched = currentInvItems.find(
+                (i) => i.status !== 'Archived' && i.name.toLowerCase() === req.itemName.toLowerCase()
+              );
+              return matched && req.quantity > 0
+                ? {
+                    itemId: String(matched.id),
+                    itemName: matched.name,
+                    quantity: req.quantity,
+                    unit: req.unit || matched.unit || 'pcs',
+                  }
+                : null;
+            })
+            .filter(Boolean);
+
+          const { error: dedErr } = await supabase.rpc('admin_deduct_booking_inventory', {
+            p_booking_id: String(b.id),
+            p_booking_name: b.profiles?.name || b.profiles?.full_name || b.customerName || 'Client',
+            p_package_name: pkgName,
+            p_guest_count: totalPax,
+            p_required_items: reqs,
+          });
+          if (!dedErr) anyMutated = true;
         }
       }
 
-      if (anyNewDeduction) {
-        currentRecords = await fetchDeductionsFromDb();
-      }
-
-      // 3. Harmonize existing confirmed booking records with current dynamic rules or updated pax counts
+      // 3. Atomically harmonize Confirmed bookings whose total guest count changed
       for (const rec of currentRecords) {
-        const b = confirmedBookings.find(cb => String(cb.id) === String(rec.bookingId));
+        const b = confirmedBookings.find((cb: any) => String(cb.id) === String(rec.bookingId));
         if (!b) continue;
         const pkgName = b.packages?.name || b.package || b.packageName || 'Event Package';
         const guestCount = Number(b.guest_count ?? b.guestCount ?? 50);
         const additionalPax = Number(b.additional_pax ?? b.additionalPax ?? 0);
         const totalPax = guestCount + additionalPax;
-        // Only touch an existing allocation when the booking's pax actually changed.
-        // Otherwise unrelated changes (new inventory items, rule edits) would silently
-        // alter stock/outsourced numbers for bookings that were already confirmed.
         if (rec.guestCount === totalPax) continue;
+
         const inclusions = b.packages?.inclusions || b.inclusions || [];
         const corkage = (b as any).corkage_info || (b as any).logistics_info?.corkage || null;
-        const expectedReqs = calculatePackageEquipment(pkgName, totalPax, inclusions, currentInvItems, corkage);
+        const expectedReqs = calculatePackageEquipment(pkgName, totalPax, inclusions, currentInvItems, corkage)
+          .map((req) => {
+            const matched = currentInvItems.find(
+              (i) => i.name.toLowerCase().trim() === req.itemName.toLowerCase().trim()
+            );
+            return {
+              itemId: matched ? String(matched.id) : null,
+              itemName: matched ? matched.name : req.itemName,
+              quantity: req.quantity,
+              unit: req.unit || matched?.unit || 'pcs',
+            };
+          });
 
-        let recordModified = false;
-        for (const req of expectedReqs) {
-          const it = rec.items.find(item => item.itemName.toLowerCase().trim() === req.itemName.toLowerCase().trim());
-          if (it) {
-            const currentTotal = it.quantity + (it.outsourcedQuantity || 0);
-            if (currentTotal !== req.quantity) {
-              const inHouse = Math.min(it.quantity, req.quantity);
-              it.quantity = inHouse;
-              it.outsourcedQuantity = Math.max(0, req.quantity - inHouse);
-              recordModified = true;
-            }
-          }
-        }
-        if (rec.guestCount !== totalPax) {
-          rec.guestCount = totalPax;
-          recordModified = true;
-        }
-        if (recordModified) {
-          await upsertDeductionInDb(rec);
-        }
+        const { error: syncErr } = await supabase.rpc('admin_sync_booking_deduction_pax', {
+          p_booking_id: String(b.id),
+          p_guest_count: totalPax,
+          p_required_items: expectedReqs,
+        });
+        if (!syncErr) anyMutated = true;
       }
 
-      // 4. Reallocate available warehouse supplies to ongoing confirmed bookings
-      await reallocateReturnedStockToConfirmedBookings(
-        currentBookings,
-        currentRecords,
-        (restoredCount === 0 && !anyNewDeduction) ? currentInvItems : undefined
-      );
+      // 4. Final atomic reallocation pass + fresh local state sync
+      const { data: realocRes } = await supabase.rpc('admin_reallocate_inventory');
+      if (anyMutated || (Number((realocRes as any)?.reallocated_units) || 0) > 0) {
+        await Promise.all([refreshInventoryItemsOnly(), fetchDeductionsFromDb()]);
+        broadcastInventoryChange('all');
+      }
 
       return restoredCount;
     } finally {
@@ -1399,10 +1135,15 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     bookingId: string | number,
     bookingName?: string
   ): Promise<boolean> => {
-    await supabase
+    const { error: updErr } = await supabase
       .from('bookings')
       .update({ status: 'Completed' })
       .eq('id', bookingId);
+
+    if (updErr) {
+      console.error('Error marking booking Completed:', updErr.message);
+      return false;
+    }
 
     await restoreBookingInventory(
       bookingId,
@@ -1499,39 +1240,24 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     const item = items.find(i => String(i.id) === String(id));
     if (!item) return;
 
-    const prevStock = item.stock;
-    const newStock = Math.max(0, prevStock + quantity);
-    const newStatus = item.status === 'Archived' ? 'Archived' : getStatus(newStock, item.minStock);
+    const { error: rpcErr } = await supabase.rpc('admin_adjust_inventory_stock', {
+      p_item_id: String(id),
+      p_delta: Math.round(quantity),
+      p_type: type,
+      p_reason: reason,
+      p_booking_id: null,
+      p_booking_name: null,
+    });
 
-    setItems(prev => prev.map(i => String(i.id) === String(id) ? { ...i, stock: newStock, status: newStatus } : i));
-
-    const { error: updateError } = await supabase
-      .from('inventory')
-      .update({ stock: newStock, status: newStatus })
-      .eq('id', id);
-
-    if (updateError) {
-      console.error("Error updating stock:", updateError);
-      alert("Supabase Error: " + updateError.message);
+    if (rpcErr) {
+      console.error("Error updating stock atomically:", rpcErr);
+      alert("Supabase Error: " + rpcErr.message);
       refreshInventoryItemsOnly();
-    } else {
-      broadcastInventoryChange('items');
-      recordStockMovement({
-        itemId: id,
-        itemName: item.name,
-        change: quantity,
-        previousStock: prevStock,
-        newStock: newStock,
-        type,
-        reason,
-        user: 'Admin'
-      });
-      if (quantity > 0) {
-        setTimeout(() => {
-          reallocateReturnedStockToConfirmedBookings();
-        }, 100);
-      }
+      return;
     }
+
+    await Promise.all([refreshInventoryItemsOnly(), fetchDeductionsFromDb()]);
+    broadcastInventoryChange('all');
   };
 
   const archiveItem = async (id: string | number) => {

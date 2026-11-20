@@ -11,9 +11,6 @@ import { cn } from "./lib/utils";
 import { InventoryProvider } from "./context/InventoryContext";
 import { BookingProvider, useBooking } from "./context/BookingContext";
 import { UserProvider, useUser } from "./context/UserContext";
-import { MenuProvider } from "./context/MenuContext";
-import { ServicesProvider } from "./context/ServicesContext";
-import { PackageProvider } from "./context/PackageContext";
 import { ThemeProvider, useTheme } from "./context/ThemeContext";
 
 // Lazy-load individual management views on-demand to reduce initial bundle and Vercel bandwidth
@@ -434,17 +431,11 @@ function MainApp() {
   }
 
   return (
-    <MenuProvider>
-      <ServicesProvider>
-        <PackageProvider>
-          <BookingProvider>
-            <InventoryProvider>
-              <AppContent />
-            </InventoryProvider>
-          </BookingProvider>
-        </PackageProvider>
-      </ServicesProvider>
-    </MenuProvider>
+    <BookingProvider>
+      <InventoryProvider>
+        <AppContent />
+      </InventoryProvider>
+    </BookingProvider>
   );
 }
 
