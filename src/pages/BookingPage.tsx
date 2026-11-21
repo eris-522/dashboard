@@ -5245,7 +5245,7 @@ export function BookingPage() {
               <thead>
                 <tr className="bg-natural-bg/30">
                   <th
-                    className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
+                    className="px-3 xl:px-4 2xl:px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
                     onClick={() => handleSort("customerName")}
                   >
                     <div className="flex items-center gap-1.5">
@@ -5261,11 +5261,11 @@ export function BookingPage() {
                       )}
                     </div>
                   </th>
-                  <th className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border">
+                  <th className="px-3 xl:px-4 2xl:px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border">
                     Event Details
                   </th>
                   <th
-                    className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
+                    className="px-3 xl:px-4 2xl:px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
                     onClick={() => handleSort("date")}
                   >
                     <div className="flex items-center gap-1.5">
@@ -5282,7 +5282,7 @@ export function BookingPage() {
                     </div>
                   </th>
                   <th
-                    className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
+                    className="px-3 xl:px-4 2xl:px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
                     onClick={() => handleSort("created_at")}
                   >
                     <div className="flex items-center gap-1.5">
@@ -5299,7 +5299,7 @@ export function BookingPage() {
                     </div>
                   </th>
                   <th
-                    className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
+                    className="px-3 xl:px-4 2xl:px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
                     onClick={() => handleSort("budget")}
                   >
                     <div className="flex items-center gap-1.5">
@@ -5315,11 +5315,11 @@ export function BookingPage() {
                       )}
                     </div>
                   </th>
-                  <th className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border">
+                  <th className="px-3 xl:px-4 2xl:px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border">
                     Downpayment
                   </th>
                   <th
-                    className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
+                    className="px-3 xl:px-4 2xl:px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border cursor-pointer hover:text-natural-accent transition-colors select-none"
                     onClick={() => handleSort("status")}
                   >
                     <div className="flex items-center gap-1.5">
@@ -5335,7 +5335,7 @@ export function BookingPage() {
                       )}
                     </div>
                   </th>
-                  <th className="px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border">
+                  <th className="px-3 xl:px-4 2xl:px-6 py-4.5 text-xs font-bold uppercase tracking-wider text-natural-text-light border-b border-natural-border">
                     Actions
                   </th>
                 </tr>
@@ -5389,7 +5389,7 @@ export function BookingPage() {
                         : "hover:bg-natural-bg/20",
                     )}
                   >
-                    <td className="px-6 py-5.5 border-b border-natural-border/50">
+                    <td className="px-3 xl:px-4 2xl:px-6 py-5.5 border-b border-natural-border/50">
                       <div>
                         <p className="text-base font-bold text-natural-text-main tracking-normal leading-snug">
                           {booking.profiles?.name ||
@@ -5399,7 +5399,7 @@ export function BookingPage() {
                         <div className="flex flex-col gap-1.5 mt-1.5">
                           <p className="text-xs text-natural-text-light flex items-center gap-1.5 tracking-normal">
                             <Mail className="w-3.5 h-3.5 text-natural-accent/70 shrink-0" />{" "}
-                            <span>{booking.profiles?.email || "N/A"}</span>
+                            <span className="min-w-0 wrap-anywhere">{booking.profiles?.email || "N/A"}</span>
                           </p>
                           <p className="text-xs text-natural-text-light flex items-center gap-1.5 tracking-normal">
                             <Phone className="w-3.5 h-3.5 text-natural-accent/70 shrink-0" />{" "}
@@ -5412,7 +5412,7 @@ export function BookingPage() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-5.5 border-b border-natural-border/50">
+                    <td className="px-3 xl:px-4 2xl:px-6 py-5.5 border-b border-natural-border/50">
                       <div>
                         <p className="text-sm font-bold text-natural-text-main tracking-normal">
                           {booking.event_type || "Event"}
@@ -5426,7 +5426,7 @@ export function BookingPage() {
                         </p>
                       </div>
                     </td>
-                    <td className="px-6 py-5.5 border-b border-natural-border/50">
+                    <td className="px-3 xl:px-4 2xl:px-6 py-5.5 border-b border-natural-border/50">
                       <div className="flex flex-col gap-1.5">
                         <p className="text-sm text-natural-text-main font-semibold flex items-center gap-2 tracking-normal">
                           <Calendar className="w-4 h-4 text-natural-accent opacity-75 shrink-0" />{" "}
@@ -5438,7 +5438,7 @@ export function BookingPage() {
                         </p>
                       </div>
                     </td>
-                    <td className="px-6 py-5.5 border-b border-natural-border/50">
+                    <td className="px-3 xl:px-4 2xl:px-6 py-5.5 border-b border-natural-border/50">
                       <div className="flex flex-col gap-1">
                         <p className="text-sm text-natural-text-main font-semibold tracking-normal">
                           {booking.created_at
@@ -5462,7 +5462,7 @@ export function BookingPage() {
                         </p>
                       </div>
                     </td>
-                    <td className="px-6 py-5.5 border-b border-natural-border/50">
+                    <td className="px-3 xl:px-4 2xl:px-6 py-5.5 border-b border-natural-border/50">
                       <p className="text-base font-bold text-natural-text-main font-serif tracking-normal">
                         ₱{calculateBudget(booking).toLocaleString()}
                       </p>
@@ -5481,7 +5481,7 @@ export function BookingPage() {
                         );
                       })()}
                     </td>
-                    <td className="px-6 py-5.5 border-b border-natural-border/50">
+                    <td className="px-3 xl:px-4 2xl:px-6 py-5.5 border-b border-natural-border/50">
                       {(() => {
                         const payment = getBookingPayment(booking);
                         const estBudget = calculateBudget(booking);
@@ -5654,7 +5654,7 @@ export function BookingPage() {
                         );
                       })()}
                     </td>
-                    <td className="px-6 py-5.5 border-b border-natural-border/50">
+                    <td className="px-3 xl:px-4 2xl:px-6 py-5.5 border-b border-natural-border/50">
                       <div className="flex flex-col items-start gap-1">
                         <span
                           className={cn(
@@ -5686,8 +5686,8 @@ export function BookingPage() {
                         )}
                       </div>
                     </td>
-                    <td className="px-6 py-5.5 border-b border-natural-border/50">
-                      <div className="flex items-center gap-2">
+                    <td className="px-3 xl:px-4 2xl:px-6 py-5.5 border-b border-natural-border/50">
+                      <div className="grid grid-cols-2 gap-1 w-max 2xl:flex 2xl:items-center 2xl:gap-2">
                         {(booking.status || "Pending") !== "Archived" && (
                           <>
                             {((booking.status || "Pending") === "Inquiry" ||
@@ -5787,7 +5787,7 @@ export function BookingPage() {
                           </>
                         )}
                         {(booking.status || "Pending") === "Archived" && (
-                          <div className="flex items-center gap-1">
+                          <div className="col-span-2 flex flex-wrap items-center gap-1">
                             <button
                               onClick={() => setSelectedBooking(booking)}
                               className="p-2 text-natural-text-light/50 hover:text-natural-text-main hover:bg-natural-bg/50 rounded-lg transition-all"
