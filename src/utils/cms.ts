@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
 import { logAuditAction } from "./auditLogger";
+import { broadcastCmsChange } from "./liveBroadcast";
 
 export interface HeroCMS {
   tagline: string;
@@ -488,15 +489,6 @@ export const DEFAULT_CMS_DATA: FullCMSData = {
 };
 
 const LOCAL_STORAGE_CMS_KEY = "rp_cms_content_cache";
-export const CMS_SYNC_CHANNEL_NAME = "cms-live-sync";
-
-// Realtime broadcast channel shared with Customer
-const broadcastChannel = supabase.channel(CMS_SYNC_CHANNEL_NAME, {
-  config: {
-    broadcast: { self: true },
-  },
-});
-broadcastChannel.subscribe();
 
 /**
  * Deeply merges a section's saved data with DEFAULT_CMS_DATA[sectionKey],
@@ -747,14 +739,8 @@ export async function saveCMSSection<K extends keyof FullCMSData>(
     throw new Error(`Failed to save to database: ${upsertError.message}`);
   }
 
-  // 4. Send over Supabase Realtime broadcast channel
-  try {
-    await broadcastChannel.send({
-      type: "broadcast",
-      event: "cms_update",
-      payload: { section: sectionKey, data: normalizedData },
-    });
-  } catch (e) {}
+  // 4. Send signal-only notification over shared Supabase Realtime broadcast channel
+  await broadcastCmsChange([String(sectionKey)]);
 
   // 5. Audit log
   try {
@@ -827,18 +813,8 @@ export async function saveCMSSectionsBatch<K extends keyof FullCMSData>(
     }
   }
 
-  // 4. Best-effort broadcast per section
-  await Promise.all(
-    entries.map(async (sectionKey) => {
-      try {
-        await broadcastChannel.send({
-          type: "broadcast",
-          event: "cms_update",
-          payload: { section: sectionKey, data: normalizedMap[sectionKey] },
-        });
-      } catch (e) {}
-    })
-  );
+  // 4. Signal-only broadcast across portals on the shared channel
+  await broadcastCmsChange(entries.map((sectionKey) => String(sectionKey)));
 
   // 5. Consolidated single audit log entry
   try {

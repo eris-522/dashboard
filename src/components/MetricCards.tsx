@@ -14,7 +14,7 @@ interface MetricCardsProps {
  */
 export function MetricCards({ onNavigate }: MetricCardsProps = {}) {
   const { bookings, dashboardMetrics } = useBooking();
-  const { activeUserCount } = useUser();
+  const { activeUserCount, isLoading: isUsersLoading } = useUser();
   const { items, getOutsourcedStock } = useInventory();
 
   const confirmedCount = dashboardMetrics
@@ -23,9 +23,9 @@ export function MetricCards({ onNavigate }: MetricCardsProps = {}) {
   const pendingCount = dashboardMetrics
     ? dashboardMetrics.status_counts.pending
     : bookings.filter((b) => b.status === 'Pending').length;
-  const resolvedActiveUserCount = dashboardMetrics
-    ? dashboardMetrics.active_customer_count
-    : activeUserCount;
+  const resolvedActiveUserCount = !isUsersLoading
+    ? activeUserCount
+    : (dashboardMetrics?.active_customer_count ?? activeUserCount);
 
   const activeItems = items.filter((item) => item.status !== 'Archived' && item.status?.toLowerCase() !== 'archived');
   const totalOutsourced = activeItems.reduce((acc, i) => acc + getOutsourcedStock(i.id), 0);

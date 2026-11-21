@@ -48,7 +48,11 @@ import {
 import { cn } from "../lib/utils";
 import { supabase } from "../utils/supabase";
 import { useUser } from "../context/UserContext";
-import { broadcastCatalogChange } from "../utils/liveBroadcast";
+import {
+  broadcastCatalogChange,
+  subscribeCatalogBroadcast,
+  subscribeCmsBroadcast,
+} from "../utils/liveBroadcast";
 import { ImageUploadField } from "../components/ImageUploadField";
 import {
   FullCMSData,
@@ -160,6 +164,7 @@ export function CMSPage() {
   const [cmsData, setCmsData] = useState<FullCMSData>(DEFAULT_CMS_DATA);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const isSavingRef = React.useRef(false);
   const [saveStatus, setSaveStatus] = useState<{
     type: "success" | "error" | "";
     text: string;
@@ -198,13 +203,139 @@ export function CMSPage() {
   const [editingPackagePhoto, setEditingPackagePhoto] = useState<any | null>(null);
   const [showPackageHeaderControls, setShowPackageHeaderControls] = useState(false);
 
+  const fetchDbPackages = async () => {
+    try {
+      const { data: pkgs } = await supabase
+        .from("packages")
+        .select("id, name, tag, price, pax, image_url, inclusions")
+        .neq("status", "Archived");
+      const list = pkgs || [];
+      setDbPackages(list);
+      return list;
+    } catch (e) {
+      console.warn("Error fetching db packages for CMS:", e);
+      return [] as any[];
+    }
+  };
+
+  const fetchDbMenuItems = async () => {
+    try {
+      const { data: dishes, error: dishesErr } = await supabase
+        .from("menu_items")
+        .select("id, name, category, sub_category, image_url")
+        .neq("status", "Archived");
+      if (dishesErr) {
+        console.warn("Supabase menu_items fetch error:", dishesErr.message);
+        return [] as any[];
+      }
+      const list = dishes || [];
+      setDbMenuItems(list);
+      return list;
+    } catch (e) {
+      console.warn("Error fetching db menu items for CMS:", e);
+      return [] as any[];
+    }
+  };
+
   useEffect(() => {
+    let active = true;
+    let pkgDebounce: ReturnType<typeof setTimeout> | null = null;
+    let menuDebounce: ReturnType<typeof setTimeout> | null = null;
+    let cmsDebounce: ReturnType<typeof setTimeout> | null = null;
+
     loadData();
+
+    const unsubscribeCatalog = subscribeCatalogBroadcast((key) => {
+      if (key === "packages") {
+        if (pkgDebounce) clearTimeout(pkgDebounce);
+        pkgDebounce = setTimeout(async () => {
+          const pkgs = await fetchDbPackages();
+          if (!active) return;
+          setPackagesForm((prev) => {
+            const nextImages = { ...(prev.packageImages || {}) };
+            pkgs.forEach((pkg: any) => {
+              if (pkg.image_url && String(pkg.image_url).trim() !== "") {
+                if (pkg.id) nextImages[pkg.id] = pkg.image_url;
+                if (pkg.name) nextImages[pkg.name] = pkg.image_url;
+              } else {
+                if (pkg.id) delete nextImages[pkg.id];
+                if (
+                  pkg.name &&
+                  nextImages[pkg.name] &&
+                  nextImages[pkg.name] !== DEFAULT_CMS_DATA.packages.packageImages[pkg.name]
+                ) {
+                  delete nextImages[pkg.name];
+                }
+              }
+            });
+            return { ...prev, packageImages: nextImages };
+          });
+        }, 250);
+      } else if (key === "menu") {
+        if (menuDebounce) clearTimeout(menuDebounce);
+        menuDebounce = setTimeout(async () => {
+          const dishes = await fetchDbMenuItems();
+          if (!active) return;
+          setMenuForm((prev) => {
+            const nextImages = { ...(prev.menuImages || {}) };
+            dishes.forEach((dish: any) => {
+              if (dish.image_url && String(dish.image_url).trim() !== "") {
+                if (dish.id) nextImages[dish.id] = dish.image_url;
+                if (dish.name) nextImages[dish.name] = dish.image_url;
+              } else {
+                if (dish.id) delete nextImages[dish.id];
+                if (
+                  dish.name &&
+                  nextImages[dish.name] &&
+                  nextImages[dish.name] !== DEFAULT_CMS_DATA.menu.menuImages[dish.name]
+                ) {
+                  delete nextImages[dish.name];
+                }
+              }
+            });
+            return { ...prev, menuImages: nextImages };
+          });
+        }, 250);
+      }
+    });
+
+    const unsubscribeCms = subscribeCmsBroadcast(() => {
+      if (isSavingRef.current) return;
+      if (cmsDebounce) clearTimeout(cmsDebounce);
+      cmsDebounce = setTimeout(async () => {
+        if (!active || isSavingRef.current) return;
+        const data = await fetchCMSContent();
+        if (!active || isSavingRef.current) return;
+        setCmsData(data);
+        setHeroForm(data.hero);
+        setAnnouncementForm(data.announcement);
+        setPackagesForm(data.packages || DEFAULT_CMS_DATA.packages);
+        setMenuForm(data.menu || DEFAULT_CMS_DATA.menu);
+        setAboutForm(data.about);
+        setContactForm(data.contact);
+        setTestimonialsForm(data.testimonials);
+        setProcessForm(data.process);
+        setFaqsForm(data.faqs);
+      }, 300);
+    });
+
+    return () => {
+      active = false;
+      if (pkgDebounce) clearTimeout(pkgDebounce);
+      if (menuDebounce) clearTimeout(menuDebounce);
+      if (cmsDebounce) clearTimeout(cmsDebounce);
+      unsubscribeCatalog();
+      unsubscribeCms();
+    };
   }, []);
 
   const loadData = async () => {
     setIsLoading(true);
-    const data = await fetchCMSContent();
+    const [data] = await Promise.all([
+      fetchCMSContent(),
+      fetchDbPackages(),
+      fetchDbMenuItems(),
+    ]);
     setCmsData(data);
     setHeroForm(data.hero);
     setAnnouncementForm(data.announcement);
@@ -215,35 +346,6 @@ export function CMSPage() {
     setTestimonialsForm(data.testimonials);
     setProcessForm(data.process);
     setFaqsForm(data.faqs);
-
-    // Load live packages from Supabase packages table
-    try {
-      const { data: pkgs } = await supabase
-        .from("packages")
-        .select("id, name, tag, price, pax, image_url, inclusions")
-        .neq("status", "Archived");
-      if (pkgs && pkgs.length > 0) {
-        setDbPackages(pkgs);
-      }
-    } catch (e) {
-      console.warn("Error fetching db packages for CMS:", e);
-    }
-
-    // Load live menu items from Supabase menu_items table
-    try {
-      const { data: dishes, error: dishesErr } = await supabase
-        .from("menu_items")
-        .select("id, name, category, sub_category, image_url")
-        .neq("status", "Archived");
-      if (dishesErr) {
-        console.warn("Supabase menu_items fetch error:", dishesErr.message);
-      }
-      if (dishes && dishes.length > 0) {
-        setDbMenuItems(dishes);
-      }
-    } catch (e) {
-      console.warn("Error fetching db menu items for CMS:", e);
-    }
 
     setIsLoading(false);
   };
@@ -588,6 +690,7 @@ export function CMSPage() {
   };
 
   const handleSaveCurrentSection = async () => {
+    isSavingRef.current = true;
     setIsSaving(true);
     setSaveStatus({ type: "", text: "" });
     const userName = currentUser?.name || "Admin User";
@@ -736,11 +839,13 @@ export function CMSPage() {
         text: err.message || "Failed to save section.",
       });
     } finally {
+      isSavingRef.current = false;
       setIsSaving(false);
     }
   };
 
   const handleResetCurrentSection = async () => {
+    isSavingRef.current = true;
     setIsSaving(true);
     const userName = currentUser?.name || "Admin User";
     try {
@@ -772,11 +877,79 @@ export function CMSPage() {
       } else if (activeTab === "packages") {
         const defPkgs = JSON.parse(JSON.stringify(DEFAULT_CMS_DATA.packages));
         await saveCMSSection("packages", defPkgs, userName);
+        try {
+          const updates = dbPackages
+            .map((pkg, idx) => {
+              const targetImg = DEFAULT_CMS_DATA.packages.packageImages[pkg.name] || null;
+              return pkg.id && (pkg.image_url || null) !== targetImg
+                ? { idx, id: pkg.id, targetImg }
+                : null;
+            })
+            .filter((u): u is { idx: number; id: any; targetImg: string | null } => Boolean(u));
+
+          if (updates.length > 0) {
+            const results = await Promise.all(
+              updates.map(async (u) => {
+                const { error } = await supabase
+                  .from("packages")
+                  .update({ image_url: u.targetImg })
+                  .eq("id", u.id);
+                return { ...u, error };
+              }),
+            );
+            const updatedDbPkgs = [...dbPackages];
+            results.forEach((r) => {
+              if (!r.error) {
+                updatedDbPkgs[r.idx] = { ...updatedDbPkgs[r.idx], image_url: r.targetImg };
+              }
+            });
+            if (results.some((r) => !r.error)) {
+              setDbPackages(updatedDbPkgs);
+              broadcastCatalogChange("packages");
+            }
+          }
+        } catch (e) {
+          console.warn("Could not reset image_url on packages:", e);
+        }
         setPackagesForm(defPkgs);
         setCmsData((prev) => ({ ...prev, packages: defPkgs }));
       } else if (activeTab === "menu") {
         const defMenu = JSON.parse(JSON.stringify(DEFAULT_CMS_DATA.menu));
         await saveCMSSection("menu", defMenu, userName);
+        try {
+          const updates = dbMenuItems
+            .map((dish, idx) => {
+              const targetImg = DEFAULT_CMS_DATA.menu.menuImages[dish.name] || null;
+              return dish.id && (dish.image_url || null) !== targetImg
+                ? { idx, id: dish.id, targetImg }
+                : null;
+            })
+            .filter((u): u is { idx: number; id: any; targetImg: string | null } => Boolean(u));
+
+          if (updates.length > 0) {
+            const results = await Promise.all(
+              updates.map(async (u) => {
+                const { error } = await supabase
+                  .from("menu_items")
+                  .update({ image_url: u.targetImg })
+                  .eq("id", u.id);
+                return { ...u, error };
+              }),
+            );
+            const updatedDbDishes = [...dbMenuItems];
+            results.forEach((r) => {
+              if (!r.error) {
+                updatedDbDishes[r.idx] = { ...updatedDbDishes[r.idx], image_url: r.targetImg };
+              }
+            });
+            if (results.some((r) => !r.error)) {
+              setDbMenuItems(updatedDbDishes);
+              broadcastCatalogChange("menu");
+            }
+          }
+        } catch (e) {
+          console.warn("Could not reset image_url on menu_items:", e);
+        }
         setMenuForm(defMenu);
         setCmsData((prev) => ({ ...prev, menu: defMenu }));
       } else if (activeTab === "about") {
@@ -808,6 +981,7 @@ export function CMSPage() {
         text: err.message || "Failed to reset section.",
       });
     } finally {
+      isSavingRef.current = false;
       setIsSaving(false);
     }
   };

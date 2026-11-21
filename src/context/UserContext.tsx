@@ -164,6 +164,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
           if (debounceTimer) clearTimeout(debounceTimer);
           debounceTimer = setTimeout(() => {
             refreshUsers(true);
+            window.dispatchEvent(new CustomEvent("profilesRealtimeSync"));
           }, 300);
         }
       )
@@ -192,6 +193,12 @@ export function UserProvider({ children }: { children: ReactNode }) {
             sessionStorage.removeItem("rp_admin_current_user");
             setCurrentUser(null);
             await supabase.auth.signOut();
+          } else {
+            const nextUser = toUser(updated);
+            setCurrentUser(nextUser);
+            try {
+              sessionStorage.setItem("rp_admin_current_user", JSON.stringify(nextUser));
+            } catch {}
           }
         }
       )

@@ -932,8 +932,8 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     }
 
     const restored = Boolean((data as any)?.restored);
+    await Promise.all([refreshInventoryItemsOnly(), fetchDeductionsFromDb()]);
     if (restored) {
-      await Promise.all([refreshInventoryItemsOnly(), fetchDeductionsFromDb()]);
       broadcastInventoryChange('all');
     }
     return restored;
@@ -1116,6 +1116,9 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       if (anyMutated || (Number((realocRes as any)?.reallocated_units) || 0) > 0) {
         await Promise.all([refreshInventoryItemsOnly(), fetchDeductionsFromDb()]);
         broadcastInventoryChange('all');
+      } else {
+        setItems(currentInvItems);
+        setDeductionRecords(currentRecords);
       }
 
       return restoredCount;

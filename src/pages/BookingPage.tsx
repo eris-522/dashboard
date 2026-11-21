@@ -56,7 +56,7 @@ import { useUser } from "../context/UserContext";
 import { useBooking } from "../context/BookingContext";
 import { useInventory } from "../context/InventoryContext";
 import { logAuditAction } from "../utils/auditLogger";
-import { subscribeCatalogBroadcast } from "../utils/liveBroadcast";
+import { subscribeCatalogBroadcast, broadcastSlotsChange } from "../utils/liveBroadcast";
 import { downloadSignedContractPdf } from "../utils/contractPdfGenerator";
 import { SignedStorageImage } from "../components/SignedStorageImage";
 import {
@@ -617,6 +617,8 @@ export function BookingPage() {
   });
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const isModalOpenRef = useRef(isModalOpen);
+  isModalOpenRef.current = isModalOpen;
   const [manualBookingError, setManualBookingError] = useState<string>("");
   const [isValidatingManualBooking, setIsValidatingManualBooking] = useState<boolean>(false);
   const [selectedBooking, setSelectedBooking] = useState<any | null>(null);
@@ -1311,8 +1313,25 @@ export function BookingPage() {
       }
     };
 
+    const handleProfilesSync = () => {
+      if (isModalOpenRef.current) {
+        supabase
+          .from("profiles")
+          .select("id, name, email, phone_number, status")
+          .neq("status", "Archived")
+          .order("name", { ascending: true })
+          .limit(500)
+          .then(({ data, error }) => {
+            if (!error && data) setCustomers(data);
+          });
+      } else {
+        setCustomers([]);
+      }
+    };
+
     window.addEventListener("bookingsUpdated", handleBookingsChange);
     window.addEventListener("bookingsRealtimeSync", handleBookingsChange);
+    window.addEventListener("profilesRealtimeSync", handleProfilesSync);
     window.addEventListener("storage", handleStorageSync);
     window.addEventListener("focus", handleVisibilityOrFocus);
     document.addEventListener("visibilitychange", handleVisibilityOrFocus);
@@ -1369,6 +1388,7 @@ export function BookingPage() {
       }
       window.removeEventListener("bookingsUpdated", handleBookingsChange);
       window.removeEventListener("bookingsRealtimeSync", handleBookingsChange);
+      window.removeEventListener("profilesRealtimeSync", handleProfilesSync);
       window.removeEventListener("storage", handleStorageSync);
       window.removeEventListener("focus", handleVisibilityOrFocus);
       document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
@@ -2136,6 +2156,7 @@ export function BookingPage() {
       }
 
       window.dispatchEvent(new CustomEvent("bookingsUpdated"));
+      broadcastSlotsChange();
       setConfirmAction(null);
       setSelectedBooking(null);
     } finally {

@@ -6,6 +6,7 @@ import React, {
   useEffect,
 } from "react";
 import { supabase } from "../utils/supabase";
+import { subscribeCatalogBroadcast } from "../utils/liveBroadcast";
 
 export interface MenuSelection {
   appetizers: string[];
@@ -136,6 +137,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const FOCUS_COOLDOWN_MS = 60_000;
     let realtimeDebounce: ReturnType<typeof setTimeout> | null = null;
+    let packageSyncDebounce: ReturnType<typeof setTimeout> | null = null;
     let hasSubscribedOnce = false;
 
     refreshBookings();
@@ -143,6 +145,15 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     // Cross-component event listener for immediate local admin synchronization
     const handleSync = () => refreshBookings(true);
     window.addEventListener("bookingsUpdated", handleSync);
+
+    const unsubscribeCatalog = subscribeCatalogBroadcast((key) => {
+      if (key === "packages") {
+        if (packageSyncDebounce) clearTimeout(packageSyncDebounce);
+        packageSyncDebounce = setTimeout(() => {
+          refreshBookings(true);
+        }, 300);
+      }
+    });
 
     // Throttled refresh when the admin returns to the tab/window (60s cooldown)
     const handleVisibilityOrFocus = () => {
@@ -196,6 +207,8 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     // Cleanup subscription on unmount
     return () => {
       if (realtimeDebounce) clearTimeout(realtimeDebounce);
+      if (packageSyncDebounce) clearTimeout(packageSyncDebounce);
+      unsubscribeCatalog();
       window.removeEventListener("bookingsUpdated", handleSync);
       window.removeEventListener("focus", handleVisibilityOrFocus);
       document.removeEventListener("visibilitychange", handleVisibilityOrFocus);

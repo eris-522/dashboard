@@ -65,7 +65,7 @@ export interface User {
 }
 
 export function UserPage() {
-  const { currentUser } = useUser();
+  const { currentUser, refreshUsers } = useUser();
   const [users, setUsers] = useState<User[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -99,8 +99,8 @@ export function UserPage() {
     return () => clearTimeout(t);
   }, [searchQuery]);
 
-  const fetchUsers = async () => {
-    setIsLoading(true);
+  const fetchUsers = async (silent = false) => {
+    if (!silent) setIsLoading(true);
     try {
       const from = page * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
@@ -175,13 +175,31 @@ export function UserPage() {
 
       setUsers(normalized);
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   };
+
+  const fetchUsersRef = React.useRef(fetchUsers);
+  fetchUsersRef.current = fetchUsers;
 
   useEffect(() => {
     fetchUsers();
   }, [page, statusFilter, debouncedSearch, sortConfig.field, sortConfig.order, currentUser?.id]);
+
+  useEffect(() => {
+    let syncTimer: ReturnType<typeof setTimeout> | null = null;
+    const handleProfilesSync = () => {
+      if (syncTimer) clearTimeout(syncTimer);
+      syncTimer = setTimeout(() => {
+        fetchUsersRef.current(true);
+      }, 250);
+    };
+    window.addEventListener("profilesRealtimeSync", handleProfilesSync);
+    return () => {
+      if (syncTimer) clearTimeout(syncTimer);
+      window.removeEventListener("profilesRealtimeSync", handleProfilesSync);
+    };
+  }, []);
 
   const toggleEmailVisibility = (id: string) => {
     setVisibleEmails((prev) => ({
@@ -312,7 +330,8 @@ export function UserPage() {
       }
     }
 
-    await fetchUsers();
+    await fetchUsers(true);
+    refreshUsers(true);
     setConfirmAction(null);
     setFormData({});
   };
