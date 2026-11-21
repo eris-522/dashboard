@@ -44,6 +44,10 @@ import {
   ChevronUp,
   Search,
   ArrowUpRight,
+  GripVertical,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUpDown,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { supabase } from "../utils/supabase";
@@ -61,6 +65,7 @@ import {
   saveCMSSection,
   saveCMSSectionsBatch,
   mergeSectionWithDefaults,
+  sortPackagesByOrder,
   PillarItem,
   TestimonialItem,
   FAQItem,
@@ -202,13 +207,17 @@ export function CMSPage() {
   const [showMenuHeaderControls, setShowMenuHeaderControls] = useState(false);
   const [editingPackagePhoto, setEditingPackagePhoto] = useState<any | null>(null);
   const [showPackageHeaderControls, setShowPackageHeaderControls] = useState(false);
+  const [draggedPackageIndex, setDraggedPackageIndex] = useState<number | null>(null);
+  const [dragOverPackageIndex, setDragOverPackageIndex] = useState<number | null>(null);
 
   const fetchDbPackages = async () => {
     try {
       const { data: pkgs } = await supabase
         .from("packages")
         .select("id, name, tag, price, pax, image_url, inclusions")
-        .neq("status", "Archived");
+        .neq("status", "Archived")
+        .neq("status", "none")
+        .neq("status", "None");
       const list = pkgs || [];
       setDbPackages(list);
       return list;
@@ -351,83 +360,123 @@ export function CMSPage() {
   };
 
   const displayPackages = useMemo(() => {
-    const map = new Map<
-      string,
-      {
-        id: string;
-        name: string;
-        price?: string;
-        pax?: string;
-        tag?: string;
-        image?: string;
-        image_url?: string;
-        defaultImage: string;
-        inclusions?: string[];
+    const cmsItemsByKey = new Map<string, PackageCMSItem>();
+    (DEFAULT_CMS_DATA.packages.items || []).forEach((item) => {
+      if (item.name) cmsItemsByKey.set(item.name.toLowerCase(), item);
+    });
+    (packagesForm.items || []).forEach((item) => {
+      if (item.name) {
+        const key = item.name.toLowerCase();
+        const existing = cmsItemsByKey.get(key);
+        cmsItemsByKey.set(key, {
+          ...(existing || {}),
+          ...item,
+          image:
+            item.image && item.image.trim() !== ""
+              ? item.image
+              : existing?.image || "",
+        });
       }
-    >();
-
-    // 1. Default presets
-    (DEFAULT_CMS_DATA.packages.items || []).forEach((item, idx) => {
-      const defImg =
-        DEFAULT_CMS_DATA.packages.packageImages[item.name] ||
-        item.image ||
-        PRESET_PACKAGE_IMAGES[idx % PRESET_PACKAGE_IMAGES.length].url;
-      map.set(item.name.toLowerCase(), {
-        ...item,
-        image: defImg,
-        defaultImage: defImg,
-      });
     });
 
-    // 2. CMS configured items
-    (packagesForm.items || []).forEach((item, idx) => {
-      const key = item.name.toLowerCase();
-      const existing = map.get(key);
-      const defImg =
-        existing?.defaultImage ||
-        DEFAULT_CMS_DATA.packages.packageImages[item.name] ||
-        PRESET_PACKAGE_IMAGES[idx % PRESET_PACKAGE_IMAGES.length].url;
-      const resolvedImg =
-        item.image && item.image.trim() !== ""
-          ? item.image
-          : existing?.image || defImg;
-      map.set(key, {
-        ...existing,
-        ...item,
-        image: resolvedImg,
-        defaultImage: defImg,
-      });
-    });
+    type DisplayPackageEntry = {
+      id: string;
+      name: string;
+      price?: string;
+      pax?: string;
+      tag?: string;
+      image?: string;
+      image_url?: string;
+      defaultImage: string;
+      inclusions?: string[];
+    };
 
-    // 3. Merge live packages from DB
-    dbPackages.forEach((pkg, idx) => {
-      const key = pkg.name.toLowerCase();
-      const existing = map.get(key);
-      const defImg =
-        existing?.defaultImage ||
-        DEFAULT_CMS_DATA.packages.packageImages[pkg.name] ||
-        PRESET_PACKAGE_IMAGES[idx % PRESET_PACKAGE_IMAGES.length].url;
-      const customImg =
-        packagesForm.packageImages?.[pkg.id] ||
-        packagesForm.packageImages?.[pkg.name] ||
-        existing?.image ||
-        pkg.image_url ||
-        defImg;
-      map.set(key, {
-        id: pkg.id,
-        name: pkg.name,
-        price: pkg.price || existing?.price,
-        pax: pkg.pax || existing?.pax,
-        tag: pkg.tag || existing?.tag,
-        image: customImg,
-        image_url: pkg.image_url,
-        defaultImage: defImg,
-        inclusions: pkg.inclusions || existing?.inclusions,
-      });
-    });
+    let list: DisplayPackageEntry[] = [];
 
-    return Array.from(map.values());
+    if (dbPackages.length > 0) {
+      // Build 1:1 from active database packages so placement matches Customer Portal exactly
+      list = dbPackages.map((pkg, idx) => {
+        const existing = cmsItemsByKey.get(String(pkg.name || "").toLowerCase());
+        const defImg =
+          DEFAULT_CMS_DATA.packages.packageImages[pkg.name] ||
+          existing?.image ||
+          PRESET_PACKAGE_IMAGES[idx % PRESET_PACKAGE_IMAGES.length].url;
+        const customImg =
+          packagesForm.packageImages?.[pkg.id] ||
+          packagesForm.packageImages?.[pkg.name] ||
+          pkg.image_url ||
+          existing?.image ||
+          defImg;
+        return {
+          id: pkg.id,
+          name: pkg.name,
+          price: pkg.price || existing?.price,
+          pax: pkg.pax || existing?.pax,
+          tag: pkg.tag || existing?.tag,
+          image: customImg,
+          image_url: pkg.image_url,
+          defaultImage: defImg,
+          inclusions: pkg.inclusions || undefined,
+        };
+      });
+    } else {
+      // Offline / empty catalog fallback to CMS presets
+      list = Array.from(cmsItemsByKey.values()).map((item, idx) => {
+        const defImg =
+          DEFAULT_CMS_DATA.packages.packageImages[item.name] ||
+          item.image ||
+          PRESET_PACKAGE_IMAGES[idx % PRESET_PACKAGE_IMAGES.length].url;
+        const resolvedImg =
+          packagesForm.packageImages?.[item.id] ||
+          packagesForm.packageImages?.[item.name] ||
+          (item.image && item.image.trim() !== "" ? item.image : defImg);
+        return {
+          ...item,
+          image: resolvedImg,
+          defaultImage: defImg,
+        };
+      });
+    }
+
+    return sortPackagesByOrder(list, packagesForm.packageOrder);
   }, [dbPackages, packagesForm]);
+
+  const hasCustomPackageOrder =
+    Array.isArray(packagesForm.packageOrder) &&
+    packagesForm.packageOrder.length > 0;
+
+  const hasUnsavedPackageOrder =
+    JSON.stringify(packagesForm.packageOrder || []) !==
+    JSON.stringify(cmsData.packages?.packageOrder || []);
+
+  const movePackage = (fromIndex: number, toIndex: number) => {
+    if (
+      fromIndex === toIndex ||
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= displayPackages.length ||
+      toIndex >= displayPackages.length
+    ) {
+      return;
+    }
+    const reordered = [...displayPackages];
+    const [moved] = reordered.splice(fromIndex, 1);
+    reordered.splice(toIndex, 0, moved);
+    const nextOrder = reordered
+      .map((p) => String(p.id || p.name || "").trim())
+      .filter((k) => k.length > 0);
+    setPackagesForm((prev) => ({
+      ...prev,
+      packageOrder: nextOrder,
+    }));
+  };
+
+  const resetPackageOrderToPrice = () => {
+    setPackagesForm((prev) => ({
+      ...prev,
+      packageOrder: [],
+    }));
+  };
 
   const displayMenuItems = useMemo(() => {
     const map = new Map<
@@ -1449,17 +1498,60 @@ export function CMSPage() {
                   </div>
                 </div>
 
-                <div className="p-3 bg-natural-bg/30 rounded-lg text-xs text-natural-text-light flex items-center justify-between">
-                  <span>
-                    The 3 featured packages on the Home Page are pulled from your live catalog (Basic, Classic, Premium).
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => navigateToPage("packages")}
-                    className="text-xs font-bold text-natural-accent hover:underline shrink-0 ml-3"
-                  >
-                    Edit Package Photos →
-                  </button>
+                <div className="p-3.5 bg-natural-bg/30 rounded-xl border border-natural-border/60 space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2 text-xs text-natural-text-light">
+                    <span>
+                      The top 3 packages in your arranged order are automatically featured on the Home Page:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => navigateToPage("packages")}
+                      className="text-xs font-bold text-natural-accent hover:underline shrink-0 cursor-pointer"
+                    >
+                      Arrange Order &amp; Photos →
+                    </button>
+                  </div>
+                  {displayPackages.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      {displayPackages.slice(0, 3).map((pkg, idx) => (
+                        <div
+                          key={pkg.id || pkg.name}
+                          className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-white/70 dark:bg-black/20 border border-natural-border/60"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-natural-accent/15 text-natural-accent shrink-0">
+                              #{idx + 1}
+                            </span>
+                            <span className="text-xs font-semibold text-natural-text-main truncate">
+                              {pkg.name}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-0.5 shrink-0">
+                            <button
+                              type="button"
+                              disabled={idx === 0}
+                              onClick={() => movePackage(idx, idx - 1)}
+                              title="Move earlier"
+                              aria-label={`Move ${pkg.name} earlier`}
+                              className="p-1 rounded hover:bg-natural-bg text-natural-text-light hover:text-natural-text-main disabled:opacity-25 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                            >
+                              <ArrowLeft className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={idx >= displayPackages.length - 1}
+                              onClick={() => movePackage(idx, idx + 1)}
+                              title="Move later"
+                              aria-label={`Move ${pkg.name} later`}
+                              className="p-1 rounded hover:bg-natural-bg text-natural-text-light hover:text-natural-text-main disabled:opacity-25 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                            >
+                              <ArrowRight className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -2039,16 +2131,16 @@ export function CMSPage() {
               <div className="border-b border-natural-border pb-4 flex items-center justify-between flex-wrap gap-2">
                 <div>
                   <h3 className="text-base font-serif font-bold text-natural-text-main">
-                    Catering Packages & Cover Photography
+                    Catering Packages, Placement &amp; Cover Photography
                   </h3>
                   <p className="text-xs text-natural-text-light mt-0.5">
-                    Assign high-resolution cover photos for each package collection
+                    Drag cards, use arrows, or pick a slot to rearrange package display order across Home, Packages, and Booking pages
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowPackageHeaderControls(!showPackageHeaderControls)}
-                  className="text-xs text-natural-accent hover:underline font-bold inline-flex items-center gap-1"
+                  className="text-xs text-natural-accent hover:underline font-bold inline-flex items-center gap-1 cursor-pointer"
                 >
                   <span>{showPackageHeaderControls ? "Hide Text Narrative" : "Edit Page Text"}</span>
                   <ChevronDown size={14} className={showPackageHeaderControls ? "rotate-180" : ""} />
@@ -2114,43 +2206,182 @@ export function CMSPage() {
                 </div>
               )}
 
-              {/* Packages Cards Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {displayPackages.map((pkg) => (
-                  <div
-                    key={pkg.name}
-                    className="p-4 rounded-xl border border-natural-border bg-natural-bg/20 flex flex-col justify-between hover:border-natural-accent/50 transition-colors"
+              {/* Package Placement Toolbar */}
+              <div className="p-3 rounded-xl border border-natural-border bg-natural-bg/30 flex items-center justify-between flex-wrap gap-3">
+                <div className="flex items-center gap-2.5 flex-wrap text-xs text-natural-text-light">
+                  <span className="inline-flex items-center gap-1.5 font-semibold text-natural-text-main">
+                    <ArrowUpDown className="w-3.5 h-3.5 text-natural-accent" />
+                    <span>Package Placement</span>
+                  </span>
+                  <span className="text-natural-border hidden sm:inline">•</span>
+                  <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-semibold">
+                    <Star className="w-3 h-3" />
+                    <span>Positions #1–#3 featured on Home Page</span>
+                  </span>
+                  {hasUnsavedPackageOrder && (
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-natural-accent/15 text-natural-accent font-bold">
+                      Unsaved order — click Publish Changes
+                    </span>
+                  )}
+                </div>
+                {hasCustomPackageOrder && (
+                  <button
+                    type="button"
+                    onClick={resetPackageOrderToPrice}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-natural-border text-[11px] font-bold text-natural-text-light hover:text-natural-text-main hover:bg-natural-bg/60 transition-colors cursor-pointer"
+                    title="Restore default ascending price order"
                   >
-                    <div>
-                      <div className="aspect-[16/10] rounded-lg overflow-hidden relative bg-black/40 mb-3">
-                        <img
-                          src={pkg.image || pkg.defaultImage}
-                          alt={pkg.name}
-                          className="w-full h-full object-cover"
-                        />
-                        {pkg.tag && (
-                          <span className="absolute top-2 left-2 bg-amber-400 text-black text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded">
-                            {pkg.tag}
-                          </span>
-                        )}
-                      </div>
-                      <h4 className="text-sm font-serif font-bold text-natural-text-main">
-                        {pkg.name}
-                      </h4>
-                      <p className="text-[11px] text-natural-text-light font-medium mt-1">
-                        ₱{pkg.price || "—"} • {pkg.pax || "—"} Guests
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setEditingPackagePhoto(pkg)}
-                      className="mt-4 w-full py-2 bg-natural-accent/10 hover:bg-natural-accent hover:text-white text-natural-accent rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Reset to Price Order</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Packages Cards Grid (Drag-and-Drop + Arrow & Slot Controls) */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {displayPackages.map((pkg, idx) => {
+                  const isDragging = draggedPackageIndex === idx;
+                  const isDropTarget =
+                    dragOverPackageIndex === idx &&
+                    draggedPackageIndex !== null &&
+                    draggedPackageIndex !== idx;
+
+                  return (
+                    <div
+                      key={pkg.id || pkg.name}
+                      draggable
+                      onDragStart={(e) => {
+                        setDraggedPackageIndex(idx);
+                        e.dataTransfer.effectAllowed = "move";
+                        try {
+                          e.dataTransfer.setData("text/plain", String(idx));
+                        } catch {}
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                        if (dragOverPackageIndex !== idx) {
+                          setDragOverPackageIndex(idx);
+                        }
+                      }}
+                      onDragLeave={(e) => {
+                        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                          setDragOverPackageIndex((prev) => (prev === idx ? null : prev));
+                        }
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const fromIdx =
+                          draggedPackageIndex !== null
+                            ? draggedPackageIndex
+                            : Number(e.dataTransfer.getData("text/plain"));
+                        if (Number.isInteger(fromIdx) && fromIdx >= 0 && fromIdx !== idx) {
+                          movePackage(fromIdx, idx);
+                        }
+                        setDraggedPackageIndex(null);
+                        setDragOverPackageIndex(null);
+                      }}
+                      onDragEnd={() => {
+                        setDraggedPackageIndex(null);
+                        setDragOverPackageIndex(null);
+                      }}
+                      className={cn(
+                        "p-4 rounded-xl border bg-natural-bg/20 flex flex-col justify-between transition-all select-none cursor-grab active:cursor-grabbing",
+                        isDragging
+                          ? "opacity-50 scale-[0.98] border-dashed border-natural-accent"
+                          : isDropTarget
+                          ? "border-natural-accent ring-2 ring-natural-accent/40 bg-natural-accent/5 scale-[1.01]"
+                          : "border-natural-border hover:border-natural-accent/50"
+                      )}
                     >
-                      <Camera className="w-3.5 h-3.5" />
-                      <span>Change Cover Photo</span>
-                    </button>
-                  </div>
-                ))}
+                      <div>
+                        {/* Reorder Control Header */}
+                        <div className="flex items-center justify-between gap-2 mb-2.5 pb-2 border-b border-natural-border/60">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <GripVertical
+                              className="w-4 h-4 text-natural-text-light shrink-0"
+                              aria-hidden="true"
+                            />
+                            <select
+                              aria-label={`Position for ${pkg.name}`}
+                              value={idx}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onChange={(e) => movePackage(idx, Number(e.target.value))}
+                              className="px-1.5 py-0.5 rounded bg-white dark:bg-black/30 border border-natural-border text-[11px] font-mono font-bold text-natural-text-main cursor-pointer focus:outline-none focus:border-natural-accent"
+                            >
+                              {displayPackages.map((_, slotIdx) => (
+                                <option key={slotIdx} value={slotIdx}>
+                                  #{slotIdx + 1}
+                                </option>
+                              ))}
+                            </select>
+                            {idx < 3 && (
+                              <span
+                                title="Featured in Home Page Showcase"
+                                className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25 shrink-0"
+                              >
+                                Home
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              disabled={idx === 0}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={() => movePackage(idx, idx - 1)}
+                              title="Move earlier"
+                              aria-label={`Move ${pkg.name} earlier`}
+                              className="p-1 rounded border border-natural-border/70 bg-white/60 dark:bg-black/20 text-natural-text-main hover:border-natural-accent hover:text-natural-accent disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                            >
+                              <ArrowLeft className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={idx === displayPackages.length - 1}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={() => movePackage(idx, idx + 1)}
+                              title="Move later"
+                              aria-label={`Move ${pkg.name} later`}
+                              className="p-1 rounded border border-natural-border/70 bg-white/60 dark:bg-black/20 text-natural-text-main hover:border-natural-accent hover:text-natural-accent disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                            >
+                              <ArrowRight className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="aspect-[16/10] rounded-lg overflow-hidden relative bg-black/40 mb-3">
+                          <img
+                            src={pkg.image || pkg.defaultImage}
+                            alt={pkg.name}
+                            draggable={false}
+                            className="w-full h-full object-cover pointer-events-none"
+                          />
+                          {pkg.tag && pkg.tag.toLowerCase() !== "none" && (
+                            <span className="absolute top-2 left-2 bg-amber-400 text-black text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded">
+                              {pkg.tag}
+                            </span>
+                          )}
+                        </div>
+                        <h4 className="text-sm font-serif font-bold text-natural-text-main">
+                          {pkg.name}
+                        </h4>
+                        <p className="text-[11px] text-natural-text-light font-medium mt-1">
+                          ₱{pkg.price || "—"} • {pkg.pax || "—"} Guests
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={() => setEditingPackagePhoto(pkg)}
+                        className="mt-4 w-full py-2 bg-natural-accent/10 hover:bg-natural-accent hover:text-white text-natural-accent rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>Change Cover Photo</span>
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -2660,7 +2891,7 @@ export function CMSPage() {
                   <div className="grid grid-cols-3 gap-2">
                     {displayPackages.slice(0, 3).map((pkg) => (
                       <div
-                        key={pkg.name}
+                        key={pkg.id || pkg.name}
                         className="p-2 rounded bg-[#111] border border-white/10 flex flex-col justify-between"
                       >
                         <div className="aspect-[16/10] rounded overflow-hidden relative mb-1.5 bg-black">
@@ -2895,8 +3126,11 @@ export function CMSPage() {
                   </h4>
                 </div>
                 <div className="space-y-2">
-                  {displayPackages.map((pkg) => (
-                    <div key={pkg.name} className="p-2.5 rounded-lg bg-[#111] border border-white/10 flex gap-3 items-center">
+                  {displayPackages.map((pkg, idx) => (
+                    <div key={pkg.id || pkg.name} className="p-2.5 rounded-lg bg-[#111] border border-white/10 flex gap-3 items-center">
+                      <span className="text-[9px] font-mono font-bold text-amber-400/80 shrink-0 w-4 text-center">
+                        #{idx + 1}
+                      </span>
                       <div className="w-20 h-14 rounded overflow-hidden shrink-0">
                         <img src={pkg.image || pkg.defaultImage} alt={pkg.name} className="w-full h-full object-cover" />
                       </div>
@@ -3384,7 +3618,7 @@ export function CMSPage() {
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                       {displayPackages.slice(0, 3).map((pkg) => (
                         <div
-                          key={pkg.name}
+                          key={pkg.id || pkg.name}
                           className="p-6 rounded-2xl bg-[#0f0f0f] border border-white/10 space-y-4 hover:border-amber-400/40 transition-colors flex flex-col justify-between"
                         >
                           <div>
@@ -3727,7 +3961,7 @@ export function CMSPage() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                   {displayPackages.map((pkg) => (
                     <div
-                      key={pkg.name}
+                      key={pkg.id || pkg.name}
                       className="p-6 rounded-2xl bg-[#0e0e0e] border border-white/10 space-y-4 hover:border-amber-400/40 transition-colors flex flex-col justify-between"
                     >
                       <div>
