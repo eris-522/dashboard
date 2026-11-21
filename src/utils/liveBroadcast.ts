@@ -3,7 +3,7 @@ import { supabase } from "./supabase";
 export const LIVE_SYNC_CHANNEL_NAME = "rpc-live-broadcast-v1";
 
 export type CatalogBroadcastKey = "packages" | "menu" | "inclusions";
-export type InventoryBroadcastScope = "items" | "deductions" | "movements" | "rules" | "all";
+export type InventoryBroadcastScope = "items" | "deductions" | "movements" | "rules" | "pax_sync" | "all";
 
 type CatalogListener = (key: CatalogBroadcastKey) => void;
 type InventoryListener = (scope: InventoryBroadcastScope) => void;

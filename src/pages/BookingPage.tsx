@@ -596,6 +596,7 @@ export function BookingPage() {
     completeBookingAndReturnInventory,
     isBookingDeducted,
     updateStock,
+    reconcileCompletedEvents,
   } = useInventory();
   const [bookings, setBookings] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
@@ -4506,6 +4507,9 @@ export function BookingPage() {
         })
       );
       window.dispatchEvent(new CustomEvent("bookingsUpdated"));
+      if (selectedBooking.status === "Confirmed") {
+        void reconcileCompletedEvents();
+      }
 
       await logAuditAction({
         action: "Confirmed Client Modification",
@@ -4653,6 +4657,9 @@ export function BookingPage() {
         })
       );
       window.dispatchEvent(new CustomEvent("bookingsUpdated"));
+      if (selectedBooking.status === "Confirmed") {
+        void reconcileCompletedEvents();
+      }
 
       await logAuditAction({
         action: targetReq.status === "Applied" ? "Reverted & Declined Client Modification" : "Rejected Modification Request",

@@ -94,7 +94,12 @@ export function InventoryPage() {
     getAllocatedStock,
     getOutsourcedStock,
     refreshItems,
+    reconcileCompletedEvents,
   } = useInventory();
+
+  useEffect(() => {
+    void reconcileCompletedEvents();
+  }, []);
 
   // Filter & Search
   const [searchQuery, setSearchQuery] = useState("");

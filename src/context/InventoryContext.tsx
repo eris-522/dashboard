@@ -592,7 +592,9 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     const unsubscribeBroadcast = subscribeInventoryBroadcast((scope) => {
       if (scopeDebounce) clearTimeout(scopeDebounce);
       scopeDebounce = setTimeout(() => {
-        if (scope === "items") {
+        if (scope === "pax_sync") {
+          void reconcileCompletedEvents();
+        } else if (scope === "items") {
           refreshInventoryItemsOnly();
         } else if (scope === "deductions") {
           fetchDeductionsFromDb();
@@ -1108,7 +1110,11 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
           p_guest_count: totalPax,
           p_required_items: expectedReqs,
         });
-        if (!syncErr) anyMutated = true;
+        if (syncErr) {
+          console.error('Atomic admin_sync_booking_deduction_pax failed:', syncErr.message);
+        } else {
+          anyMutated = true;
+        }
       }
 
       // 4. Final atomic reallocation pass + fresh local state sync
