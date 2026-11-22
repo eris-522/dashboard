@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import { supabase } from "../utils/supabase";
 import { subscribeCatalogBroadcast } from "../utils/liveBroadcast";
+import { resolveEventType } from "../utils/eventTypeClassifier";
 
 export interface MenuSelection {
   appetizers: string[];
@@ -321,7 +322,11 @@ export function BookingProvider({ children }: { children: ReactNode }) {
             email: booking.profiles?.email || "",
             phone:
               booking.profiles?.phone_number || booking.profiles?.phone || "",
-            eventType: booking.event_type || booking.packages?.type || "",
+            eventType: resolveEventType(
+              booking.event_type,
+              booking.packages?.name,
+              booking.packages?.type
+            ),
             package: booking.packages?.name || "",
             inclusions: Array.isArray(booking.packages?.inclusions) ? booking.packages.inclusions : [],
             date: booking.event_date || "",

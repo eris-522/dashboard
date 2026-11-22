@@ -32,6 +32,11 @@ import { cn } from "../lib/utils";
 import { useBooking } from "../context/BookingContext";
 import { useInventory, normalizeStockStatus } from "../context/InventoryContext";
 import { useTheme } from "../context/ThemeContext";
+import {
+  CORE_EVENT_TYPES,
+  resolveEventType,
+  getEventTypeColor,
+} from "../utils/eventTypeClassifier";
 
 const getEventDate = (b: any): Date => {
   if (b.date) {
@@ -185,33 +190,74 @@ export function AnalyticsPage() {
     }));
   }, [dashboardMetrics, timeRange, confirmedBookings, totalRevenue]);
 
-  // Event Type Breakdown
+  // Event Type Breakdown (smartly resolves explicit event_type & package-inferred celebrations,
+  // and always distributes across core celebration categories so single-category timeframes stay informative)
   const eventTypeAnalytics = useMemo(() => {
     const map: Record<string, { type: string; count: number; revenue: number }> = {};
 
-    if (dashboardMetrics?.event_type_by_year) {
-      dashboardMetrics.event_type_by_year.forEach((row) => {
+    CORE_EVENT_TYPES.forEach(({ label }) => {
+      map[label] = { type: label, count: 0, revenue: 0 };
+    });
+
+    const addBucket = (typeLabel: string, count: number, revenue: number) => {
+      if (!map[typeLabel]) {
+        map[typeLabel] = { type: typeLabel, count: 0, revenue: 0 };
+      }
+      map[typeLabel].count += count;
+      map[typeLabel].revenue += revenue;
+    };
+
+    const rpcEventRows = (dashboardMetrics?.event_type_by_year || []).filter(
+      (row) => timeRange === "all" || String(row.year) === timeRange
+    );
+    const rpcHasSpecificTypes = rpcEventRows.some((row) => {
+      const t = String(row.type || "").trim().toLowerCase();
+      return t !== "" && t !== "social" && t !== "general" && t !== "event";
+    });
+    const useBookingsSource =
+      confirmedBookings.length > 0 && confirmedBookings.length >= confirmedEventsCount;
+
+    if (useBookingsSource) {
+      confirmedBookings.forEach((b) => {
+        const type = resolveEventType(b.eventType, b.package);
+        addBucket(type, 1, Number(b.budget) || 0);
+      });
+    } else if (rpcHasSpecificTypes) {
+      rpcEventRows.forEach((row) => {
+        const type = resolveEventType(row.type, null);
+        addBucket(type, Number(row.count) || 0, Number(row.revenue) || 0);
+      });
+    } else if (dashboardMetrics?.package_by_year?.length) {
+      dashboardMetrics.package_by_year.forEach((row) => {
         if (timeRange !== "all" && String(row.year) !== timeRange) return;
-        const type = row.type || "General";
-        if (!map[type]) {
-          map[type] = { type, count: 0, revenue: 0 };
-        }
-        map[type].count += Number(row.count) || 0;
-        map[type].revenue += Number(row.revenue) || 0;
+        const type = resolveEventType(null, row.name);
+        addBucket(type, Number(row.count) || 0, Number(row.revenue) || 0);
       });
     } else {
       confirmedBookings.forEach((b) => {
-        const type = b.eventType || "General";
-        if (!map[type]) {
-          map[type] = { type, count: 0, revenue: 0 };
-        }
-        map[type].count += 1;
-        map[type].revenue += Number(b.budget) || 0;
+        const type = resolveEventType(b.eventType, b.package);
+        addBucket(type, 1, Number(b.budget) || 0);
       });
     }
 
-    return Object.values(map).sort((a, b) => b.count - a.count);
-  }, [dashboardMetrics, timeRange, confirmedBookings]);
+    const totalTypedEvents = Object.values(map).reduce((sum, item) => sum + item.count, 0);
+    const coreOrder = new Map(CORE_EVENT_TYPES.map((c, idx) => [c.label, idx]));
+
+    return Object.values(map)
+      .sort((a, b) => {
+        if (b.count !== a.count) return b.count - a.count;
+        if (b.revenue !== a.revenue) return b.revenue - a.revenue;
+        const idxA = coreOrder.has(a.type) ? coreOrder.get(a.type)! : 999;
+        const idxB = coreOrder.has(b.type) ? coreOrder.get(b.type)! : 999;
+        if (idxA !== idxB) return idxA - idxB;
+        return a.type.localeCompare(b.type);
+      })
+      .map((item, idx) => ({
+        ...item,
+        color: getEventTypeColor(item.type, idx),
+        percent: totalTypedEvents > 0 ? (item.count / totalTypedEvents) * 100 : 0,
+      }));
+  }, [dashboardMetrics, timeRange, confirmedBookings, confirmedEventsCount]);
 
   // Equipment Monitoring Health Data
   const activeItems = useMemo(() => {
@@ -256,8 +302,8 @@ export function AnalyticsPage() {
       ...packageAnalytics.map((p) => [csvCell(p.name), csvCell(p.count), csvCell(p.revenue), csvCell(`${p.percent.toFixed(1)}%`)].join(",")),
       "",
       csvCell("--- EVENT TYPE BREAKDOWN ---"),
-      [csvCell("Event Type"), csvCell("Total Bookings"), csvCell("Revenue Generated (PHP)")].join(","),
-      ...eventTypeAnalytics.map((e) => [csvCell(e.type), csvCell(e.count), csvCell(e.revenue)].join(",")),
+      [csvCell("Event Type"), csvCell("Total Bookings"), csvCell("Event Share (%)"), csvCell("Revenue Generated (PHP)")].join(","),
+      ...eventTypeAnalytics.map((e) => [csvCell(e.type), csvCell(e.count), csvCell(`${e.percent.toFixed(1)}%`), csvCell(e.revenue)].join(",")),
     ];
 
     const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
@@ -549,27 +595,85 @@ export function AnalyticsPage() {
               </p>
             </div>
 
-            {eventTypeAnalytics.length === 0 ? (
+            {confirmedEventsCount === 0 ? (
               <div className="py-12 text-center text-natural-text-light italic font-serif">
                 No events recorded yet
               </div>
             ) : (
-              <div className="space-y-3">
-                {eventTypeAnalytics.map((ev, i) => (
-                  <div key={i} className="flex items-center justify-between p-3 bg-natural-bg/30 rounded-xl border border-natural-border">
-                    <div>
-                      <p className="text-xs font-bold text-natural-text-main">{ev.type}</p>
-                      <span className="text-xs text-natural-text-light font-medium">
-                        {ev.count} {ev.count === 1 ? "Event" : "Events"} confirmed
-                      </span>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-xs font-bold font-serif text-natural-text-main block">
-                        ₱{ev.revenue.toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
-                ))}
+              <div className="space-y-4">
+                {/* Stacked Ratio Bar */}
+                <div className="w-full h-2.5 rounded-full bg-natural-bg/70 overflow-hidden flex border border-natural-border/60">
+                  {eventTypeAnalytics
+                    .filter((ev) => ev.count > 0)
+                    .map((ev) => (
+                      <div
+                        key={ev.type}
+                        style={{
+                          width: `${Math.max(ev.percent, 2)}%`,
+                          backgroundColor: ev.color,
+                        }}
+                        title={`${ev.type}: ${ev.count} ${ev.count === 1 ? "Event" : "Events"} (${ev.percent.toFixed(1)}%)`}
+                        className="h-full transition-all duration-500 first:rounded-l-full last:rounded-r-full"
+                      />
+                    ))}
+                </div>
+
+                <div className="space-y-2.5">
+                  {eventTypeAnalytics.map((ev) => {
+                    const isActive = ev.count > 0;
+                    return (
+                      <div
+                        key={ev.type}
+                        className={cn(
+                          "p-3 rounded-xl border border-natural-border transition-colors space-y-2",
+                          isActive
+                            ? "bg-natural-bg/30"
+                            : "bg-natural-bg/15 opacity-60"
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <span
+                              className="w-2.5 h-2.5 rounded-full shrink-0"
+                              style={{ backgroundColor: ev.color }}
+                            />
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-natural-text-main truncate">
+                                {ev.type}
+                              </p>
+                              <span className="text-xs text-natural-text-light font-medium">
+                                {isActive
+                                  ? `${ev.count} ${ev.count === 1 ? "Event" : "Events"} confirmed • ${ev.percent.toFixed(1)}% share`
+                                  : "0 Events confirmed"}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <span
+                              className={cn(
+                                "text-xs font-bold font-serif block",
+                                isActive
+                                  ? "text-natural-text-main"
+                                  : "text-natural-text-light"
+                              )}
+                            >
+                              ₱{ev.revenue.toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="w-full h-1.5 rounded-full bg-natural-bg/80 overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all duration-500"
+                            style={{
+                              width: `${isActive ? Math.max(ev.percent, 3) : 0}%`,
+                              backgroundColor: ev.color,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>

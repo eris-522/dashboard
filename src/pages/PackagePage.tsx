@@ -23,6 +23,7 @@ import { useInventory } from "../context/InventoryContext";
 import { logAuditAction } from "../utils/auditLogger";
 import { subscribeCatalogBroadcast, broadcastCatalogChange } from "../utils/liveBroadcast";
 import { ImageUploadField } from "../components/ImageUploadField";
+import { resolveEventType } from "../utils/eventTypeClassifier";
 
 // Feature: Defines the structure for Packages based on the Supabase table
 export interface CateringPackage {
@@ -706,6 +707,7 @@ export function PackagePage() {
         const { error } = await supabase.from("packages").insert([
           {
             name: cleanName,
+            type: resolveEventType(null, cleanName),
             pax: cleanPax,
             price: editingPackage?.price
               ? String(editingPackage.price).replace(/,/g, "")
@@ -738,6 +740,7 @@ export function PackagePage() {
           .from("packages")
           .update({
             name: cleanName,
+            type: resolveEventType(null, cleanName),
             pax: cleanPax,
             price: editingPackage?.price
               ? String(editingPackage.price).replace(/,/g, "")
