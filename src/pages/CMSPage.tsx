@@ -3845,7 +3845,7 @@ export function CMSPage() {
 
                 {/* Customer Footer */}
                 <footer className="py-12 px-8 sm:px-12 bg-[#050505] text-xs text-white/40 flex flex-col sm:flex-row items-center justify-between gap-4">
-                  <p>© {new Date().getFullYear()} Roxan Policarpio Events & Catering. All Rights Reserved.</p>
+                  <p>© 2019 Roxan Policarpio Events & Catering. All Rights Reserved.</p>
                   <div className="flex items-center gap-6 uppercase tracking-wider font-bold">
                     <span>Facebook</span>
                     <span>Instagram</span>
