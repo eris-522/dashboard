@@ -2348,6 +2348,11 @@ export function BookingPage() {
   const handleVerifyExcessPayment = async (bookingId: number | string) => {
     const targetBooking = findTargetBooking(bookingId);
     if (!targetBooking) return;
+    const targetStatus = String(targetBooking.status || "Pending");
+    if (targetStatus === "Cancelled" || targetStatus === "Archived") {
+      setFetchError(`Cannot verify excess payment: Booking is ${targetStatus.toLowerCase()}.`);
+      return;
+    }
     const clientName =
       targetBooking.profiles?.name || targetBooking.profiles?.full_name || "Client";
     const existingLogistics = targetBooking.logistics_info || {};
@@ -2818,6 +2823,11 @@ export function BookingPage() {
   const handleVerifyDamagePayment = async (bookingId: number | string) => {
     const targetBooking = findTargetBooking(bookingId);
     if (!targetBooking) return;
+    const targetStatus = String(targetBooking.status || "Pending");
+    if (targetStatus === "Cancelled" || targetStatus === "Archived") {
+      setFetchError(`Cannot verify damage invoice payment: Booking is ${targetStatus.toLowerCase()}.`);
+      return;
+    }
     const clientName =
       targetBooking.profiles?.name || targetBooking.profiles?.full_name || "Client";
     const existingLogistics = targetBooking.logistics_info || {};
@@ -2924,6 +2934,18 @@ export function BookingPage() {
       status: complaint.status === "Pending Review" ? "Resolved" : complaint.status,
       resolution_notes: complaint.resolution_notes || "",
     };
+
+    const targetStatus = String(targetBooking.status || "Pending");
+    if (targetStatus === "Cancelled" || targetStatus === "Archived") {
+      setComplaintDrafts((prev) => ({
+        ...prev,
+        [complaint.id]: {
+          ...draft,
+          error: `Cannot update complaint resolution: Booking is ${targetStatus.toLowerCase()}.`,
+        },
+      }));
+      return;
+    }
 
     if (draft.resolution_notes.trim().length < 5) {
       setComplaintDrafts((prev) => ({
@@ -3158,6 +3180,11 @@ export function BookingPage() {
   const handleVerifyFinalBalance = async (bookingId: number | string) => {
     const targetBooking = findTargetBooking(bookingId);
     if (!targetBooking) return;
+    const targetStatus = String(targetBooking.status || "Pending");
+    if (targetStatus === "Cancelled" || targetStatus === "Archived") {
+      setFetchError(`Cannot verify final balance: Booking is ${targetStatus.toLowerCase()}.`);
+      return;
+    }
     const clientName = targetBooking.profiles?.name || targetBooking.profiles?.full_name || "Client";
     const payment = getBookingPayment(targetBooking);
     const schedule = payment.installment_schedule || [];
@@ -3280,6 +3307,11 @@ export function BookingPage() {
   const handleVerifyInstallment = async (bookingId: number | string, milestoneIndex: number) => {
     const targetBooking = findTargetBooking(bookingId);
     if (!targetBooking) return;
+    const targetStatus = String(targetBooking.status || "Pending");
+    if (targetStatus === "Cancelled" || targetStatus === "Archived") {
+      setFetchError(`Cannot verify installment payment: Booking is ${targetStatus.toLowerCase()}.`);
+      return;
+    }
     const clientName = targetBooking.profiles?.name || targetBooking.profiles?.full_name || "Client";
     const payment = getBookingPayment(targetBooking);
     const schedule = payment.installment_schedule || [];
@@ -3372,8 +3404,9 @@ export function BookingPage() {
     const targetBooking = findTargetBooking(bookingId);
     if (!targetBooking) return;
 
-    if ((targetBooking.status || "Pending") === "Cancelled") {
-      setLogisticsSaveMessage("Cannot update logistics: Booking has been cancelled.");
+    const targetStatus = String(targetBooking.status || "Pending");
+    if (targetStatus === "Cancelled" || targetStatus === "Archived") {
+      setLogisticsSaveMessage(`Cannot update logistics: Booking has been ${targetStatus.toLowerCase()}.`);
       return;
     }
 
@@ -3497,8 +3530,9 @@ export function BookingPage() {
     if (!targetBooking) return;
 
     const isCancelled = targetBooking.status === "Cancelled";
+    const isArchived = targetBooking.status === "Archived";
     const isCompleted = targetBooking.status === "Completed";
-    if (isCancelled || isCompleted) {
+    if (isCancelled || isArchived || isCompleted) {
       setFetchError(
         `Cannot modify rain laundry fee: event is already ${targetBooking.status.toLowerCase()}.`
       );
@@ -3658,7 +3692,11 @@ export function BookingPage() {
     const targetBooking = findTargetBooking(bookingId);
     if (!targetBooking) return;
 
-    if (targetBooking.status === "Cancelled" || targetBooking.status === "Completed") {
+    if (
+      targetBooking.status === "Cancelled" ||
+      targetBooking.status === "Archived" ||
+      targetBooking.status === "Completed"
+    ) {
       setFetchError(`Cannot change venue type: event is already ${targetBooking.status.toLowerCase()}.`);
       return;
     }
@@ -3700,6 +3738,12 @@ export function BookingPage() {
   const handleApplyDayOfOvertime = async (bookingId: number | string) => {
     const targetBooking = findTargetBooking(bookingId);
     if (!targetBooking) return;
+
+    const targetStatus = String(targetBooking.status || "Pending");
+    if (targetStatus === "Cancelled" || targetStatus === "Archived") {
+      setOvertimeSaveMessage(`Cannot apply overtime: Booking has been ${targetStatus.toLowerCase()}.`);
+      return;
+    }
 
     const clientName =
       targetBooking.profiles?.name ||
@@ -3839,6 +3883,13 @@ export function BookingPage() {
     const targetBooking = findTargetBooking(bookingId);
     if (!targetBooking) return;
 
+    const targetStatus = String(targetBooking.status || "Pending");
+    if (targetStatus === "Cancelled" || targetStatus === "Archived") {
+      setOvertimeSaveMessage(`Cannot revert overtime: Booking has been ${targetStatus.toLowerCase()}.`);
+      setShowRevertOTConfirm(false);
+      return;
+    }
+
     const currentDayOf = targetBooking.overtime_info?.day_of;
     const prevDayOfFee = Number(currentDayOf?.total_day_of_fee) || 0;
     if (prevDayOfFee === 0 && !currentDayOf) {
@@ -3949,6 +4000,8 @@ export function BookingPage() {
 
   const handleOpenSubstituteModal = (dishToReplace?: string) => {
     if (!selectedBooking) return;
+    const targetStatus = String(selectedBooking.status || "Pending");
+    if (targetStatus === "Cancelled" || targetStatus === "Archived") return;
     const currentDishes: string[] = selectedBooking.selected_menu_items || [];
     const initialDish = dishToReplace || currentDishes[0] || "";
     setSubOriginalDish(initialDish);
@@ -4021,6 +4074,8 @@ export function BookingPage() {
     opts?: { fromSubModal?: boolean }
   ) => {
     if (!selectedBooking || !dishToRestore) return;
+    const targetStatus = String(selectedBooking.status || "Pending");
+    if (targetStatus === "Cancelled" || targetStatus === "Archived") return;
     setRestoringDish(dishToRestore);
     if (opts?.fromSubModal) {
       setIsSavingSub(true);
@@ -4182,6 +4237,11 @@ export function BookingPage() {
   const handleConfirmDishSubstitution = async () => {
     const finalReplacement = (isCustomReplacement ? subCustomReplacement : subReplacementDish).trim();
     if (!selectedBooking || !subOriginalDish || !finalReplacement) return;
+    const targetStatus = String(selectedBooking.status || "Pending");
+    if (targetStatus === "Cancelled" || targetStatus === "Archived") {
+      setSubMessage(`Cannot substitute dish: Booking is ${targetStatus.toLowerCase()}.`);
+      return;
+    }
 
     if (isCustomReplacement) {
       if (finalReplacement.length < 2) {
@@ -4381,6 +4441,8 @@ export function BookingPage() {
 
   const handleApproveModification = async (reqId: string) => {
     if (!selectedBooking) return;
+    const targetStatus = String(selectedBooking.status || "Pending");
+    if (targetStatus === "Cancelled" || targetStatus === "Archived") return;
     const clientName =
       selectedBooking.profiles?.name || selectedBooking.profiles?.full_name || "Client";
 
@@ -4541,6 +4603,8 @@ export function BookingPage() {
 
   const handleRejectModification = async (reqId: string, reasonText: string) => {
     if (!selectedBooking) return;
+    const targetStatus = String(selectedBooking.status || "Pending");
+    if (targetStatus === "Cancelled" || targetStatus === "Archived") return;
     const clientName =
       selectedBooking.profiles?.name || selectedBooking.profiles?.full_name || "Client";
 
@@ -6289,6 +6353,8 @@ export function BookingPage() {
       {selectedBooking && (() => {
         const bookingStatus = selectedBooking.status || "Pending";
         const isCancelled = bookingStatus === "Cancelled";
+        const isArchived = bookingStatus === "Archived";
+        const isReadOnlyBooking = isCancelled || isArchived;
         const isCompleted = bookingStatus === "Completed";
         const isConfirmed = bookingStatus === "Confirmed";
 
@@ -6395,11 +6461,12 @@ export function BookingPage() {
               Boolean(m.receipt_url)
           );
         const needsPaymentReview =
-          (!isDepositVerified && Boolean(payment.receipt_url)) ||
-          (is50Percent && !isFinalVerified && hasFinalReceipt) ||
-          hasPendingInstallmentSlip ||
-          excessInfo.isUnderReview ||
-          damageInfo.isUnderReview;
+          !isReadOnlyBooking &&
+          ((!isDepositVerified && Boolean(payment.receipt_url)) ||
+            (is50Percent && !isFinalVerified && hasFinalReceipt) ||
+            hasPendingInstallmentSlip ||
+            excessInfo.isUnderReview ||
+            damageInfo.isUnderReview);
 
         const prebookedCatering =
           Number(selectedBooking.overtime_info?.prebooked?.catering_hours) || 0;
@@ -6413,7 +6480,9 @@ export function BookingPage() {
           dayOfInfo?.total_day_of_fee !== undefined && dayOfInfo?.applied_at
         );
         const needsTravelFeeAssessment =
-          !isCancelled && logistics.isOutsideTaytay && (logistics.travelFee || 0) === 0;
+          !isReadOnlyBooking &&
+          logistics.isOutsideTaytay &&
+          (logistics.travelFee || 0) === 0;
 
         const cleanAllergies =
           typeof selectedBooking.food_allergies === "string" &&
@@ -6785,10 +6854,11 @@ export function BookingPage() {
                       label: "Menu & Requests",
                       icon: UtensilsCrossed,
                       badge:
-                        actionableModCount > 0
+                        !isReadOnlyBooking && actionableModCount > 0
                           ? `${actionableModCount} Mod`
                           : String(menuCount),
-                      badgeTone: actionableModCount > 0 ? "rose" : "neutral",
+                      badgeTone:
+                        !isReadOnlyBooking && actionableModCount > 0 ? "rose" : "neutral",
                     },
                     {
                       key: "equipment" as const,
@@ -6887,7 +6957,7 @@ export function BookingPage() {
               {/* Single Clean Scrollable Workspace Body */}
               <div className="p-3 sm:p-5 space-y-3 sm:space-y-3.5 overflow-y-auto overscroll-contain flex-1 min-h-0">
                 {/* Exception-Only High-Priority Alerts */}
-                {openComplaintsCount > 0 && overviewTab !== "complaints" && (
+                {!isReadOnlyBooking && openComplaintsCount > 0 && overviewTab !== "complaints" && (
                   <div className="p-2.5 px-3.5 bg-rose-500/10 border border-rose-500/30 rounded-xl flex flex-wrap items-center justify-between gap-2 text-rose-800 dark:text-rose-200 text-xs">
                     <div className="flex items-center gap-2">
                       <Scale aria-hidden="true" className="w-4 h-4 text-rose-500 shrink-0" />
@@ -6908,7 +6978,7 @@ export function BookingPage() {
                   </div>
                 )}
 
-                {(isLateMod || actionableModCount > 0) && (
+                {!isReadOnlyBooking && (isLateMod || actionableModCount > 0) && (
                   <div className="p-2.5 px-3.5 bg-rose-500/10 border border-rose-500/30 rounded-xl flex flex-wrap items-center justify-between gap-2 text-rose-800 dark:text-rose-200 text-xs">
                     <div className="flex items-center gap-2">
                       <AlertTriangle
@@ -6940,7 +7010,7 @@ export function BookingPage() {
 
                 {cleanAllergies &&
                   !isCompleted &&
-                  !isCancelled &&
+                  !isReadOnlyBooking &&
                   (overviewTab === "payments" || overviewTab === "logistics") && (
                     <div className="p-2 px-3 bg-orange-50/90 dark:bg-orange-950/30 border border-orange-200/70 dark:border-orange-800/40 rounded-lg flex items-center justify-between gap-2 text-xs">
                       <div className="flex items-center gap-2 min-w-0">
@@ -7308,16 +7378,18 @@ export function BookingPage() {
                                   <span className="truncate">
                                     Day-of Event OT ({dayOT?.billable_ot_hours}h)
                                   </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setIsDayOfOtExpanded(true);
-                                      setOverviewTab("logistics");
-                                    }}
-                                    className="text-[10px] font-bold underline cursor-pointer shrink-0"
-                                  >
-                                    Edit →
-                                  </button>
+                                  {!isReadOnlyBooking && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setIsDayOfOtExpanded(true);
+                                        setOverviewTab("logistics");
+                                      }}
+                                      className="text-[10px] font-bold underline cursor-pointer shrink-0"
+                                    >
+                                      Edit →
+                                    </button>
+                                  )}
                                 </dt>
                                 <dd className="font-semibold text-amber-600 dark:text-amber-400 font-mono shrink-0">
                                   +₱{dayFee.toLocaleString()}
@@ -7333,13 +7405,15 @@ export function BookingPage() {
                                     className="w-3.5 h-3.5 text-amber-500 shrink-0"
                                   />
                                   <span>Rain / Laundry Surcharge</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => setOverviewTab("logistics")}
-                                    className="text-[10px] font-bold underline cursor-pointer"
-                                  >
-                                    Manage →
-                                  </button>
+                                  {!isReadOnlyBooking && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setOverviewTab("logistics")}
+                                      className="text-[10px] font-bold underline cursor-pointer"
+                                    >
+                                      Manage →
+                                    </button>
+                                  )}
                                 </dt>
                                 <dd className="font-semibold text-amber-600 dark:text-amber-400 font-mono shrink-0">
                                   +₱{(logistics.rainLaundryFee || 0).toLocaleString()}
@@ -7565,7 +7639,7 @@ export function BookingPage() {
                                                   Slip
                                                 </button>
                                               )}
-                                              {!isPaid && hasSlip && (
+                                              {!isPaid && hasSlip && !isReadOnlyBooking && (
                                                 <button
                                                   type="button"
                                                   aria-label={`Confirm ${milestoneLabel}`}
@@ -7734,6 +7808,13 @@ export function BookingPage() {
                               <div className="w-full py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5">
                                 <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" />
                                 Final Balance Confirmed
+                              </div>
+                            ) : isReadOnlyBooking ? (
+                              <div className="w-full py-2 bg-natural-bg/50 border border-dashed border-natural-border text-natural-text-light rounded-lg text-xs font-medium flex items-center justify-center gap-1.5">
+                                <Lock aria-hidden="true" className="w-3.5 h-3.5" />
+                                <span>
+                                  Locked (Booking is {isArchived ? "archived" : "cancelled"})
+                                </span>
                               </div>
                             ) : !isDepositVerified ? (
                               <div className="w-full py-2 bg-natural-bg/50 border border-dashed border-natural-border text-natural-text-light rounded-lg text-xs font-medium flex items-center justify-center gap-1.5">
@@ -8044,7 +8125,7 @@ export function BookingPage() {
                                   </div>
                                 )}
 
-                                {!excessInfo.isSettled && (
+                                {!excessInfo.isSettled && !isReadOnlyBooking && (
                                   <button
                                     type="button"
                                     disabled={!Boolean(excessInfo.postEventBilling?.receipt_url)}
@@ -8227,7 +8308,7 @@ export function BookingPage() {
                                   </div>
                                 )}
 
-                                {!damageInfo.isSettled && (
+                                {!damageInfo.isSettled && !isReadOnlyBooking && (
                                   <button
                                     type="button"
                                     disabled={!Boolean(damageInfo.damageAppraisal.receipt_url)}
@@ -8355,11 +8436,11 @@ export function BookingPage() {
                               <div className="inline-flex rounded-lg border border-natural-border p-0.5 bg-natural-card shrink-0">
                                 <button
                                   type="button"
-                                  disabled={isCancelled || isCompleted}
+                                  disabled={isReadOnlyBooking || isCompleted}
                                   onClick={() => handleToggleVenueType(selectedBooking.id, "Indoor")}
                                   className={cn(
                                     "px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all",
-                                    isCancelled || isCompleted ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+                                    isReadOnlyBooking || isCompleted ? "cursor-not-allowed opacity-60" : "cursor-pointer",
                                     !logistics.isOutdoor
                                       ? "bg-natural-accent text-white shadow-2xs"
                                       : "text-natural-text-light hover:text-natural-text-main"
@@ -8369,11 +8450,11 @@ export function BookingPage() {
                                 </button>
                                 <button
                                   type="button"
-                                  disabled={isCancelled || isCompleted}
+                                  disabled={isReadOnlyBooking || isCompleted}
                                   onClick={() => handleToggleVenueType(selectedBooking.id, "Outdoor")}
                                   className={cn(
                                     "px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all",
-                                    isCancelled || isCompleted ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+                                    isReadOnlyBooking || isCompleted ? "cursor-not-allowed opacity-60" : "cursor-pointer",
                                     logistics.isOutdoor
                                       ? "bg-amber-600 text-white shadow-2xs"
                                       : "text-natural-text-light hover:text-natural-text-main"
@@ -8387,18 +8468,20 @@ export function BookingPage() {
                             {/* One-Click Rain / Laundry Fee Toggle Button */}
                             <button
                               type="button"
-                              disabled={isSavingRainLaundry || isCancelled || isCompleted}
+                              disabled={isSavingRainLaundry || isReadOnlyBooking || isCompleted}
                               onClick={() => handleToggleRainLaundryFee(selectedBooking.id)}
                               title={
                                 isCancelled
                                   ? "Cannot modify laundry fee: Event is cancelled"
-                                  : isCompleted
-                                    ? "Cannot modify laundry fee: Event is completed"
-                                    : undefined
+                                  : isArchived
+                                    ? "Cannot modify laundry fee: Event is archived"
+                                    : isCompleted
+                                      ? "Cannot modify laundry fee: Event is completed"
+                                      : undefined
                               }
                               className={cn(
                                 "w-full sm:w-auto justify-center px-3.5 py-2 sm:py-1.5 text-[11px] sm:text-xs font-bold uppercase tracking-wider rounded-lg transition-all flex items-center gap-1.5 shadow-2xs whitespace-nowrap",
-                                isCancelled || isCompleted
+                                isReadOnlyBooking || isCompleted
                                   ? "bg-natural-bg/80 text-natural-text-light/60 border border-natural-border/80 cursor-not-allowed opacity-60"
                                   : logistics.rainLaundryApplied
                                     ? "bg-rose-600 hover:bg-rose-700 text-white cursor-pointer"
@@ -8406,7 +8489,7 @@ export function BookingPage() {
                               )}
                             >
                               <CloudRain className="w-3.5 h-3.5 shrink-0" />
-                              {isCancelled || isCompleted ? (
+                              {isReadOnlyBooking || isCompleted ? (
                                 <span>Rain Laundry Locked</span>
                               ) : logistics.rainLaundryApplied ? (
                                 <>
@@ -8554,7 +8637,7 @@ export function BookingPage() {
                               min="0"
                               max={MAX_LOGISTICS_FEE}
                               step="100"
-                              disabled={isCancelled || isSavingLogistics}
+                              disabled={isReadOnlyBooking || isSavingLogistics}
                               value={customTravelFeeInput}
                               onFocus={(e) => e.target.select()}
                               onKeyDown={(e) => {
@@ -8575,7 +8658,7 @@ export function BookingPage() {
                               placeholder="0"
                               className={cn(
                                 "w-full px-3 py-2 text-xs font-semibold bg-natural-bg/60 border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent",
-                                (isCancelled || isSavingLogistics) &&
+                                (isReadOnlyBooking || isSavingLogistics) &&
                                   "opacity-60 cursor-not-allowed"
                               )}
                             />
@@ -8598,7 +8681,7 @@ export function BookingPage() {
                                 <span className="text-[10px] text-natural-text-light/70 font-medium">
                                   Max ₱{MAX_LOGISTICS_FEE.toLocaleString()}
                                 </span>
-                                {!isCancelled &&
+                                {!isReadOnlyBooking &&
                                   recommendedHauling > 0 &&
                                   Number(customHaulingFeeInput) !== recommendedHauling && (
                                     <button
@@ -8624,7 +8707,7 @@ export function BookingPage() {
                               min="0"
                               max={MAX_LOGISTICS_FEE}
                               step="150"
-                              disabled={isCancelled || isSavingLogistics}
+                              disabled={isReadOnlyBooking || isSavingLogistics}
                               value={customHaulingFeeInput}
                               onFocus={(e) => e.target.select()}
                               onKeyDown={(e) => {
@@ -8645,7 +8728,7 @@ export function BookingPage() {
                               placeholder="0"
                               className={cn(
                                 "w-full px-3 py-2 text-xs font-semibold bg-natural-bg/60 border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent",
-                                (isCancelled || isSavingLogistics) &&
+                                (isReadOnlyBooking || isSavingLogistics) &&
                                   "opacity-60 cursor-not-allowed"
                               )}
                             />
@@ -8657,10 +8740,10 @@ export function BookingPage() {
 
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-natural-border/60">
                           <div className="text-xs">
-                            {isCancelled ? (
+                            {isReadOnlyBooking ? (
                               <span className="text-amber-700 dark:text-amber-400 font-semibold text-[11px] flex items-center gap-1">
                                 <Lock aria-hidden="true" className="w-3.5 h-3.5" /> Logistics
-                                locked (Booking is cancelled)
+                                locked (Booking is {isArchived ? "archived" : "cancelled"})
                               </span>
                             ) : logisticsSaveMessage ? (
                               <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
@@ -8692,14 +8775,16 @@ export function BookingPage() {
                           </div>
                           <button
                             type="button"
-                            disabled={isSavingLogistics || isCancelled}
+                            disabled={isSavingLogistics || isReadOnlyBooking}
                             onClick={() => handleSaveLogisticsSurcharge(selectedBooking.id)}
                             className="px-3.5 py-2 bg-natural-accent hover:bg-natural-accent/90 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-all shadow-2xs shrink-0 cursor-pointer"
                           >
                             {isSavingLogistics
                               ? "Saving..."
-                              : isCancelled
-                                ? "Booking Cancelled"
+                              : isReadOnlyBooking
+                                ? isArchived
+                                  ? "Booking Archived"
+                                  : "Booking Cancelled"
                                 : "Update Logistics Surcharge"}
                           </button>
                         </div>
@@ -8784,10 +8869,15 @@ export function BookingPage() {
                                 id="actual-end-time-input"
                                 type="text"
                                 placeholder="e.g. 11:30 PM"
+                                disabled={isReadOnlyBooking}
                                 value={actualEndTimeInput}
-                                onChange={(e) => setActualEndTimeInput(e.target.value)}
+                                onChange={(e) => {
+                                  if (isReadOnlyBooking) return;
+                                  setActualEndTimeInput(e.target.value);
+                                }}
                                 className={cn(
                                   "w-full px-2.5 py-1.5 text-xs font-semibold bg-natural-card border rounded-lg text-natural-text-main focus:outline-none transition-colors",
+                                  isReadOnlyBooking && "opacity-60 cursor-not-allowed",
                                   actualEndTimeInput.trim() !== "" && !otCalculation.valid
                                     ? "border-red-500 focus:border-red-500 text-red-500"
                                     : "border-natural-border focus:border-natural-accent"
@@ -8814,8 +8904,12 @@ export function BookingPage() {
                                   <button
                                     key={preset}
                                     type="button"
-                                    onClick={() => setActualEndTimeInput(preset)}
-                                    className="min-h-6 text-[10px] px-1.5 py-0.5 rounded bg-natural-card hover:bg-natural-accent/10 border border-natural-border text-natural-text-light hover:text-natural-accent transition-colors cursor-pointer"
+                                    disabled={isReadOnlyBooking}
+                                    onClick={() => {
+                                      if (isReadOnlyBooking) return;
+                                      setActualEndTimeInput(preset);
+                                    }}
+                                    className="min-h-6 text-[10px] px-1.5 py-0.5 rounded bg-natural-card hover:bg-natural-accent/10 border border-natural-border text-natural-text-light hover:text-natural-accent transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                                   >
                                     {preset}
                                   </button>
@@ -8918,9 +9012,14 @@ export function BookingPage() {
                                     return (
                                       <div
                                         key={srv.id}
-                                        onClick={() => toggleService(srv.id)}
+                                        onClick={() => {
+                                          if (!isReadOnlyBooking) toggleService(srv.id);
+                                        }}
                                         className={cn(
-                                          "p-2.5 rounded-xl border cursor-pointer transition-all flex items-start justify-between gap-2",
+                                          "p-2.5 rounded-xl border transition-all flex items-start justify-between gap-2",
+                                          isReadOnlyBooking
+                                            ? "opacity-60 cursor-not-allowed"
+                                            : "cursor-pointer",
                                           isChecked
                                             ? "bg-natural-accent/10 border-natural-accent/40 text-natural-text-main"
                                             : "bg-natural-bg/40 border-natural-border text-natural-text-light hover:border-natural-accent/30"
@@ -8929,10 +9028,11 @@ export function BookingPage() {
                                         <div className="flex items-start gap-2 min-w-0">
                                           <input
                                             type="checkbox"
+                                            disabled={isReadOnlyBooking}
                                             aria-label={`Bill overtime for ${srv.name}`}
                                             checked={isChecked}
                                             onChange={() => {}}
-                                            className="mt-0.5 rounded accent-natural-accent"
+                                            className="mt-0.5 rounded accent-natural-accent disabled:opacity-50"
                                           />
                                           <div>
                                             <p className="font-bold text-xs leading-tight">
@@ -8958,16 +9058,18 @@ export function BookingPage() {
                                                   type="number"
                                                   min="1"
                                                   max="10"
+                                                  disabled={isReadOnlyBooking}
                                                   value={otCoordinatorCount}
-                                                  onChange={(e) =>
+                                                  onChange={(e) => {
+                                                    if (isReadOnlyBooking) return;
                                                     setOtCoordinatorCount(
                                                       Math.max(
                                                         1,
                                                         parseInt(e.target.value) || 1
                                                       )
-                                                    )
-                                                  }
-                                                  className="w-12 px-1 py-0.5 bg-natural-card border border-natural-border rounded text-center text-[10px] font-bold"
+                                                    );
+                                                  }}
+                                                  className="w-12 px-1 py-0.5 bg-natural-card border border-natural-border rounded text-center text-[10px] font-bold disabled:opacity-50"
                                                 />
                                               </div>
                                             )}
@@ -8998,7 +9100,7 @@ export function BookingPage() {
                             </div>
                           )}
 
-                          {showRevertOTConfirm ? (
+                          {showRevertOTConfirm && !isReadOnlyBooking ? (
                             <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
                               <div className="flex items-center gap-2 text-rose-700 dark:text-rose-300">
                                 <AlertTriangle
@@ -9044,7 +9146,12 @@ export function BookingPage() {
                           ) : (
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-natural-border/60">
                               <div className="text-xs">
-                                {overtimeSaveMessage ? (
+                                {isReadOnlyBooking ? (
+                                  <span className="text-amber-700 dark:text-amber-400 font-semibold flex items-center gap-1">
+                                    <Lock aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />
+                                    Overtime locked (Booking is {isArchived ? "archived" : "cancelled"})
+                                  </span>
+                                ) : overtimeSaveMessage ? (
                                   <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
                                     {overtimeSaveMessage}
                                   </span>
@@ -9058,7 +9165,7 @@ export function BookingPage() {
                                 )}
                               </div>
                               <div className="flex items-center gap-2 flex-wrap">
-                                {isDayOfOtApplied && (
+                                {isDayOfOtApplied && !isReadOnlyBooking && (
                                   <button
                                     type="button"
                                     disabled={isSavingOvertime || isRevertingOvertime}
@@ -9072,6 +9179,7 @@ export function BookingPage() {
                                 <button
                                   type="button"
                                   disabled={
+                                    isReadOnlyBooking ||
                                     isSavingOvertime ||
                                     isRevertingOvertime ||
                                     !actualEndTimeInput.trim() ||
@@ -9080,13 +9188,22 @@ export function BookingPage() {
                                   onClick={() =>
                                     handleApplyDayOfOvertime(selectedBooking.id)
                                   }
-                                  className="px-4 py-2 bg-natural-accent hover:bg-natural-accent/90 disabled:opacity-50 text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-all shadow-2xs cursor-pointer"
+                                  className={cn(
+                                    "px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all shadow-2xs",
+                                    isReadOnlyBooking
+                                      ? "bg-natural-accent/50 text-white/80 cursor-not-allowed opacity-60"
+                                      : "bg-natural-accent hover:bg-natural-accent/90 disabled:opacity-50 text-white cursor-pointer"
+                                  )}
                                 >
-                                  {isSavingOvertime
-                                    ? "Applying..."
-                                    : isDayOfOtApplied
-                                      ? "Update Overtime Surcharge"
-                                      : "Apply Overtime to Final Invoice"}
+                                  {isReadOnlyBooking
+                                    ? isArchived
+                                      ? "Booking Archived"
+                                      : "Booking Cancelled"
+                                    : isSavingOvertime
+                                      ? "Applying..."
+                                      : isDayOfOtApplied
+                                        ? "Update Overtime Surcharge"
+                                        : "Apply Overtime to Final Invoice"}
                                 </button>
                               </div>
                             </div>
@@ -9275,7 +9392,7 @@ export function BookingPage() {
                                     </div>
                                   </div>
 
-                                  {isActionable && (
+                                  {isActionable && !isReadOnlyBooking && (
                                     <div className="pt-2 border-t border-natural-border/50 flex items-center justify-end gap-2">
                                       {rejectingModId === req.id ? (
                                         <div className="flex items-center gap-1.5 w-full">
@@ -9401,14 +9518,16 @@ export function BookingPage() {
                           />
                           Menu Selection ({menuCount} Dishes)
                         </h4>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenSubstituteModal()}
-                          className="min-h-7 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider bg-natural-accent/10 text-natural-accent hover:bg-natural-accent hover:text-white rounded-md border border-natural-accent/30 transition-colors flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <RefreshCw aria-hidden="true" className="w-3 h-3" />
-                          Substitute Unavailable Dish
-                        </button>
+                        {!isReadOnlyBooking && (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenSubstituteModal()}
+                            className="min-h-7 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider bg-natural-accent/10 text-natural-accent hover:bg-natural-accent hover:text-white rounded-md border border-natural-accent/30 transition-colors flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <RefreshCw aria-hidden="true" className="w-3 h-3" />
+                            Substitute Unavailable Dish
+                          </button>
+                        )}
                       </div>
 
                       {menuCount > 0 ? (
@@ -9452,21 +9571,26 @@ export function BookingPage() {
                                     {groupedMenu[cat].map((m) => (
                                       <div
                                         key={m}
-                                        className="group/dish inline-flex items-center gap-1 pl-2 pr-1 py-0.5 bg-natural-card border border-natural-border rounded-md text-[11px] font-semibold text-natural-text-main"
+                                        className={cn(
+                                          "group/dish inline-flex items-center gap-1 py-0.5 bg-natural-card border border-natural-border rounded-md text-[11px] font-semibold text-natural-text-main",
+                                          isReadOnlyBooking ? "px-2.5 py-1" : "pl-2 pr-1"
+                                        )}
                                       >
                                         <span>{m}</span>
-                                        <button
-                                          type="button"
-                                          aria-label={`Substitute ${m}`}
-                                          title={`Substitute ${m}`}
-                                          onClick={() => handleOpenSubstituteModal(m)}
-                                          className="min-w-6 min-h-6 flex items-center justify-center text-natural-text-light/60 hover:text-natural-accent rounded transition-colors cursor-pointer"
-                                        >
-                                          <RefreshCw
-                                            aria-hidden="true"
-                                            className="w-3 h-3"
-                                          />
-                                        </button>
+                                        {!isReadOnlyBooking && (
+                                          <button
+                                            type="button"
+                                            aria-label={`Substitute ${m}`}
+                                            title={`Substitute ${m}`}
+                                            onClick={() => handleOpenSubstituteModal(m)}
+                                            className="min-w-6 min-h-6 flex items-center justify-center text-natural-text-light/60 hover:text-natural-accent rounded transition-colors cursor-pointer"
+                                          >
+                                            <RefreshCw
+                                              aria-hidden="true"
+                                              className="w-3 h-3"
+                                            />
+                                          </button>
+                                        )}
                                       </div>
                                     ))}
                                   </div>
@@ -9485,21 +9609,26 @@ export function BookingPage() {
                                     {uncategorized.map((m) => (
                                       <div
                                         key={m}
-                                        className="group/dish inline-flex items-center gap-1 pl-2 pr-1 py-0.5 bg-natural-card border border-natural-border rounded-md text-[11px] font-semibold text-natural-text-main"
+                                        className={cn(
+                                          "group/dish inline-flex items-center gap-1 py-0.5 bg-natural-card border border-natural-border rounded-md text-[11px] font-semibold text-natural-text-main",
+                                          isReadOnlyBooking ? "px-2.5 py-1" : "pl-2 pr-1"
+                                        )}
                                       >
                                         <span>{m}</span>
-                                        <button
-                                          type="button"
-                                          aria-label={`Substitute ${m}`}
-                                          title={`Substitute ${m}`}
-                                          onClick={() => handleOpenSubstituteModal(m)}
-                                          className="min-w-6 min-h-6 flex items-center justify-center text-natural-text-light/60 hover:text-natural-accent rounded transition-colors cursor-pointer"
-                                        >
-                                          <RefreshCw
-                                            aria-hidden="true"
-                                            className="w-3 h-3"
-                                          />
-                                        </button>
+                                        {!isReadOnlyBooking && (
+                                          <button
+                                            type="button"
+                                            aria-label={`Substitute ${m}`}
+                                            title={`Substitute ${m}`}
+                                            onClick={() => handleOpenSubstituteModal(m)}
+                                            className="min-w-6 min-h-6 flex items-center justify-center text-natural-text-light/60 hover:text-natural-accent rounded transition-colors cursor-pointer"
+                                          >
+                                            <RefreshCw
+                                              aria-hidden="true"
+                                              className="w-3 h-3"
+                                            />
+                                          </button>
+                                        )}
                                       </div>
                                     ))}
                                   </div>
@@ -9574,23 +9703,25 @@ export function BookingPage() {
                                           ).toLocaleDateString()}
                                         </span>
                                       )}
-                                      <button
-                                        type="button"
-                                        disabled={isRestoring}
-                                        aria-label={`Set Available Again for ${sub.original_dish}`}
-                                        onClick={() =>
-                                          handleMarkDishAvailableAgain(sub.original_dish)
-                                        }
-                                        className="min-h-6 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider bg-emerald-600/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-600 hover:text-white rounded border border-emerald-600/30 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                                      >
-                                        <CheckCircle2
-                                          aria-hidden="true"
-                                          className="w-3 h-3"
-                                        />
-                                        {isRestoring
-                                          ? "Restoring..."
-                                          : "Set Available Again"}
-                                      </button>
+                                      {!isReadOnlyBooking && (
+                                        <button
+                                          type="button"
+                                          disabled={isRestoring}
+                                          aria-label={`Set Available Again for ${sub.original_dish}`}
+                                          onClick={() =>
+                                            handleMarkDishAvailableAgain(sub.original_dish)
+                                          }
+                                          className="min-h-6 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider bg-emerald-600/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-600 hover:text-white rounded border border-emerald-600/30 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                                        >
+                                          <CheckCircle2
+                                            aria-hidden="true"
+                                            className="w-3 h-3"
+                                          />
+                                          {isRestoring
+                                            ? "Restoring..."
+                                            : "Set Available Again"}
+                                        </button>
+                                      )}
                                     </div>
                                   </div>
                                 );
@@ -10581,6 +10712,7 @@ export function BookingPage() {
                                         </label>
                                         <select
                                           id={`res-status-${cmp.id}`}
+                                          disabled={isReadOnlyBooking}
                                           value={cDraft.status}
                                           onChange={(ev) =>
                                             setComplaintDrafts((prev) => ({
@@ -10592,7 +10724,7 @@ export function BookingPage() {
                                               },
                                             }))
                                           }
-                                          className="w-full px-2.5 py-2 text-xs font-semibold bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                                          className="w-full px-2.5 py-2 text-xs font-semibold bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent disabled:opacity-60 disabled:cursor-not-allowed"
                                         >
                                           <option value="Under Investigation">
                                             Under Investigation
@@ -10617,6 +10749,7 @@ export function BookingPage() {
                                           id={`res-notes-${cmp.id}`}
                                           rows={2}
                                           required
+                                          disabled={isReadOnlyBooking}
                                           aria-invalid={Boolean(cDraft.error)}
                                           aria-describedby={`res-notes-err-${cmp.id}`}
                                           placeholder="Record findings, agreement reached with the Contract Signer, or action taken (synced to client)..."
@@ -10643,7 +10776,7 @@ export function BookingPage() {
                                               }));
                                             }
                                           }}
-                                          className="w-full px-3 py-1.5 text-xs bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent"
+                                          className="w-full px-3 py-1.5 text-xs bg-natural-card border border-natural-border rounded-lg text-natural-text-main focus:outline-none focus:border-natural-accent disabled:opacity-60 disabled:cursor-not-allowed"
                                         />
                                         <p
                                           id={`res-notes-err-${cmp.id}`}
@@ -10657,20 +10790,26 @@ export function BookingPage() {
 
                                     <div className="flex items-center justify-between gap-2">
                                       <span className="text-[11px] text-natural-text-light">
-                                        {cmp.resolved_at
-                                          ? `Last updated by ${cmp.resolved_by || "Admin"} on ${new Date(
-                                              cmp.resolved_at
-                                            ).toLocaleString()}`
-                                          : "Saving notifies the Contract Signer in My Inquiries."}
+                                        {isReadOnlyBooking
+                                          ? `Resolution locked (Booking is ${isArchived ? "archived" : "cancelled"})`
+                                          : cmp.resolved_at
+                                            ? `Last updated by ${cmp.resolved_by || "Admin"} on ${new Date(
+                                                cmp.resolved_at
+                                              ).toLocaleString()}`
+                                            : "Saving notifies the Contract Signer in My Inquiries."}
                                       </span>
                                       <button
                                         type="submit"
-                                        disabled={savingComplaintId === cmp.id}
-                                        className="px-4 py-1.5 rounded-lg bg-natural-accent hover:bg-natural-accent/90 text-white text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50"
+                                        disabled={savingComplaintId === cmp.id || isReadOnlyBooking}
+                                        className="px-4 py-1.5 rounded-lg bg-natural-accent hover:bg-natural-accent/90 text-white text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                                       >
-                                        {savingComplaintId === cmp.id
-                                          ? "Saving..."
-                                          : "Record Resolution"}
+                                        {isReadOnlyBooking
+                                          ? isArchived
+                                            ? "Booking Archived"
+                                            : "Booking Cancelled"
+                                          : savingComplaintId === cmp.id
+                                            ? "Saving..."
+                                            : "Record Resolution"}
                                       </button>
                                     </div>
                                   </form>
